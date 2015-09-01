@@ -39,16 +39,15 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 {
 	uint64_t shift1 = 2 * (k - 1), shift = 2 * k, mask = (1ULL<<shift) - 1;
-	int i, j, l, buf_pos, n_min, m_min = 4 * w;
-	uint64_t *buf, *min, kmer[2] = {0,0};
+	int i, j, l, buf_pos;
+	uint64_t *buf, min, kmer[2] = {0,0};
 	uint64_v a = {0,0,0};
 
 	assert(len <= UINT64_MAX>>2*k);
 	buf = (uint64_t*)alloca(w * 8);
 	memset(buf, 0xff, w * 8);
-	min = (uint64_t*)alloca(m_min * 8);
 
-	for (i = l = n_min = buf_pos = 0; i < len; ++i) {
+	for (i = l = buf_pos = 0; i < len; ++i) {
 		int c = seq_nt4_table[(uint8_t)str[i]];
 		uint64_t info = UINT64_MAX;
 		if (c < 4) { // not an ambiguous base
@@ -57,30 +56,22 @@ uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 			if (++l >= k)
 				info = (uint64_t)i << shift | hash64(kmer[(kmer[0] > kmer[1])], mask); // hash the smaller k-mer
 		} else l = 0;
-//		printf("X\t%d\t%d\t%d\t%ld\t%llx\t%llx\n", i, l, n_min, a.n, info&mask, min[0]&mask);
+//		printf("X\t%d\t%d\t%ld\t%llx\t(%lld,%llx)\n", i, l, a.n, info&mask, min>>shift, min&mask);
 		buf[buf_pos] = info; // need to do this here as appropriate buf_pos and buf[buf_pos] are needed below
-		if (n_min == 0) { // directly write to the min buffer if it is empty
-			if (info != UINT64_MAX) min[n_min++] = info;
-		} else if ((info&mask) < (min[0]&mask)) { // a new minimum; then write the old min(s)
-			if (l >= w + k)
-				for (j = 0; j < n_min; ++j) kv_push(uint64_t, a, min[j]);
-			min[0] = info, n_min = 1;
-		} else if ((info&mask) == (min[0]&mask)) {
-			if (n_min < m_min) min[n_min++] = info;
-		} else if (buf_pos == (min[n_min-1]>>shift)%w) { // all min(s) have moved outside the window
-			uint64_t m;
-			if (l >= w + k) // write the old min(s)
-				for (j = 0; j < n_min; ++j) kv_push(uint64_t, a, min[j]);
-			n_min = 0;
-			for (j = 0, m = UINT64_MAX; j < w; ++j) // find the new min
-				if (m > (buf[j]&mask)) m = buf[j]&mask;
-			if (m != UINT64_MAX)
-				for (j = 0; j < w; ++j) 
-					if (m == (buf[j]&mask)) min[n_min++] = buf[j];
+		if ((info&mask) <= (min&mask)) { // a new minimum; then write the old min
+			if (l >= w + k || (l == w + k - 1 && (info&mask) == (min&mask)))
+				kv_push(uint64_t, a, min);
+			min = info;
+		} else if (buf_pos == (min>>shift)%w) { // all min(s) have moved outside the window
+			if (l >= w + k - 1) kv_push(uint64_t, a, min);
+			for (j = buf_pos + 1, min = UINT64_MAX; j < w; ++j)
+				if ((min&mask) > (buf[j]&mask)) min = buf[j];
+			for (j = 0; j <= buf_pos; ++j)
+				if ((min&mask) > (buf[j]&mask)) min = buf[j];
 		}
 		if (++buf_pos == w) buf_pos = 0;
 	}
-	for (j = 0; j < n_min; ++j) kv_push(uint64_t, a, min[j]);
+	kv_push(uint64_t, a, min);
 	*n = a.n;
 	return a.a;
 }
