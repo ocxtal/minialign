@@ -39,7 +39,7 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 {
 	uint64_t shift1 = 2 * (k - 1), shift = 2 * k, mask = (1ULL<<shift) - 1;
-	int i, j, l, buf_pos;
+	int i, j, l, buf_pos, min_pos;
 	uint64_t *buf, min, kmer[2] = {0,0};
 	uint64_v a = {0,0,0};
 
@@ -47,7 +47,7 @@ uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 	buf = (uint64_t*)alloca(w * 8);
 	memset(buf, 0xff, w * 8);
 
-	for (i = l = buf_pos = 0; i < len; ++i) {
+	for (i = l = buf_pos = min_pos = 0; i < len; ++i) {
 		int c = seq_nt4_table[(uint8_t)str[i]];
 		uint64_t info = UINT64_MAX;
 		if (c < 4) { // not an ambiguous base
@@ -56,18 +56,23 @@ uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 			if (++l >= k)
 				info = (uint64_t)i << shift | hash64(kmer[(kmer[0] > kmer[1])], mask); // hash the smaller k-mer
 		} else l = 0;
-		printf("X\t%d\t%d\t%ld\t%llx\t(%lld,%llx)\n", i, l, a.n, info&mask, min>>shift, min&mask);
+//		printf("X\t%d\t%d\t%ld\t%llx\t(%lld,%llx)\n", i, l, a.n, info&mask, min>>shift, min&mask);
 		buf[buf_pos] = info; // need to do this here as appropriate buf_pos and buf[buf_pos] are needed below
+		if (l == w + k - 1) {
+			for (j = buf_pos + 1; j < w; ++j)
+				if ((min&mask) == (buf[j]&mask) && buf[j] != min) kv_push(uint64_t, a, buf[j]);
+			for (j = 0; j < buf_pos; ++j)
+				if ((min&mask) == (buf[j]&mask) && buf[j] != min) kv_push(uint64_t, a, buf[j]);
+		}
 		if ((info&mask) <= (min&mask)) { // a new minimum; then write the old min
-			if (l >= w + k || (l == w + k - 1 && (info&mask) == (min&mask)))
-				kv_push(uint64_t, a, min);
-			min = info;
-		} else if (buf_pos == (min>>shift)%w) { // all min(s) have moved outside the window
+			if (l >= w + k) kv_push(uint64_t, a, min);
+			min = info, min_pos = buf_pos;
+		} else if (buf_pos == min_pos) { // all min(s) have moved outside the window
 			if (l >= w + k - 1) kv_push(uint64_t, a, min);
 			for (j = buf_pos + 1, min = UINT64_MAX; j < w; ++j)
-				if ((min&mask) >= (buf[j]&mask)) min = buf[j];
+				if ((min&mask) >= (buf[j]&mask)) min = buf[j], min_pos = j;
 			for (j = 0; j <= buf_pos; ++j)
-				if ((min&mask) >= (buf[j]&mask)) min = buf[j];
+				if ((min&mask) >= (buf[j]&mask)) min = buf[j], min_pos = j;
 			if (l >= w + k - 1) {
 				for (j = buf_pos + 1; j < w; ++j)
 					if ((min&mask) == (buf[j]&mask) && min != buf[j])
