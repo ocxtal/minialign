@@ -56,7 +56,7 @@ uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 			if (++l >= k)
 				info = (uint64_t)i << shift | hash64(kmer[(kmer[0] > kmer[1])], mask); // hash the smaller k-mer
 		} else l = 0;
-//		printf("X\t%d\t%d\t%ld\t%llx\t(%lld,%llx)\n", i, l, a.n, info&mask, min>>shift, min&mask);
+		printf("X\t%d\t%d\t%ld\t%llx\t(%lld,%llx)\n", i, l, a.n, info&mask, min>>shift, min&mask);
 		buf[buf_pos] = info; // need to do this here as appropriate buf_pos and buf[buf_pos] are needed below
 		if ((info&mask) <= (min&mask)) { // a new minimum; then write the old min
 			if (l >= w + k || (l == w + k - 1 && (info&mask) == (min&mask)))
@@ -65,9 +65,17 @@ uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 		} else if (buf_pos == (min>>shift)%w) { // all min(s) have moved outside the window
 			if (l >= w + k - 1) kv_push(uint64_t, a, min);
 			for (j = buf_pos + 1, min = UINT64_MAX; j < w; ++j)
-				if ((min&mask) > (buf[j]&mask)) min = buf[j];
+				if ((min&mask) >= (buf[j]&mask)) min = buf[j];
 			for (j = 0; j <= buf_pos; ++j)
-				if ((min&mask) > (buf[j]&mask)) min = buf[j];
+				if ((min&mask) >= (buf[j]&mask)) min = buf[j];
+			if (l >= w + k - 1) {
+				for (j = buf_pos + 1; j < w; ++j)
+					if ((min&mask) == (buf[j]&mask) && min != buf[j])
+						kv_push(uint64_t, a, buf[j]);
+				for (j = 0; j <= buf_pos; ++j)
+					if ((min&mask) == (buf[j]&mask) && min != buf[j])
+						kv_push(uint64_t, a, buf[j]);
+			}
 		}
 		if (++buf_pos == w) buf_pos = 0;
 	}
