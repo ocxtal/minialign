@@ -9,7 +9,7 @@ int main(int argc, char *argv[])
 {
 	gzFile fp;
 	kseq_t *seq;
-	int c, w = 60, k = 16;
+	int c, w = 30, k = 14;
 	uint64_t shift, mask;
 	while ((c = getopt(argc, argv, "w:k:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
