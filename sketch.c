@@ -43,7 +43,7 @@ uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 	uint64_t *buf, min, kmer[2] = {0,0};
 	uint64_v a = {0,0,0};
 
-	assert(len <= UINT64_MAX>>2*k);
+	assert(len > 0 && w > 0 && k > 0 && len <= UINT64_MAX>>2*k);
 	buf = (uint64_t*)alloca(w * 8);
 	memset(buf, 0xff, w * 8);
 
@@ -83,6 +83,6 @@ uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 		if (++buf_pos == w) buf_pos = 0;
 	}
 	kv_push(uint64_t, a, min);
-	*n = a.n;
+	if (n) *n = a.n;
 	return a.a;
 }
