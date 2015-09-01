@@ -39,15 +39,14 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 {
 	uint64_t shift1 = 2 * (k - 1), shift = 2 * k, mask = (1ULL<<shift) - 1;
-	int i, j, l, buf_pos, n_min;
+	int i, j, l, buf_pos, n_min, m_min = 4 * w;
 	uint64_t *buf, *min, kmer[2] = {0,0};
 	uint64_v a = {0,0,0};
 
 	assert(len <= UINT64_MAX>>2*k);
 	buf = (uint64_t*)alloca(w * 8);
 	memset(buf, 0xff, w * 8);
-	min = (uint64_t*)alloca(w * 8);
-	memset(min, 0xff, w * 8);
+	min = (uint64_t*)alloca(m_min * 8);
 
 	for (i = l = n_min = buf_pos = 0; i < len; ++i) {
 		int c = seq_nt4_table[(uint8_t)str[i]];
@@ -67,7 +66,7 @@ uint64_t *mm_sketch(const char *str, int len, int w, int k, int *n)
 				for (j = 0; j < n_min; ++j) kv_push(uint64_t, a, min[j]);
 			min[0] = info, n_min = 1;
 		} else if ((info&mask) == (min[0]&mask)) {
-			min[n_min++] = info;
+			if (n_min < m_min) min[n_min++] = info;
 		} else if (buf_pos == (min[n_min-1]>>shift)%w) { // all min(s) have moved outside the window
 			uint64_t m;
 			if (l >= w + k) // write the old min(s)
