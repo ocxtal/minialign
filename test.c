@@ -9,7 +9,7 @@ int main(int argc, char *argv[])
 {
 	gzFile fp;
 	kseq_t *seq;
-	int c, w = 30, k = 14;
+	int c, w = 20, k = 17;
 	uint64_t shift, mask;
 	while ((c = getopt(argc, argv, "w:k:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
@@ -21,11 +21,12 @@ int main(int argc, char *argv[])
 	while (kseq_read(seq) >= 0) {
 		int i, n;
 		uint64_t *a;
-		a = mm_sketch(seq->seq.s, seq->seq.l, w, k, &n);
+		a = mm_sketch64(seq->seq.s, seq->seq.l, w, k, &n);
 		printf(">%s\n", seq->name.s);
 		for (i = 0; i < n; ++i)
 			printf("%llu\t%llx\n", a[i]>>shift, a[i]&mask);
 		printf("//\n");
+		free(a);
 	}
 	kseq_destroy(seq);
 	gzclose(fp);
