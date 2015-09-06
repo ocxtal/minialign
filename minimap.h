@@ -14,8 +14,7 @@ typedef struct { size_t n, m; uint64_t *a; } uint64_v;
 extern "C" {
 #endif
 
-uint64_t *mm_sketch64(const char *str, int len, int w, int k, int *n);
-void mm_sketch128(const char *str, int len, int w, int k, mm128_v *p);
+void mm_sketch(const char *str, int len, int w, int k, uint64_t offset, mm128_v *p);
 
 #ifdef __cplusplus
 }

@@ -21,7 +21,8 @@ int main(int argc, char *argv[])
 	seq = kseq_init(fp);
 	while (kseq_read(seq) >= 0) {
 		int i;
-		mm_sketch128(seq->seq.s, seq->seq.l, w, k, &a);
+		a.n = 0;
+		mm_sketch(seq->seq.s, seq->seq.l, w, k, 0, &a);
 		printf(">%s\n", seq->name.s);
 		for (i = 0; i < a.n; ++i)
 			printf("%llu\t%llx\n", a.a[i].y, a.a[i].x);

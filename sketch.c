@@ -36,57 +36,7 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 	return key;
 }
 
-uint64_t *mm_sketch64(const char *str, int len, int w, int k, int *n)
-{
-	uint64_t shift1 = 2 * (k - 1), shift = 2 * k, mask = (1ULL<<shift) - 1;
-	int i, j, l, buf_pos, min_pos;
-	uint64_t *buf, min, kmer[2] = {0,0};
-	uint64_v a = {0,0,0};
-
-	assert(len > 0 && w > 0 && k > 0 && len <= UINT64_MAX>>2*k);
-	buf = (uint64_t*)alloca(w * 8);
-	memset(buf, 0xff, w * 8);
-
-	for (i = l = buf_pos = min_pos = 0; i < len; ++i) {
-		int c = seq_nt4_table[(uint8_t)str[i]];
-		uint64_t info = UINT64_MAX;
-		if (c < 4) { // not an ambiguous base
-			kmer[0] = (kmer[0] << 2 | c) & mask;           // forward k-mer
-			kmer[1] = (kmer[1] >> 2) | (3ULL^c) << shift1; // reverse k-mer
-			if (++l >= k)
-				info = (uint64_t)i << shift | hash64(kmer[(kmer[0] > kmer[1])], mask); // hash the smaller k-mer
-		} else l = 0;
-		buf[buf_pos] = info; // need to do this here as appropriate buf_pos and buf[buf_pos] are needed below
-		if (l == w + k - 1) { // special case for the first window - because identical k-mers are not stored yet
-			for (j = buf_pos + 1; j < w; ++j)
-				if ((min&mask) == (buf[j]&mask) && buf[j] != min) kv_push(uint64_t, a, buf[j]);
-			for (j = 0; j < buf_pos; ++j)
-				if ((min&mask) == (buf[j]&mask) && buf[j] != min) kv_push(uint64_t, a, buf[j]);
-		}
-		if ((info&mask) <= (min&mask)) { // a new minimum; then write the old min
-			if (l >= w + k) kv_push(uint64_t, a, min);
-			min = info, min_pos = buf_pos;
-		} else if (buf_pos == min_pos) { // old min has moved outside the window
-			if (l >= w + k - 1) kv_push(uint64_t, a, min);
-			for (j = buf_pos + 1, min = UINT64_MAX; j < w; ++j) // the two loops are necessary when there are identical k-mers
-				if ((min&mask) >= (buf[j]&mask)) min = buf[j], min_pos = j; // >= is important s.t. min is always the closest k-mer
-			for (j = 0; j <= buf_pos; ++j)
-				if ((min&mask) >= (buf[j]&mask)) min = buf[j], min_pos = j;
-			if (l >= w + k - 1) { // write identical k-mers
-				for (j = buf_pos + 1; j < w; ++j) // these two loops make sure the output is sorted
-					if ((min&mask) == (buf[j]&mask) && min != buf[j]) kv_push(uint64_t, a, buf[j]);
-				for (j = 0; j <= buf_pos; ++j)
-					if ((min&mask) == (buf[j]&mask) && min != buf[j]) kv_push(uint64_t, a, buf[j]);
-			}
-		}
-		if (++buf_pos == w) buf_pos = 0;
-	}
-	kv_push(uint64_t, a, min);
-	if (n) *n = a.n;
-	return a.a;
-}
-
-void mm_sketch128(const char *str, int len, int w, int k, mm128_v *p)
+void mm_sketch(const char *str, int len, int w, int k, uint64_t offset, mm128_v *p)
 {
 	uint64_t shift1 = 2 * (k - 1), shift = 2 * k, mask = (1ULL<<shift) - 1, kmer[2] = {0,0};
 	int i, j, l, buf_pos, min_pos;
@@ -96,7 +46,6 @@ void mm_sketch128(const char *str, int len, int w, int k, mm128_v *p)
 	buf = (mm128_t*)alloca(w * 16);
 	memset(buf, 0xff, w * 16);
 
-	p->n = 0;
 	for (i = l = buf_pos = min_pos = 0; i < len; ++i) {
 		int c = seq_nt4_table[(uint8_t)str[i]];
 		mm128_t info = { UINT64_MAX, UINT64_MAX };
@@ -104,7 +53,7 @@ void mm_sketch128(const char *str, int len, int w, int k, mm128_v *p)
 			kmer[0] = (kmer[0] << 2 | c) & mask;           // forward k-mer
 			kmer[1] = (kmer[1] >> 2) | (3ULL^c) << shift1; // reverse k-mer
 			if (++l >= k)
-				info.x = hash64(kmer[(kmer[0] > kmer[1])], mask), info.y = i;
+				info.x = hash64(kmer[(kmer[0] > kmer[1])], mask), info.y = offset + i;
 		} else l = 0;
 		buf[buf_pos] = info; // need to do this here as appropriate buf_pos and buf[buf_pos] are needed below
 		if (l == w + k - 1) { // special case for the first window - because identical k-mers are not stored yet
