@@ -26,5 +26,5 @@ depend:
 
 bseq.o: bseq.h kseq.h
 genidx.o: minimap.h bseq.h
-index.o: minimap.h kvec.h
+index.o: minimap.h kvec.h ksort.h
 sketch.o: kvec.h minimap.h

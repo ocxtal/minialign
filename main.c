@@ -3,7 +3,7 @@
 #include <sys/resource.h>
 #include <sys/time.h>
 
-#define MM_VERSION "0.1.0-r14"
+#define MM_VERSION "0.1.0-r16"
 
 void liftrlimit()
 {
@@ -31,6 +31,7 @@ double realtime()
 }
 
 int mm_verbose = 3;
+double mm_realtime0;
 
 int main_index(int argc, char *argv[]);
 
@@ -45,7 +46,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  index    create minimap index\n");
 		return 1;
 	}
-	t_start = realtime();
+	mm_realtime0 = t_start = realtime();
 	if (strcmp(argv[1], "index") == 0) ret = main_index(argc-1, argv+1);
 	else {
 		fprintf(stderr, "[E::%s] unknown command\n", __func__);

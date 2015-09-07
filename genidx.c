@@ -21,6 +21,11 @@ typedef struct {
 	bseq1_t *seq;
 } step_t;
 
+extern int mm_verbose;
+extern double mm_realtime0;
+double cputime(void);
+double realtime(void);
+
 static void *worker_pipeline(void *shared, int step, void *in)
 {
 	int i;
@@ -55,16 +60,18 @@ static void *worker_pipeline(void *shared, int step, void *in)
 
 int main_index(int argc, char *argv[])
 {
-	int c, k = 16, w = 20, b = 14, debug_print = 0;
+	int c, k = 16, w = 16, b = 14, n_threads = 2, debug_print = 0;
+	mm_idx_t *mi = 0;
 	pipeline_t pl;
 
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.batch_size = 10000000;
 
-	while ((c = getopt(argc, argv, "w:k:B:b:p")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:p")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
+		else if (c == 't') n_threads = atoi(optarg);
 		else if (c == 'B') pl.batch_size = atoi(optarg);
 		else if (c == 'p') debug_print = 1;
 	}
@@ -75,6 +82,7 @@ int main_index(int argc, char *argv[])
 		fprintf(stderr, "  -k INT     k-mer size [%d]\n", k);
 		fprintf(stderr, "  -w INT     minizer window size [%d]\n", w);
 		fprintf(stderr, "  -b INT     bucket bits [%d]\n", b);
+		fprintf(stderr, "  -t INT     number of threads for post-processing [%d]\n", n_threads);
 		fprintf(stderr, "  -B INT     batch size [%d]\n", pl.batch_size);
 		return 1;
 	}
@@ -83,7 +91,11 @@ int main_index(int argc, char *argv[])
 	assert(pl.fp);
 	pl.mi = mm_idx_init(w, k, b);
 
+	if (mm_verbose >= 3)
+		fprintf(stderr, "[M::%s::%.3f*%.2f] collecting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 	kt_pipeline(3, worker_pipeline, &pl, 3);
+	if (mm_verbose >= 3)
+		fprintf(stderr, "[M::%s::%.3f*%.2f] finished collecting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
 	bseq_close(pl.fp);
 	if (debug_print) {
@@ -92,6 +104,14 @@ int main_index(int argc, char *argv[])
 			printf("%ld\t%ld\t%lx\n", (long)(pl.a.a[i].y>>32), (long)pl.a.a[i].y, (long)pl.a.a[i].x);
 	}
 	free(pl.a.a);
-	mm_idx_destroy(pl.mi);
+
+	if (mm_verbose >= 3)
+		fprintf(stderr, "[M::%s::%.3f*%.2f] sorting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
+	mi = pl.mi;
+	mm_idx_post(mi, n_threads);
+	if (mm_verbose >= 3)
+		fprintf(stderr, "[M::%s::%.3f*%.2f] finished sorting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
+
+	mm_idx_destroy(mi);
 	return 0;
 }
