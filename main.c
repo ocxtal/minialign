@@ -1,7 +1,10 @@
+#include <unistd.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/resource.h>
 #include <sys/time.h>
+#include "minimap.h"
 
 #define MM_VERSION "r20"
 
@@ -15,25 +18,34 @@ void liftrlimit()
 #endif
 }
 
-double cputime()
+int main_index(int argc, char *argv[])
 {
-	struct rusage r;
-	getrusage(RUSAGE_SELF, &r);
-	return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
+	int c, k = 16, w = 16, b = 14, n_threads = 2, batch_size = 10000000;
+	mm_idx_t *mi = 0;
+
+	while ((c = getopt(argc, argv, "w:k:B:b:t:")) >= 0) {
+		if (c == 'w') w = atoi(optarg);
+		else if (c == 'k') k = atoi(optarg);
+		else if (c == 'b') b = atoi(optarg);
+		else if (c == 't') n_threads = atoi(optarg);
+		else if (c == 'B') batch_size = atoi(optarg);
+	}
+
+	if (argc == optind) {
+		fprintf(stderr, "Usage: minimap index [options] <in.fa>\n");
+		fprintf(stderr, "Options:\n");
+		fprintf(stderr, "  -k INT     k-mer size [%d]\n", k);
+		fprintf(stderr, "  -w INT     minizer window size [%d]\n", w);
+		fprintf(stderr, "  -b INT     bucket bits [%d]\n", b);
+		fprintf(stderr, "  -t INT     number of threads for post-processing [%d]\n", n_threads);
+		fprintf(stderr, "  -B INT     batch size [%d]\n", batch_size);
+		return 1;
+	}
+
+	mi = mm_idx_gen(argv[optind], w, k, b, batch_size, n_threads);
+	mm_idx_destroy(mi);
+	return 0;
 }
-
-double realtime()
-{
-	struct timeval tp;
-	struct timezone tzp;
-	gettimeofday(&tp, &tzp);
-	return tp.tv_sec + tp.tv_usec * 1e-6;
-}
-
-int mm_verbose = 3;
-double mm_realtime0;
-
-int main_index(int argc, char *argv[]);
 
 int main(int argc, char *argv[])
 {

@@ -2,7 +2,7 @@ CC=			gcc
 CFLAGS=		-g -Wall -O2 -Wc++-compat -Wno-unused-function #-fno-inline-functions -fno-inline-functions-called-once
 CPPFLAGS=
 INCLUDES=	
-OBJS=		kthread.o bseq.o sketch.o index.o genidx.o
+OBJS=		kthread.o misc.o bseq.o sketch.o index.o
 PROG=		minimap
 LIBS=		-lm -lz -lpthread
 
@@ -25,6 +25,7 @@ depend:
 # DO NOT DELETE
 
 bseq.o: bseq.h kseq.h
-genidx.o: minimap.h bseq.h
-index.o: minimap.h kvec.h khash.h ksort.h
+genidx.o: minimap.h
+index.o: minimap.h kvec.h khash.h ksort.h bseq.h
+main.o: minimap.h
 sketch.o: kvec.h minimap.h

@@ -33,15 +33,6 @@ void mm_idx_destroy(mm_idx_t *mi)
 	free(mi->B); free(mi);
 }
 
-void mm_idx_add(mm_idx_t *mi, int n, const mm128_t *a)
-{
-	int i, mask = (1<<mi->b) - 1;
-	for (i = 0; i < n; ++i) {
-		mm128_v *p = &mi->B[a[i].x&mask].a;
-		kv_push(mm128_t, *p, a[i]);
-	}
-}
-
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n)
 {
 	int mask = (1<<mi->b) - 1;
@@ -59,6 +50,10 @@ const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n)
 		return &b->p[kh_val(h, k)>>32];
 	}
 }
+
+/*********************************
+ * Sort and generate hash tables *
+ *********************************/
 
 #include "ksort.h"
 #define sort_key(a) ((a).x)
@@ -114,7 +109,98 @@ static void worker_post(void *g, long i, int tid)
 	b->a.n = b->a.m = 0, b->a.a = 0;
 }
  
-void mm_idx_post(mm_idx_t *mi, int n_threads)
+static void mm_idx_post(mm_idx_t *mi, int n_threads)
 {
 	kt_for(n_threads, worker_post, mi, 1<<mi->b);
+}
+
+/******************
+ * Generate index *
+ ******************/
+
+#include <stdio.h>
+#include <zlib.h>
+#include "bseq.h"
+
+void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
+
+typedef struct {
+	int batch_size, n_processed;
+	bseq_file_t *fp;
+	mm128_v a;
+	mm_idx_t *mi;
+} pipeline_t;
+
+typedef struct {
+    int n_seq;
+	bseq1_t *seq;
+} step_t;
+
+extern int mm_verbose;
+extern double mm_realtime0;
+
+static void mm_idx_add(mm_idx_t *mi, int n, const mm128_t *a)
+{
+	int i, mask = (1<<mi->b) - 1;
+	for (i = 0; i < n; ++i) {
+		mm128_v *p = &mi->B[a[i].x&mask].a;
+		kv_push(mm128_t, *p, a[i]);
+	}
+}
+
+static void *worker_pipeline(void *shared, int step, void *in)
+{
+	int i;
+    pipeline_t *p = (pipeline_t*)shared;
+    if (step == 0) { // step 0: read sequences
+        step_t *s;
+        s = (step_t*)calloc(1, sizeof(step_t));
+		s->seq = bseq_read(p->fp, p->batch_size, &s->n_seq);
+		if (s->seq) {
+			for (i = 0; i < s->n_seq; ++i)
+				s->seq[i].rid = p->n_processed++;
+			return s;
+		} else free(s);
+    } else if (step == 1) { // step 1: compute sketch
+        step_t *s = (step_t*)in;
+		p->a.n = 0;
+		for (i = 0; i < s->n_seq; ++i) {
+			bseq1_t *t = &s->seq[i];
+			mm_sketch(t->seq, t->l_seq, p->mi->w, p->mi->k, t->rid, &p->a);
+			free(t->seq); free(t->name);
+		}
+		free(s->seq);
+		return s;
+    } else if (step == 2) { // dispatch sketch to buckets
+        step_t *s = (step_t*)in;
+		mm_idx_add(p->mi, p->a.n, p->a.a);
+		p->a.n = 0;
+		free(s);
+	}
+    return 0;
+}
+
+double cputime(void);
+double realtime(void);
+
+mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_threads)
+{
+	pipeline_t pl;
+	memset(&pl, 0, sizeof(pipeline_t));
+	pl.batch_size = batch_size;
+	pl.fp = bseq_open(fn);
+	if (pl.fp == 0) return 0;
+	pl.mi = mm_idx_init(w, k, b);
+
+	kt_pipeline(3, worker_pipeline, &pl, 3);
+	bseq_close(pl.fp);
+	free(pl.a.a);
+	if (mm_verbose >= 3)
+		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
+
+	mm_idx_post(pl.mi, n_threads);
+	if (mm_verbose >= 3)
+		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
+
+	return pl.mi;
 }
