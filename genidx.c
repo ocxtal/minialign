@@ -91,8 +91,6 @@ int main_index(int argc, char *argv[])
 	assert(pl.fp);
 	pl.mi = mm_idx_init(w, k, b);
 
-	if (mm_verbose >= 3)
-		fprintf(stderr, "[M::%s::%.3f*%.2f] collecting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 	kt_pipeline(3, worker_pipeline, &pl, 3);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] finished collecting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
@@ -105,8 +103,6 @@ int main_index(int argc, char *argv[])
 	}
 	free(pl.a.a);
 
-	if (mm_verbose >= 3)
-		fprintf(stderr, "[M::%s::%.3f*%.2f] sorting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 	mi = pl.mi;
 	mm_idx_post(mi, n_threads);
 	if (mm_verbose >= 3)
