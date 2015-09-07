@@ -26,6 +26,7 @@ void mm_idx_destroy(mm_idx_t *mi)
 	int i;
 	if (mi == 0) return;
 	for (i = 0; i < 1<<mi->b; ++i) {
+		free(mi->B[i].p);
 		free(mi->B[i].a.a);
 		kh_destroy(idx, mi->B[i].h);
 	}
@@ -45,37 +46,54 @@ void mm_idx_add(mm_idx_t *mi, int n, const mm128_t *a)
 #define sort_key(a) ((a).x)
 KRADIX_SORT_INIT(128, mm128_t, sort_key, 8) 
 
-static inline void insert_key(idxhash_t *h, const mm128_t *p, int start, int n, int b)
-{
-	int absent;
-	khint_t k;
-	k = kh_put(idx, h, p->x>>b<<1, &absent);
-	if (n == 1) {
-		kh_key(h, k) |= 1;
-		kh_val(h, k) = p->y;
-	} else kh_val(h, k) = (uint64_t)start<<32 | n;
-}
-
 static void worker_post(void *g, long i, int tid)
 {
-	int j, start, n;
+	int j, start_a, start_p, n, n_keys;
 	idxhash_t *h;
 	mm_idx_t *mi = (mm_idx_t*)g;
 	mm_idx_bucket_t *b = &mi->B[i];
 	if (b->a.n == 0) return;
+
+	// sort by minimizer
 	radix_sort_128(b->a.a, b->a.a + b->a.n);
-	for (j = 1, n = 0; j < b->a.n; ++j) // count the number of keys to preallocate the hash table
-		if (b->a.a[j].x != b->a.a[j-1].x) ++n;
-	h = kh_init(idx);
-	kh_resize(idx, h, n + 1);
-	for (j = 1, n = 1, start = 0; j < b->a.n; ++j) {
-		if (b->a.a[j].x != b->a.a[j-1].x) {
-			insert_key(h, &b->a.a[j-1], start, n, mi->b);
-			start = j, n = 1;
+
+	// count and preallocate
+	for (j = 1, n = 1, n_keys = 0, b->n = 0; j <= b->a.n; ++j) {
+		if (j == b->a.n || b->a.a[j].x != b->a.a[j-1].x) {
+			++n_keys;
+			if (n > 1) b->n += n;
+			n = 1;
 		} else ++n;
 	}
-	insert_key(h, &b->a.a[j-1], start, n, mi->b);
+	h = kh_init(idx);
+	kh_resize(idx, h, n_keys);
+	b->p = (uint64_t*)calloc(b->n, 8);
+
+	// create the hash table
+	for (j = 1, n = 1, start_a = start_p = 0; j <= b->a.n; ++j) {
+		if (j == b->a.n || b->a.a[j].x != b->a.a[j-1].x) {
+			khint_t itr;
+			int absent;
+			mm128_t *p = &b->a.a[j-1];
+			itr = kh_put(idx, h, p->x>>mi->b<<1, &absent);
+			if (n == 1) {
+				kh_key(h, itr) |= 1;
+				kh_val(h, itr) = p->y;
+			} else {
+				int k;
+				for (k = 0; k < n; ++k)
+					b->p[start_p + k] = b->a.a[start_a + k].y;
+				kh_val(h, itr) = (uint64_t)start_p<<32 | n;
+				start_p += k;
+			}
+			start_a = j, n = 1;
+		} else ++n;
+	}
 	b->h = h;
+
+	// deallocate and clear b->a
+	free(b->a.a);
+	b->a.n = b->a.m = 0, b->a.a = 0;
 }
  
 void mm_idx_post(mm_idx_t *mi, int n_threads)
