@@ -2,8 +2,8 @@ CC=			gcc
 CFLAGS=		-g -Wall -O2 -Wno-unused-function #-fno-inline-functions -fno-inline-functions-called-once
 CPPFLAGS=
 INCLUDES=	
-OBJS=		sketch.o
-PROG=		mm-test
+OBJS=		kthread.o bseq.o sketch.o index.o
+PROG=		minimap
 LIBS=		-lm -lz -lpthread
 
 .SUFFIXES:.c .o
@@ -13,7 +13,7 @@ LIBS=		-lm -lz -lpthread
 
 all:$(PROG)
 
-mm-test:$(OBJS) test.o
+minimap:$(OBJS) main.o
 		$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
 
 clean:
@@ -24,5 +24,6 @@ depend:
 
 # DO NOT DELETE
 
+bseq.o: bseq.h kseq.h
+index.o: minimap.h bseq.h
 sketch.o: kvec.h minimap.h
-test.o: minimap.h kseq.h

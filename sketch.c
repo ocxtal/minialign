@@ -36,7 +36,7 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 	return key;
 }
 
-void mm_sketch(const char *str, int len, int w, int k, uint64_t offset, mm128_v *p)
+void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 {
 	uint64_t shift1 = 2 * (k - 1), shift = 2 * k, mask = (1ULL<<shift) - 1, kmer[2] = {0,0};
 	int i, j, l, buf_pos, min_pos;
@@ -53,7 +53,7 @@ void mm_sketch(const char *str, int len, int w, int k, uint64_t offset, mm128_v 
 			kmer[0] = (kmer[0] << 2 | c) & mask;           // forward k-mer
 			kmer[1] = (kmer[1] >> 2) | (3ULL^c) << shift1; // reverse k-mer
 			if (++l >= k)
-				info.x = hash64(kmer[(kmer[0] > kmer[1])], mask), info.y = offset + i;
+				info.x = hash64(kmer[(kmer[0] > kmer[1])], mask), info.y = (uint64_t)rid<<32 | i;
 		} else l = 0;
 		buf[buf_pos] = info; // need to do this here as appropriate buf_pos and buf[buf_pos] are needed below
 		if (l == w + k - 1) { // special case for the first window - because identical k-mers are not stored yet
