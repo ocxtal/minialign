@@ -32,6 +32,7 @@ mm_idx_t *mm_idx_init(int w, int k, int b);
 void mm_idx_destroy(mm_idx_t *mi);
 void mm_idx_add(mm_idx_t *mi, int n, const mm128_t *a);
 void mm_idx_post(mm_idx_t *mi, int n_threads);
+const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 
 #ifdef __cplusplus
 }

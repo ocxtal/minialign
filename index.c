@@ -42,6 +42,24 @@ void mm_idx_add(mm_idx_t *mi, int n, const mm128_t *a)
 	}
 }
 
+const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n)
+{
+	int mask = (1<<mi->b) - 1;
+	khint_t k;
+	mm_idx_bucket_t *b = &mi->B[minier&mask];
+	idxhash_t *h = (idxhash_t*)b->h;
+	*n = 0;
+	k = kh_get(idx, h, minier>>mi->b<<1);
+	if (k == kh_end(h)) return 0;
+	if (kh_key(h, k)&1) {
+		*n = 1;
+		return &kh_val(h, k);
+	} else {
+		*n = (uint32_t)kh_val(h, k);
+		return &b->p[kh_val(h, k)>>32];
+	}
+}
+
 #include "ksort.h"
 #define sort_key(a) ((a).x)
 KRADIX_SORT_INIT(128, mm128_t, sort_key, 8) 
