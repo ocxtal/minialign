@@ -19,7 +19,7 @@ bseq_file_t *bseq_open(const char *fn)
 	gzFile f;
 	f = fn && strcmp(fn, "-")? gzopen(fn, "r") : gzdopen(fileno(stdin), "r");
 	if (f == 0) return 0;
-	fp = calloc(1, sizeof(bseq_file_t));
+	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
 	fp->fp = f;
 	fp->ks = kseq_init(fp->fp);
 	return fp;
@@ -42,7 +42,7 @@ bseq1_t *bseq_read(bseq_file_t *fp, int chunk_size, int *n_)
 		bseq1_t *s;
 		if (n >= m) {
 			m = m? m<<1 : 256;
-			seqs = realloc(seqs, m * sizeof(bseq1_t));
+			seqs = (bseq1_t*)realloc(seqs, m * sizeof(bseq1_t));
 		}
 		s = &seqs[n];
 		s->name = strdup(ks->name.s);
