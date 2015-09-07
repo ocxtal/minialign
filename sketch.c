@@ -40,7 +40,7 @@ void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 {
 	uint64_t shift1 = 2 * (k - 1), shift = 2 * k, mask = (1ULL<<shift) - 1, kmer[2] = {0,0};
 	int i, j, l, buf_pos, min_pos;
-	mm128_t *buf, min;
+	mm128_t *buf, min = { UINT64_MAX, UINT64_MAX };
 
 	assert(len > 0 && w > 0 && k > 0);
 	buf = (mm128_t*)alloca(w * 16);

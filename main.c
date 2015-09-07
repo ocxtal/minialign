@@ -3,7 +3,7 @@
 #include <sys/resource.h>
 #include <sys/time.h>
 
-#define MM_VERSION "0.1.0"
+#define MM_VERSION "0.1.0-r13"
 
 void liftrlimit()
 {
