@@ -93,7 +93,7 @@ int main_index(int argc, char *argv[])
 
 	kt_pipeline(3, worker_pipeline, &pl, 3);
 	if (mm_verbose >= 3)
-		fprintf(stderr, "[M::%s::%.3f*%.2f] finished collecting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
+		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
 	bseq_close(pl.fp);
 	if (debug_print) {
@@ -106,7 +106,7 @@ int main_index(int argc, char *argv[])
 	mi = pl.mi;
 	mm_idx_post(mi, n_threads);
 	if (mm_verbose >= 3)
-		fprintf(stderr, "[M::%s::%.3f*%.2f] finished sorting minimizers...\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
+		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
 	mm_idx_destroy(mi);
 	return 0;

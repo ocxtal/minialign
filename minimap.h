@@ -11,8 +11,13 @@ typedef struct { size_t n, m; mm128_t *a; } mm128_v;
 typedef struct { size_t n, m; uint64_t *a; } uint64_v;
 
 typedef struct {
+	mm128_v a;
+	void *h;
+} mm_idx_bucket_t;
+
+typedef struct {
 	int b, w, k;
-	mm128_v *a;
+	mm_idx_bucket_t *B;
 } mm_idx_t;
 
 #ifdef __cplusplus
