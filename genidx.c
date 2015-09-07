@@ -6,7 +6,6 @@
 #include <zlib.h>
 #include "minimap.h"
 #include "bseq.h"
-#include "kvec.h"
 
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
 

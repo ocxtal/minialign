@@ -25,5 +25,6 @@ depend:
 # DO NOT DELETE
 
 bseq.o: bseq.h kseq.h
-index.o: minimap.h bseq.h
+genidx.o: minimap.h bseq.h
+index.o: minimap.h kvec.h
 sketch.o: kvec.h minimap.h
