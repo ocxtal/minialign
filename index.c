@@ -28,7 +28,7 @@ void mm_idx_destroy(mm_idx_t *mi)
 	for (i = 0; i < 1<<mi->b; ++i) {
 		free(mi->B[i].p);
 		free(mi->B[i].a.a);
-		kh_destroy(idx, mi->B[i].h);
+		kh_destroy(idx, (idxhash_t*)mi->B[i].h);
 	}
 	free(mi->B); free(mi);
 }
@@ -118,6 +118,7 @@ static void mm_idx_post(mm_idx_t *mi, int n_threads)
  * Generate index *
  ******************/
 
+#include <string.h>
 #include <stdio.h>
 #include <zlib.h>
 #include "bseq.h"
@@ -135,9 +136,6 @@ typedef struct {
     int n_seq;
 	bseq1_t *seq;
 } step_t;
-
-extern int mm_verbose;
-extern double mm_realtime0;
 
 static void mm_idx_add(mm_idx_t *mi, int n, const mm128_t *a)
 {
@@ -180,9 +178,6 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-double cputime(void);
-double realtime(void);
-
 mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_threads)
 {
 	pipeline_t pl;
@@ -192,7 +187,7 @@ mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_
 	if (pl.fp == 0) return 0;
 	pl.mi = mm_idx_init(w, k, b);
 
-	kt_pipeline(3, worker_pipeline, &pl, 3);
+	kt_pipeline(n_threads < 3? n_threads : 3, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);
 	free(pl.a.a);
 	if (mm_verbose >= 3)

@@ -20,7 +20,7 @@ void liftrlimit()
 
 int main_index(int argc, char *argv[])
 {
-	int c, k = 16, w = 16, b = 14, n_threads = 2, batch_size = 10000000;
+	int c, k = 16, w = 16, b = 14, n_threads = 3, batch_size = 10000000;
 	mm_idx_t *mi = 0;
 
 	while ((c = getopt(argc, argv, "w:k:B:b:t:")) >= 0) {
@@ -37,7 +37,7 @@ int main_index(int argc, char *argv[])
 		fprintf(stderr, "  -k INT     k-mer size [%d]\n", k);
 		fprintf(stderr, "  -w INT     minizer window size [%d]\n", w);
 		fprintf(stderr, "  -b INT     bucket bits [%d]\n", b);
-		fprintf(stderr, "  -t INT     number of threads for post-processing [%d]\n", n_threads);
+		fprintf(stderr, "  -t INT     number of threads [%d]\n", n_threads);
 		fprintf(stderr, "  -B INT     batch size [%d]\n", batch_size);
 		return 1;
 	}

@@ -1,5 +1,5 @@
 CC=			gcc
-CFLAGS=		-g -Wall -O2 -Wc++-compat -Wno-unused-function #-fno-inline-functions -fno-inline-functions-called-once
+CFLAGS=		-g -Wall -O2 -Wc++-compat -Wno-unused-function
 CPPFLAGS=
 INCLUDES=	
 OBJS=		kthread.o misc.o bseq.o sketch.o index.o
@@ -25,7 +25,6 @@ depend:
 # DO NOT DELETE
 
 bseq.o: bseq.h kseq.h
-genidx.o: minimap.h
 index.o: minimap.h kvec.h khash.h ksort.h bseq.h
 main.o: minimap.h
 sketch.o: kvec.h minimap.h
