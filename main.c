@@ -21,7 +21,7 @@ void liftrlimit()
 int main(int argc, char *argv[])
 {
 	int i, c, k = 16, w = 16, b = 14, d = 100, m = 3, n_threads = 3, batch_size = 10000000;
-	float f = 0.01;
+	float f = 0.005;
 	mm_idx_t *mi = 0;
 
 	liftrlimit();

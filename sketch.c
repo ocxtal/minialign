@@ -38,7 +38,7 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 
 void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 {
-	uint64_t shift1 = 2 * (k - 1), shift = 2 * k, mask = (1ULL<<shift) - 1, kmer[2] = {0,0};
+	uint64_t shift1 = 2 * (k - 1), mask = (1ULL<<2*k) - 1, kmer[2] = {0,0};
 	int i, j, l, buf_pos, min_pos;
 	mm128_t *buf, min = { UINT64_MAX, UINT64_MAX };
 

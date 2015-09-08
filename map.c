@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "bseq.h"
+#include "kvec.h"
 #include "minimap.h"
 
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
@@ -8,14 +9,15 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 typedef struct {
 	int batch_size, n_processed, n_threads;
-	int d, m, thres;
+	int d, m;
+	uint32_t thres;
 	float f;
 	bseq_file_t *fp;
 	const mm_idx_t *mi;
 } pipeline_t;
 
 typedef struct { // per-thread buffer
-	mm128_v a;
+	mm128_v a, c[2];
 } tbuf_t;
 
 typedef struct {
@@ -30,8 +32,41 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
     step_t *step = (step_t*)_data;
 	bseq1_t *t = &step->seq[i];
 	tbuf_t *b = &step->buf[tid];
-	b->a.n = 0;
-	mm_sketch(t->seq, t->l_seq, step->p->mi->w, step->p->mi->k, t->rid, &b->a);
+	const mm_idx_t *mi = step->p->mi;
+	int j, N = 0;
+
+	b->a.n = b->c[0].n = b->c[1].n = 0;
+	mm_sketch(t->seq, t->l_seq, mi->w, mi->k, t->rid, &b->a);
+	for (j = 0; j < b->a.n; ++j) {
+		int k, n;
+		const uint64_t *q;
+		int32_t pos = (int32_t)b->a.a[j].y;
+		q = mm_idx_get(mi, b->a.a[j].x, &n);
+		N += n;
+		if (n > step->p->thres) continue;
+		for (k = 0; k < n; ++k) {
+			uint32_t f, r;
+			mm128_t *p;
+			f = 0x80000000U + ((int32_t)q[k] - pos);
+			r = (uint32_t)q[k] + (pos - mi->k);
+			kv_pushp(mm128_t, b->c[0], &p);
+			p->x = (uint64_t)q[k]>>32<<32 | f, p->y = (uint64_t)pos<<32 | (uint32_t)q[k];
+			kv_pushp(mm128_t, b->c[1], &p);
+			p->x = (uint64_t)q[k]>>32<<32 | r, p->y = (uint64_t)(pos-mi->k)<<32 | (uint32_t)q[k];
+		}
+	}
+	radix_sort_128x(b->c[0].a, b->c[0].a + b->c[0].n);
+	radix_sort_128x(b->c[1].a, b->c[1].a + b->c[1].n);
+	printf(">%s\n", t->name);
+	for (j = 0; j < 2; ++j) {
+		int k;
+		for (k = 0; k < b->c[j].n; ++k) {
+			uint64_t x = b->c[j].a[k].x;
+			uint32_t off = j == 0? 0x80000000U : 0;
+			printf("%d\t%c\t%d\n", (uint32_t)(x>>32), "+-"[j], (int32_t)((uint32_t)x - off));
+		}
+	}
+	printf("//\n");
 }
 
 static void *worker_pipeline(void *shared, int step, void *in)
@@ -56,6 +91,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
         step_t *s = (step_t*)in;
 		for (i = 0; i < p->n_threads; ++i) {
 			free(s->buf[i].a.a);
+			free(s->buf[i].c[0].a);
+			free(s->buf[i].c[1].a);
 		}
 		free(s->buf);
 		free(s);

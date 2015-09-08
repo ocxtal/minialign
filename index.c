@@ -61,6 +61,7 @@ uint32_t mm_idx_thres(const mm_idx_t *mi, float f)
 	size_t n = 0;
 	uint32_t thres;
 	khint_t *a, k;
+	if (f <= 0.) return UINT32_MAX;
 	for (i = 0; i < 1<<mi->b; ++i)
 		if (mi->B[i].h) n += kh_size((idxhash_t*)mi->B[i].h);
 	a = (uint32_t*)malloc(n * 4);
