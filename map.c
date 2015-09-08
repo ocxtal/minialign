@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 #include "bseq.h"
 #include "kvec.h"
@@ -103,6 +104,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 int mm_map(const mm_idx_t *idx, const char *fn, int d, int m, float f, int n_threads, int batch_size)
 {
 	pipeline_t pl;
+	memset(&pl, 0, sizeof(pipeline_t));
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return -1;
 	pl.mi = idx, pl.d = d, pl.m = m;
