@@ -36,6 +36,8 @@ void mm_idx_destroy(mm_idx_t *mi);
 mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_threads);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 
+int mm_map(const mm_idx_t *idx, const char *fn, int d, int m, int n_threads, int batch_size);
+
 double cputime(void);
 double realtime(void);
 
