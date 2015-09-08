@@ -8,7 +8,8 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 typedef struct {
 	int batch_size, n_processed, n_threads;
-	int d, m;
+	int d, m, thres;
+	float f;
 	bseq_file_t *fp;
 	const mm_idx_t *mi;
 } pipeline_t;
@@ -62,12 +63,15 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-int mm_map(const mm_idx_t *idx, const char *fn, int d, int m, int n_threads, int batch_size)
+int mm_map(const mm_idx_t *idx, const char *fn, int d, int m, float f, int n_threads, int batch_size)
 {
 	pipeline_t pl;
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return -1;
 	pl.mi = idx, pl.d = d, pl.m = m;
+	pl.thres = mm_idx_thres(idx, f);
+	if (mm_verbose >= 3)
+		fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, pl.thres);
 	pl.n_threads = n_threads, pl.batch_size = batch_size;
 	kt_pipeline(n_threads == 1? 1 : 2, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);

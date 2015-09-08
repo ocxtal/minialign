@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r25"
+#define MM_VERSION "r27"
 
 void liftrlimit()
 {
@@ -21,19 +21,26 @@ void liftrlimit()
 int main(int argc, char *argv[])
 {
 	int i, c, k = 16, w = 16, b = 14, d = 100, m = 3, n_threads = 3, batch_size = 10000000;
+	float f = 0.01;
 	mm_idx_t *mi = 0;
 
 	liftrlimit();
 	mm_realtime0 = realtime();
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:d:m:")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:d:m:f:Vv:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
 		else if (c == 'd') d = atoi(optarg);
 		else if (c == 'm') m = atoi(optarg);
+		else if (c == 'f') f = atof(optarg);
 		else if (c == 't') n_threads = atoi(optarg);
 		else if (c == 'B') batch_size = atoi(optarg);
+		else if (c == 'v') mm_verbose = atoi(optarg);
+		else if (c == 'V') {
+			puts(MM_VERSION);
+			return 0;
+		}
 	}
 
 	if (argc == optind) {
@@ -45,13 +52,16 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  -t INT     number of threads [%d]\n", n_threads);
 		fprintf(stderr, "  -d INT     bandwidth [%d]\n", d);
 		fprintf(stderr, "  -m INT     min minimizer matches [%d]\n", m);
+		fprintf(stderr, "  -f FLOAT   minimizer filteration threshold [%.3f]\n", f);
 		fprintf(stderr, "  -B INT     batch size [%d]\n", batch_size);
+		fprintf(stderr, "  -v INT     verbose level [%d]\n", mm_verbose);
+		fprintf(stderr, "  -V         show version number\n");
 		return 1;
 	}
 
 	mi = mm_idx_gen(argv[optind], w, k, b, batch_size, n_threads);
 	if (argc - optind >= 2)
-		mm_map(mi, argv[optind+1], d, m, n_threads, batch_size);
+		mm_map(mi, argv[optind+1], d, m, f, n_threads, batch_size);
 	mm_idx_destroy(mi);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);

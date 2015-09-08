@@ -1,5 +1,6 @@
 #include <sys/resource.h>
 #include <sys/time.h>
+#include "minimap.h"
 
 int mm_verbose = 3;
 double mm_realtime0;
@@ -18,3 +19,7 @@ double realtime()
 	gettimeofday(&tp, &tzp);
 	return tp.tv_sec + tp.tv_usec * 1e-6;
 }
+
+#include "ksort.h"
+#define sort_key(a) ((a).x)
+KRADIX_SORT_INIT(128x, mm128_t, sort_key, 8) 

@@ -40,6 +40,7 @@ const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n)
 	mm_idx_bucket_t *b = &mi->B[minier&mask];
 	idxhash_t *h = (idxhash_t*)b->h;
 	*n = 0;
+	if (h == 0) return 0;
 	k = kh_get(idx, h, minier>>mi->b<<1);
 	if (k == kh_end(h)) return 0;
 	if (kh_key(h, k)&1) {
@@ -51,13 +52,34 @@ const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n)
 	}
 }
 
+#include "ksort.h"
+KSORT_INIT_GENERIC(uint32_t)
+
+uint32_t mm_idx_thres(const mm_idx_t *mi, float f)
+{
+	int i;
+	size_t n = 0;
+	uint32_t thres;
+	khint_t *a, k;
+	for (i = 0; i < 1<<mi->b; ++i)
+		if (mi->B[i].h) n += kh_size((idxhash_t*)mi->B[i].h);
+	a = (uint32_t*)malloc(n * 4);
+	for (i = n = 0; i < 1<<mi->b; ++i) {
+		idxhash_t *h = (idxhash_t*)mi->B[i].h;
+		if (h == 0) continue;
+		for (k = 0; k < kh_end(h); ++k) {
+			if (!kh_exist(h, k)) continue;
+			a[n++] = kh_key(h, k)&1? 1 : (uint32_t)kh_val(h, k);
+		}
+	}
+	thres = ks_ksmall(uint32_t, n, a, (uint32_t)((1. - f) * n)) + 1;
+	free(a);
+	return thres;
+}
+
 /*********************************
  * Sort and generate hash tables *
  *********************************/
-
-#include "ksort.h"
-#define sort_key(a) ((a).x)
-KRADIX_SORT_INIT(128, mm128_t, sort_key, 8) 
 
 static void worker_post(void *g, long i, int tid)
 {
@@ -68,7 +90,7 @@ static void worker_post(void *g, long i, int tid)
 	if (b->a.n == 0) return;
 
 	// sort by minimizer
-	radix_sort_128(b->a.a, b->a.a + b->a.n);
+	radix_sort_128x(b->a.a, b->a.a + b->a.n);
 
 	// count and preallocate
 	for (j = 1, n = 1, n_keys = 0, b->n = 0; j <= b->a.n; ++j) {
