@@ -17,16 +17,75 @@ typedef struct {
 	const mm_idx_t *mi;
 } pipeline_t;
 
+typedef struct {
+	uint32_t cnt:31, rev:1;
+	int32_t rid;
+	int32_t qs, qe, rs, re;
+} mm_reg1_t;
+
 typedef struct { // per-thread buffer
 	mm128_v a, c[2];
+	uint64_v stack;
+	kvec_t(mm_reg1_t) reg;
 } tbuf_t;
 
 typedef struct {
 	const pipeline_t *p;
     int n_seq;
 	bseq1_t *seq;
+	kvec_t(mm_reg1_t) *reg;
 	tbuf_t *buf;
 } step_t;
+
+static void get_reg(tbuf_t *b, int radius, int min_cnt, int k, int rev)
+{
+	mm128_v *c = &b->c[rev];
+	mm128_t *p;
+	int i, j, start = 0;
+	if (c->n < min_cnt) return;
+	b->a.n = 0;
+	for (i = 1; i < c->n; ++i) { // identify all (possibly overlapping) clusters within _radius_
+		if (c->a[i].x - c->a[start].x > radius) {
+			if (i - start >= min_cnt) {
+				kv_pushp(mm128_t, b->a, &p);
+				p->x = i - start, p->y = start;
+			}
+			for (j = start + 1; j < i && c->a[i].x - c->a[j].x > radius; ++j);
+		}
+	}
+	if (i - start >= min_cnt) { // the last cluster
+		kv_pushp(mm128_t, b->a, &p);
+		p->x = i - start, p->y = start;
+	}
+	radix_sort_128x(b->a.a, b->a.a + b->a.n); // sort by the size of the cluster
+	for (i = b->a.n - 1; i >= 0; --i) { // starting from the largest cluster
+		int start = b->a.a[i].y;
+		int end = start + b->a.a[i].x;
+		int cnt = 0;
+		mm_reg1_t *r;
+		for (j = start; j < end; ++j) // exclude minimizer hits that have been used in larger clusters
+			if (c->a[j].x != UINT64_MAX) ++cnt;
+		if (cnt < min_cnt) continue;
+		while (c->a[start].x == UINT64_MAX) ++start; // we do this as we need the first to be present
+		kv_pushp(mm_reg1_t, b->reg, &r);
+		r->cnt = cnt, r->rid = c->a[start].x>>32, r->rev = rev;
+		r->qs = r->rs = INT32_MAX; r->qe = r->re = 0;
+		for (j = start; j < end; ++j) {
+			int qpos, rpos;
+			if (c->a[j].x == UINT64_MAX) continue;
+			qpos = c->a[j].y>>32;
+			rpos = (int32_t)c->a[j].y;
+			r->qs = r->qs < qpos? r->qs : qpos;
+			r->rs = r->rs < rpos? r->rs : rpos;
+			r->qe = r->qe > qpos? r->qe : qpos;
+			r->re = r->re > rpos? r->re : rpos;
+			c->a[j].x = UINT64_MAX; // mark the minimizer hit having been used
+		}
+		if (rev == 0) r->qs -= k - 1, ++r->qe; // we need to correct for k
+		else r->qe += k; // and a hit to the reverse strand is different
+		r->rs -= k - 1, ++r->re;
+	}
+}
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
 {
@@ -54,21 +113,20 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 				p->y = (uint64_t)qpos << 32 | rpos;
 			} else {
 				kv_pushp(mm128_t, b->c[1], &p);
-				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos - mi->k);
-				p->y = (uint64_t)(qpos - mi->k) << 32 | rpos;
+				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos - mi->k + 1);
+				p->y = (uint64_t)(qpos - mi->k + 1) << 32 | rpos;
 			}
 		}
 	}
 	radix_sort_128x(b->c[0].a, b->c[0].a + b->c[0].n);
 	radix_sort_128x(b->c[1].a, b->c[1].a + b->c[1].n);
-	printf(">%s\n", t->name);
-	for (j = 0; j < 2; ++j) {
-		int k;
-		for (k = 0; k < b->c[j].n; ++k) {
-			uint64_t x = b->c[j].a[k].x;
-			uint32_t off = j == 0? 0x80000000U : 0;
-			printf("%d\t%c\t%d\n", (uint32_t)(x>>32), "+-"[j], (int32_t)((uint32_t)x - off));
-		}
+	b->reg.n = 0;
+	get_reg(b, step->p->d, step->p->m, mi->k, 0);
+	get_reg(b, step->p->d, step->p->m, mi->k, 1);
+	printf(">%s\t%ld\n", t->name, b->reg.n);
+	for (j = 0; j < b->reg.n; ++j) {
+		mm_reg1_t *r = &b->reg.a[j];
+		printf("%s\t%d\t%d\t%c\t%d\t%d\t%d\t%d\n", t->name, r->qs, r->qe, "+-"[r->rev], r->rid, r->rs, r->re, r->cnt);
 	}
 	printf("//\n");
 }
