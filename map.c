@@ -82,8 +82,7 @@ static void get_reg(tbuf_t *b, int radius, int min_cnt, int k, int rev)
 			r->re = r->re > rpos? r->re : rpos;
 			c->a[j].x = UINT64_MAX; // mark the minimizer hit having been used
 		}
-		if (rev == 0) r->qs -= k - 1, ++r->qe; // we need to correct for k
-		else r->qe += k; // and a hit to the reverse strand is different
+		r->qs -= k - 1, ++r->qe; // we need to correct for k
 		r->rs -= k - 1, ++r->re;
 	}
 }
@@ -114,8 +113,8 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 				p->y = (uint64_t)qpos << 32 | rpos;
 			} else {
 				kv_pushp(mm128_t, b->c[1], &p);
-				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos - mi->k + 1);
-				p->y = (uint64_t)(qpos - mi->k + 1) << 32 | rpos;
+				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos);
+				p->y = (uint64_t)qpos << 32 | rpos;
 			}
 		}
 	}
