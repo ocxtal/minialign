@@ -40,20 +40,23 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	mm_sketch(t->seq, t->l_seq, mi->w, mi->k, t->rid, &b->a);
 	for (j = 0; j < b->a.n; ++j) {
 		int k, n;
-		const uint64_t *q;
-		int32_t pos = (int32_t)b->a.a[j].y;
-		q = mm_idx_get(mi, b->a.a[j].x, &n);
+		const uint64_t *r;
+		int32_t qpos = (uint32_t)b->a.a[j].y>>1, strand = b->a.a[j].y&1;
+		r = mm_idx_get(mi, b->a.a[j].x, &n);
 		N += n;
 		if (n > step->p->thres) continue;
 		for (k = 0; k < n; ++k) {
-			uint32_t f, r;
+			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
-			f = 0x80000000U + ((int32_t)q[k] - pos);
-			r = (uint32_t)q[k] + (pos - mi->k);
-			kv_pushp(mm128_t, b->c[0], &p);
-			p->x = (uint64_t)q[k]>>32<<32 | f, p->y = (uint64_t)pos<<32 | (uint32_t)q[k];
-			kv_pushp(mm128_t, b->c[1], &p);
-			p->x = (uint64_t)q[k]>>32<<32 | r, p->y = (uint64_t)(pos-mi->k)<<32 | (uint32_t)q[k];
+			if ((r[k]&1) == strand) {
+				kv_pushp(mm128_t, b->c[0], &p);
+				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);
+				p->y = (uint64_t)qpos << 32 | rpos;
+			} else {
+				kv_pushp(mm128_t, b->c[1], &p);
+				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos - mi->k);
+				p->y = (uint64_t)(qpos - mi->k) << 32 | rpos;
+			}
 		}
 	}
 	radix_sort_128x(b->c[0].a, b->c[0].a + b->c[0].n);

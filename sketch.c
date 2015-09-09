@@ -50,10 +50,12 @@ void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 		int c = seq_nt4_table[(uint8_t)str[i]];
 		mm128_t info = { UINT64_MAX, UINT64_MAX };
 		if (c < 4) { // not an ambiguous base
+			int z;
 			kmer[0] = (kmer[0] << 2 | c) & mask;           // forward k-mer
 			kmer[1] = (kmer[1] >> 2) | (3ULL^c) << shift1; // reverse k-mer
+			z = kmer[0] < kmer[1]? 0 : 1; // strand
 			if (++l >= k)
-				info.x = hash64(kmer[(kmer[0] > kmer[1])], mask), info.y = (uint64_t)rid<<32 | i;
+				info.x = hash64(kmer[z], mask), info.y = (uint64_t)rid<<32 | (uint32_t)i<<1 | z;
 		} else l = 0;
 		buf[buf_pos] = info; // need to do this here as appropriate buf_pos and buf[buf_pos] are needed below
 		if (l == w + k - 1) { // special case for the first window - because identical k-mers are not stored yet
