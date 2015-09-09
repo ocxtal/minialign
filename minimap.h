@@ -19,7 +19,10 @@ typedef struct {
 
 typedef struct {
 	int b, w, k;
+	uint32_t n;  // number of reference sequences
 	mm_idx_bucket_t *B;
+	int *len;    // length of each reference sequence
+	char **name; // TODO: if this uses too much RAM, switch one concatenated string
 } mm_idx_t;
 
 extern int mm_verbose;
@@ -33,7 +36,7 @@ void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 
 mm_idx_t *mm_idx_init(int w, int k, int b);
 void mm_idx_destroy(mm_idx_t *mi);
-mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_threads);
+mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_threads, int keep_name);
 uint32_t mm_idx_thres(const mm_idx_t *mi, float f);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 

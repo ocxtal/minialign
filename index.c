@@ -30,7 +30,11 @@ void mm_idx_destroy(mm_idx_t *mi)
 		free(mi->B[i].a.a);
 		kh_destroy(idx, (idxhash_t*)mi->B[i].h);
 	}
-	free(mi->B); free(mi);
+	free(mi->B);
+	if (mi->name)
+		for (i = 0; i < mi->n; ++i) free(mi->name[i]);
+	free(mi->len); free(mi->name);
+	free(mi);
 }
 
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n)
@@ -149,7 +153,7 @@ static void mm_idx_post(mm_idx_t *mi, int n_threads)
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
 
 typedef struct {
-	int batch_size, n_processed;
+	int batch_size, n_processed, keep_name;
 	bseq_file_t *fp;
 	mm128_v a;
 	mm_idx_t *mi;
@@ -178,8 +182,20 @@ static void *worker_pipeline(void *shared, int step, void *in)
         s = (step_t*)calloc(1, sizeof(step_t));
 		s->seq = bseq_read(p->fp, p->batch_size, &s->n_seq);
 		if (s->seq) {
-			for (i = 0; i < s->n_seq; ++i)
+			uint32_t old_m = p->mi->n, m, n;
+			m = n = p->mi->n + s->n_seq;
+			kroundup32(m); kroundup32(old_m);
+			if (old_m != m) {
+				if (p->keep_name)
+					p->mi->name = (char**)realloc(p->mi->name, m * sizeof(char*));
+				p->mi->len = (int*)realloc(p->mi->len, m * sizeof(int));
+			}
+			for (i = 0; i < s->n_seq; ++i) {
+				if (p->keep_name)
+					p->mi->name[p->mi->n] = strdup(s->seq[i].name);
+				p->mi->len[p->mi->n++] = s->seq[i].l_seq;
 				s->seq[i].rid = p->n_processed++;
+			}
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: compute sketch
@@ -201,11 +217,12 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_threads)
+mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_threads, int keep_name)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.batch_size = batch_size;
+	pl.keep_name = keep_name;
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return 0;
 	pl.mi = mm_idx_init(w, k, b);
