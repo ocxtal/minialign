@@ -33,7 +33,8 @@ typedef struct {
 	const pipeline_t *p;
     int n_seq;
 	bseq1_t *seq;
-	kvec_t(mm_reg1_t) *reg;
+	int *n_reg;
+	mm_reg1_t **reg;
 	tbuf_t *buf;
 } step_t;
 
@@ -118,7 +119,6 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 			}
 		}
 	}
-	printf(">%s\n", t->name);
 	radix_sort_128x(b->c[0].a, b->c[0].a + b->c[0].n);
 	radix_sort_128x(b->c[1].a, b->c[1].a + b->c[1].n);
 	/*
@@ -134,16 +134,14 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	b->reg.n = 0;
 	get_reg(b, step->p->radius, step->p->min_cnt, mi->k, 0);
 	get_reg(b, step->p->radius, step->p->min_cnt, mi->k, 1);
-	for (j = 0; j < b->reg.n; ++j) {
-		mm_reg1_t *r = &b->reg.a[j];
-		printf("%s\t%d\t%d\t%c\t%d\t%d\t%d\t%d\n", t->name, r->qs, r->qe, "+-"[r->rev], r->rid, r->rs, r->re, r->cnt);
-	}
-	printf("//\n");
+	step->n_reg[i] = b->reg.n;
+	step->reg[i] = (mm_reg1_t*)malloc(b->reg.n * sizeof(mm_reg1_t));
+	memcpy(step->reg[i], b->reg.a, b->reg.n * sizeof(mm_reg1_t));
 }
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
-	int i;
+	int i, j;
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
         step_t *s;
@@ -154,6 +152,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			for (i = 0; i < s->n_seq; ++i)
 				s->seq[i].rid = p->n_processed++;
 			s->buf = (tbuf_t*)calloc(p->n_threads, sizeof(tbuf_t));
+			s->n_reg = (int*)calloc(s->n_seq, sizeof(int));
+			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t**));
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
@@ -161,12 +161,26 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		return in;
     } else if (step == 2) { // step 2: output
         step_t *s = (step_t*)in;
-		for (i = 0; i < p->n_threads; ++i) {
-			free(s->buf[i].a.a);
-			free(s->buf[i].c[0].a);
-			free(s->buf[i].c[1].a);
+		const mm_idx_t *mi = p->mi;
+		for (i = 0; i < p->n_threads; ++i) { // free temporary data
+			tbuf_t *b = &s->buf[i];
+			free(b->a.a); free(b->c[0].a); free(b->c[1].a);
+			free(b->stack.a); free(b->reg.a);
 		}
 		free(s->buf);
+		for (i = 0; i < s->n_seq; ++i) {
+			bseq1_t *t = &s->seq[i];
+			for (j = 0; j < s->n_reg[i]; ++j) {
+				mm_reg1_t *r = &s->reg[i][j];
+				printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
+				if (mi->name) fputs(mi->name[r->rid], stdout);
+				else printf("%d", r->rid + 1);
+				printf("\t%d\t%d\t%d\t%d\n", mi->len[r->rid], r->rs, r->re, r->cnt);
+			}
+			free(s->reg[i]);
+			free(s->seq[i].seq); free(s->seq[i].name);
+		}
+		free(s->reg); free(s->n_reg); free(s->seq);
 		free(s);
 	}
     return 0;

@@ -2,6 +2,7 @@
 #define MINIMAP_H
 
 #include <stdint.h>
+#include <sys/types.h>
 
 typedef struct {
  	uint64_t x, y;
