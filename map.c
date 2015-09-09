@@ -50,7 +50,7 @@ static void get_reg(tbuf_t *b, int radius, int min_cnt, int k, int rev)
 				kv_pushp(mm128_t, b->a, &p);
 				p->x = i - start, p->y = start;
 			}
-			for (j = start + 1; j < i && c->a[i].x - c->a[j].x > radius; ++j);
+			for (++start; start < i && c->a[i].x - c->a[start].x > radius; ++start);
 		}
 	}
 	if (i - start >= min_cnt) { // the last cluster
@@ -118,12 +118,22 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 			}
 		}
 	}
+	printf(">%s\t%ld\n", t->name, b->reg.n);
 	radix_sort_128x(b->c[0].a, b->c[0].a + b->c[0].n);
 	radix_sort_128x(b->c[1].a, b->c[1].a + b->c[1].n);
+	/*
+	for (j = 0; j < 2; ++j) {
+		int k;
+		for (k = 0; k < b->c[j].n; ++k) {
+			uint64_t x = b->c[j].a[k].x;
+			uint32_t off = j == 0? 0x80000000U : 0;
+			printf("%d\t%d\t%c\t%d\n", k, (uint32_t)(x>>32), "+-"[j], (int32_t)((uint32_t)x - off));
+		}
+	}
+	*/
 	b->reg.n = 0;
 	get_reg(b, step->p->d, step->p->m, mi->k, 0);
 	get_reg(b, step->p->d, step->p->m, mi->k, 1);
-	printf(">%s\t%ld\n", t->name, b->reg.n);
 	for (j = 0; j < b->reg.n; ++j) {
 		mm_reg1_t *r = &b->reg.a[j];
 		printf("%s\t%d\t%d\t%c\t%d\t%d\t%d\t%d\n", t->name, r->qs, r->qe, "+-"[r->rev], r->rid, r->rs, r->re, r->cnt);
