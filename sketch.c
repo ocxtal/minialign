@@ -53,6 +53,7 @@ void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 			int z;
 			kmer[0] = (kmer[0] << 2 | c) & mask;           // forward k-mer
 			kmer[1] = (kmer[1] >> 2) | (3ULL^c) << shift1; // reverse k-mer
+			if (kmer[0] == kmer[1]) continue; // skip "symmetric k-mers" as we don't know it strand
 			z = kmer[0] < kmer[1]? 0 : 1; // strand
 			if (++l >= k)
 				info.x = hash64(kmer[z], mask), info.y = (uint64_t)rid<<32 | (uint32_t)i<<1 | z;

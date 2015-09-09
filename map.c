@@ -10,7 +10,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 typedef struct {
 	int batch_size, n_processed, n_threads;
-	int d, m;
+	int radius, min_cnt;
 	uint32_t thres;
 	float f;
 	bseq_file_t *fp;
@@ -118,7 +118,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 			}
 		}
 	}
-	printf(">%s\t%ld\n", t->name, b->reg.n);
+	printf(">%s\n", t->name);
 	radix_sort_128x(b->c[0].a, b->c[0].a + b->c[0].n);
 	radix_sort_128x(b->c[1].a, b->c[1].a + b->c[1].n);
 	/*
@@ -132,8 +132,8 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	}
 	*/
 	b->reg.n = 0;
-	get_reg(b, step->p->d, step->p->m, mi->k, 0);
-	get_reg(b, step->p->d, step->p->m, mi->k, 1);
+	get_reg(b, step->p->radius, step->p->min_cnt, mi->k, 0);
+	get_reg(b, step->p->radius, step->p->min_cnt, mi->k, 1);
 	for (j = 0; j < b->reg.n; ++j) {
 		mm_reg1_t *r = &b->reg.a[j];
 		printf("%s\t%d\t%d\t%c\t%d\t%d\t%d\t%d\n", t->name, r->qs, r->qe, "+-"[r->rev], r->rid, r->rs, r->re, r->cnt);
@@ -172,13 +172,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-int mm_map(const mm_idx_t *idx, const char *fn, int d, int m, float f, int n_threads, int batch_size)
+int mm_map(const mm_idx_t *idx, const char *fn, int radius, int min_cnt, float f, int n_threads, int batch_size)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return -1;
-	pl.mi = idx, pl.d = d, pl.m = m;
+	pl.mi = idx, pl.radius = radius, pl.min_cnt = min_cnt;
 	pl.thres = mm_idx_thres(idx, f);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, pl.thres);

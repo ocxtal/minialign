@@ -37,7 +37,7 @@ mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_
 uint32_t mm_idx_thres(const mm_idx_t *mi, float f);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 
-int mm_map(const mm_idx_t *idx, const char *fn, int d, int m, float f, int n_threads, int batch_size);
+int mm_map(const mm_idx_t *idx, const char *fn, int radius, int min_cnt, float f, int n_threads, int batch_size);
 
 double cputime(void);
 double realtime(void);
