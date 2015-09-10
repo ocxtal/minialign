@@ -1,4 +1,6 @@
 #include <stdlib.h>
+#include <assert.h>
+#include <stdio.h>
 #include "minimap.h"
 #include "kvec.h"
 #include "khash.h"
@@ -116,6 +118,7 @@ static void worker_post(void *g, long i, int tid)
 			int absent;
 			mm128_t *p = &b->a.a[j-1];
 			itr = kh_put(idx, h, p->x>>mi->b<<1, &absent);
+			assert(absent && j - start_a == n);
 			if (n == 1) {
 				kh_key(h, itr) |= 1;
 				kh_val(h, itr) = p->y;
@@ -146,7 +149,6 @@ static void mm_idx_post(mm_idx_t *mi, int n_threads)
  ******************/
 
 #include <string.h>
-#include <stdio.h>
 #include <zlib.h>
 #include "bseq.h"
 

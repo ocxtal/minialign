@@ -93,7 +93,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	bseq1_t *t = &step->seq[i];
 	tbuf_t *b = &step->buf[tid];
 	const mm_idx_t *mi = step->p->mi;
-	int j, N = 0;
+	int j;
 
 	b->a.n = b->c[0].n = b->c[1].n = 0;
 	mm_sketch(t->seq, t->l_seq, mi->w, mi->k, t->rid, &b->a);
@@ -102,11 +102,12 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->a.a[j].y>>1, strand = b->a.a[j].y&1;
 		r = mm_idx_get(mi, b->a.a[j].x, &n);
-		N += n;
+		printf("C\t%d\t%d\t%lx\n", (uint32_t)b->a.a[j].y>>1, n, (long)b->a.a[j].x);
 		if (n > step->p->thres) continue;
 		for (k = 0; k < n; ++k) {
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
+			printf("M\t%d\t%s\t%d\t%c\n", (uint32_t)b->a.a[j].y>>1, mi->name[r[k]>>32], rpos, "+-"[(b->a.a[j].y&1) != (r[k]&1)]);
 			if ((r[k]&1) == strand) {
 				kv_pushp(mm128_t, b->c[0], &p);
 				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);
@@ -120,16 +121,18 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	}
 	radix_sort_128x(b->c[0].a, b->c[0].a + b->c[0].n);
 	radix_sort_128x(b->c[1].a, b->c[1].a + b->c[1].n);
-	/*
-	for (j = 0; j < 2; ++j) {
-		int k;
-		for (k = 0; k < b->c[j].n; ++k) {
-			uint64_t x = b->c[j].a[k].x;
-			uint32_t off = j == 0? 0x80000000U : 0;
-			printf("%d\t%d\t%c\t%d\n", k, (uint32_t)(x>>32), "+-"[j], (int32_t)((uint32_t)x - off));
+	if (mm_verbose >= 5) {
+		/*
+		for (j = 0; j < 2; ++j) {
+			int k;
+			for (k = 0; k < b->c[j].n; ++k) {
+				uint64_t x = b->c[j].a[k].x;
+				uint32_t off = j == 0? 0x80000000U : 0;
+				printf("%d\t%d\t%c\t%d\n", k, (uint32_t)(x>>32), "+-"[j], (int32_t)((uint32_t)x - off));
+			}
 		}
+		*/
 	}
-	*/
 	b->reg.n = 0;
 	get_reg(b, step->p->radius, step->p->min_cnt, mi->k, 0);
 	get_reg(b, step->p->radius, step->p->min_cnt, mi->k, 1);
