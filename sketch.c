@@ -83,5 +83,6 @@ void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 		}
 		if (++buf_pos == w) buf_pos = 0;
 	}
-	kv_push(mm128_t, *p, min);
+	if (min.x != UINT64_MAX)
+		kv_push(mm128_t, *p, min);
 }

@@ -127,12 +127,13 @@ static void worker_post(void *g, long i, int tid)
 				for (k = 0; k < n; ++k)
 					b->p[start_p + k] = b->a.a[start_a + k].y;
 				kh_val(h, itr) = (uint64_t)start_p<<32 | n;
-				start_p += k;
+				start_p += n;
 			}
 			start_a = j, n = 1;
 		} else ++n;
 	}
 	b->h = h;
+	assert(b->n == start_p);
 
 	// deallocate and clear b->a
 	free(b->a.a);
