@@ -102,12 +102,12 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->a.a[j].y>>1, strand = b->a.a[j].y&1;
 		r = mm_idx_get(mi, b->a.a[j].x, &n);
-		printf("C\t%d\t%d\t%lx\n", (uint32_t)b->a.a[j].y>>1, n, (long)b->a.a[j].x);
+		//printf("C\t%d\t%d\t%lx\n", (uint32_t)b->a.a[j].y>>1, n, (long)b->a.a[j].x);
 		if (n > step->p->thres) continue;
 		for (k = 0; k < n; ++k) {
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
-			printf("M\t%d\t%s\t%d\t%c\n", (uint32_t)b->a.a[j].y>>1, mi->name[r[k]>>32], rpos, "+-"[(b->a.a[j].y&1) != (r[k]&1)]);
+			//printf("M\t%d\t%s\t%d\t%c\n", (uint32_t)b->a.a[j].y>>1, mi->name[r[k]>>32], rpos, "+-"[(b->a.a[j].y&1) != (r[k]&1)]);
 			if ((r[k]&1) == strand) {
 				kv_pushp(mm128_t, b->c[0], &p);
 				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);

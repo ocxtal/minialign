@@ -157,13 +157,13 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 typedef struct {
 	int batch_size, n_processed, keep_name;
 	bseq_file_t *fp;
-	mm128_v a;
 	mm_idx_t *mi;
 } pipeline_t;
 
 typedef struct {
     int n_seq;
 	bseq1_t *seq;
+	mm128_v a;
 } step_t;
 
 static void mm_idx_add(mm_idx_t *mi, int n, const mm128_t *a)
@@ -202,19 +202,17 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		} else free(s);
     } else if (step == 1) { // step 1: compute sketch
         step_t *s = (step_t*)in;
-		p->a.n = 0;
 		for (i = 0; i < s->n_seq; ++i) {
 			bseq1_t *t = &s->seq[i];
-			mm_sketch(t->seq, t->l_seq, p->mi->w, p->mi->k, t->rid, &p->a);
+			mm_sketch(t->seq, t->l_seq, p->mi->w, p->mi->k, t->rid, &s->a);
 			free(t->seq); free(t->name);
 		}
-		free(s->seq);
+		free(s->seq); s->seq = 0;
 		return s;
     } else if (step == 2) { // dispatch sketch to buckets
         step_t *s = (step_t*)in;
-		mm_idx_add(p->mi, p->a.n, p->a.a);
-		p->a.n = 0;
-		free(s);
+		mm_idx_add(p->mi, s->a.n, s->a.a);
+		free(s->a.a); free(s);
 	}
     return 0;
 }
@@ -231,7 +229,6 @@ mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_
 
 	kt_pipeline(n_threads < 3? n_threads : 3, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);
-	free(pl.a.a);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
