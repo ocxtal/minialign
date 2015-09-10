@@ -69,7 +69,7 @@ static void get_reg(tbuf_t *b, int radius, int min_cnt, int k)
 		if (cnt < min_cnt) continue;
 		while (c->a[start].x == UINT64_MAX) ++start; // we do this as we need the first to be present
 		kv_pushp(mm_reg1_t, b->reg, &r);
-		r->cnt = cnt, r->rid = c->a[start].x<<1>>33, r->rev = c->a[start].x>>1;
+		r->cnt = cnt, r->rid = c->a[start].x<<1>>33, r->rev = c->a[start].x>>63;
 		r->qs = r->rs = INT32_MAX; r->qe = r->re = 0;
 		for (j = start; j < end; ++j) {
 			int qpos, rpos;
