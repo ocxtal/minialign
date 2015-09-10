@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <assert.h>
 #include "bseq.h"
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
@@ -40,6 +41,7 @@ bseq1_t *bseq_read(bseq_file_t *fp, int chunk_size, int *n_)
 	m = n = 0; seqs = 0;
 	while (kseq_read(ks) >= 0) {
 		bseq1_t *s;
+		assert(ks->seq.l <= INT32_MAX);
 		if (n >= m) {
 			m = m? m<<1 : 256;
 			seqs = (bseq1_t*)realloc(seqs, m * sizeof(bseq1_t));

@@ -185,6 +185,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		s->seq = bseq_read(p->fp, p->batch_size, &s->n_seq);
 		if (s->seq) {
 			uint32_t old_m = p->mi->n, m, n;
+			assert((uint64_t)p->n_processed + s->n_seq <= INT32_MAX);
 			m = n = p->mi->n + s->n_seq;
 			kroundup32(m); kroundup32(old_m);
 			if (old_m != m) {

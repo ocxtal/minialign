@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r35"
+#define MM_VERSION "r39"
 
 void liftrlimit()
 {
@@ -20,7 +20,7 @@ void liftrlimit()
 
 int main(int argc, char *argv[])
 {
-	int i, c, k = 17, w = -1, b = 14, radius = 100, min_cnt = 3, n_threads = 3, batch_size = 10000000, keep_name = 1;
+	int i, c, k = 15, w = -1, b = 14, radius = 1000, min_cnt = 3, n_threads = 3, batch_size = 10000000, keep_name = 1;
 	float f = 0.005;
 	mm_idx_t *mi = 0;
 

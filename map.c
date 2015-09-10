@@ -24,7 +24,7 @@ typedef struct {
 } mm_reg1_t;
 
 typedef struct { // per-thread buffer
-	mm128_v a, c[2];
+	mm128_v mini, coef, intv;
 	uint64_v stack;
 	kvec_t(mm_reg1_t) reg;
 } tbuf_t;
@@ -38,30 +38,30 @@ typedef struct {
 	tbuf_t *buf;
 } step_t;
 
-static void get_reg(tbuf_t *b, int radius, int min_cnt, int k, int rev)
+static void get_reg(tbuf_t *b, int radius, int min_cnt, int k)
 {
-	mm128_v *c = &b->c[rev];
+	mm128_v *c = &b->coef;
 	mm128_t *p;
 	int i, j, start = 0;
 	if (c->n < min_cnt) return;
-	b->a.n = 0;
+	b->intv.n = 0;
 	for (i = 1; i < c->n; ++i) { // identify all (possibly overlapping) clusters within _radius_
 		if (c->a[i].x - c->a[start].x > radius) {
 			if (i - start >= min_cnt) {
-				kv_pushp(mm128_t, b->a, &p);
+				kv_pushp(mm128_t, b->intv, &p);
 				p->x = i - start, p->y = start;
 			}
 			for (++start; start < i && c->a[i].x - c->a[start].x > radius; ++start);
 		}
 	}
 	if (i - start >= min_cnt) { // the last cluster
-		kv_pushp(mm128_t, b->a, &p);
+		kv_pushp(mm128_t, b->intv, &p);
 		p->x = i - start, p->y = start;
 	}
-	radix_sort_128x(b->a.a, b->a.a + b->a.n); // sort by the size of the cluster
-	for (i = b->a.n - 1; i >= 0; --i) { // starting from the largest cluster
-		int start = b->a.a[i].y;
-		int end = start + b->a.a[i].x;
+	radix_sort_128x(b->intv.a, b->intv.a + b->intv.n); // sort by the size of the cluster
+	for (i = b->intv.n - 1; i >= 0; --i) { // starting from the largest cluster
+		int start = b->intv.a[i].y;
+		int end = start + b->intv.a[i].x;
 		int cnt = 0;
 		mm_reg1_t *r;
 		for (j = start; j < end; ++j) // exclude minimizer hits that have been used in larger clusters
@@ -69,7 +69,7 @@ static void get_reg(tbuf_t *b, int radius, int min_cnt, int k, int rev)
 		if (cnt < min_cnt) continue;
 		while (c->a[start].x == UINT64_MAX) ++start; // we do this as we need the first to be present
 		kv_pushp(mm_reg1_t, b->reg, &r);
-		r->cnt = cnt, r->rid = c->a[start].x>>32, r->rev = rev;
+		r->cnt = cnt, r->rid = c->a[start].x<<1>>33, r->rev = c->a[start].x>>1;
 		r->qs = r->rs = INT32_MAX; r->qe = r->re = 0;
 		for (j = start; j < end; ++j) {
 			int qpos, rpos;
@@ -95,32 +95,30 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	const mm_idx_t *mi = step->p->mi;
 	int j;
 
-	b->a.n = b->c[0].n = b->c[1].n = 0;
-	mm_sketch(t->seq, t->l_seq, mi->w, mi->k, t->rid, &b->a);
-	for (j = 0; j < b->a.n; ++j) {
+	b->mini.n = b->coef.n = 0;
+	mm_sketch(t->seq, t->l_seq, mi->w, mi->k, t->rid, &b->mini);
+	for (j = 0; j < b->mini.n; ++j) {
 		int k, n;
 		const uint64_t *r;
-		int32_t qpos = (uint32_t)b->a.a[j].y>>1, strand = b->a.a[j].y&1;
-		r = mm_idx_get(mi, b->a.a[j].x, &n);
+		int32_t qpos = (uint32_t)b->mini.a[j].y>>1, strand = b->mini.a[j].y&1;
+		r = mm_idx_get(mi, b->mini.a[j].x, &n);
 		//printf("C\t%d\t%d\t%lx\n", (uint32_t)b->a.a[j].y>>1, n, (long)b->a.a[j].x);
 		if (n > step->p->thres) continue;
 		for (k = 0; k < n; ++k) {
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
 			//printf("M\t%d\t%s\t%d\t%c\n", (uint32_t)b->a.a[j].y>>1, mi->name[r[k]>>32], rpos, "+-"[(b->a.a[j].y&1) != (r[k]&1)]);
-			if ((r[k]&1) == strand) {
-				kv_pushp(mm128_t, b->c[0], &p);
+			kv_pushp(mm128_t, b->coef, &p);
+			if ((r[k]&1) == strand) { // forward strand
 				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);
 				p->y = (uint64_t)qpos << 32 | rpos;
-			} else {
-				kv_pushp(mm128_t, b->c[1], &p);
-				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos);
+			} else { // reverse strand
+				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos) | 1ULL<<63;
 				p->y = (uint64_t)qpos << 32 | rpos;
 			}
 		}
 	}
-	radix_sort_128x(b->c[0].a, b->c[0].a + b->c[0].n);
-	radix_sort_128x(b->c[1].a, b->c[1].a + b->c[1].n);
+	radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
 	if (mm_verbose >= 5) {
 		/*
 		for (j = 0; j < 2; ++j) {
@@ -134,8 +132,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		*/
 	}
 	b->reg.n = 0;
-	get_reg(b, step->p->radius, step->p->min_cnt, mi->k, 0);
-	get_reg(b, step->p->radius, step->p->min_cnt, mi->k, 1);
+	get_reg(b, step->p->radius, step->p->min_cnt, mi->k);
 	step->n_reg[i] = b->reg.n;
 	step->reg[i] = (mm_reg1_t*)malloc(b->reg.n * sizeof(mm_reg1_t));
 	memcpy(step->reg[i], b->reg.a, b->reg.n * sizeof(mm_reg1_t));
@@ -166,7 +163,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		const mm_idx_t *mi = p->mi;
 		for (i = 0; i < p->n_threads; ++i) { // free temporary data
 			tbuf_t *b = &s->buf[i];
-			free(b->a.a); free(b->c[0].a); free(b->c[1].a);
+			free(b->mini.a); free(b->coef.a); free(b->intv.a);
 			free(b->stack.a); free(b->reg.a);
 		}
 		free(s->buf);
