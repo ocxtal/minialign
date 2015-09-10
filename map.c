@@ -102,12 +102,10 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->mini.a[j].y>>1, strand = b->mini.a[j].y&1;
 		r = mm_idx_get(mi, b->mini.a[j].x, &n);
-		//printf("C\t%d\t%d\t%lx\n", (uint32_t)b->a.a[j].y>>1, n, (long)b->a.a[j].x);
 		if (n > step->p->thres) continue;
 		for (k = 0; k < n; ++k) {
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
-			//printf("M\t%d\t%s\t%d\t%c\n", (uint32_t)b->a.a[j].y>>1, mi->name[r[k]>>32], rpos, "+-"[(b->a.a[j].y&1) != (r[k]&1)]);
 			kv_pushp(mm128_t, b->coef, &p);
 			if ((r[k]&1) == strand) { // forward strand
 				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);
@@ -119,17 +117,14 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		}
 	}
 	radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
-	if (mm_verbose >= 5) {
-		/*
-		for (j = 0; j < 2; ++j) {
-			int k;
-			for (k = 0; k < b->c[j].n; ++k) {
-				uint64_t x = b->c[j].a[k].x;
-				uint32_t off = j == 0? 0x80000000U : 0;
-				printf("%d\t%d\t%c\t%d\n", k, (uint32_t)(x>>32), "+-"[j], (int32_t)((uint32_t)x - off));
-			}
+	if (mm_verbose >= 5) { // NB: the following block may be corrupted by multi-threading
+		printf(">%s\n", t->name);
+		for (j = 0; j < b->coef.n; ++j) {
+			uint64_t x = b->coef.a[j].x;
+			uint32_t off = x>>63 == 0? 0x80000000U : 0;
+			printf("%d\t%d\t%c\t%d\n", j, (uint32_t)(x<<1>>33), "+-"[x>>63], (int32_t)((uint32_t)x - off));
 		}
-		*/
+		printf("//\n");
 	}
 	b->reg.n = 0;
 	get_reg(b, step->p->radius, step->p->min_cnt, mi->k);
