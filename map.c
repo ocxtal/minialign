@@ -38,26 +38,35 @@ typedef struct {
 	tbuf_t *buf;
 } step_t;
 
+static inline void push_intv(mm128_v *intv, int start, int end)
+{
+	mm128_t *p;
+	if (intv->n > 0) {
+		int last_start, last_end;
+		p = &intv->a[intv->n-1];
+		last_start = p->y, last_end = p->x + last_start;
+		if (last_end > start && (last_end - start) > (end - last_start)>>1) {
+			p->x = end - last_start;
+			return;
+		}
+	}
+	kv_pushp(mm128_t, *intv, &p);
+	p->x = end - start, p->y = start;
+}
+
 static void get_reg(tbuf_t *b, int radius, int min_cnt, int k)
 {
 	mm128_v *c = &b->coef;
-	mm128_t *p;
 	int i, j, start = 0;
 	if (c->n < min_cnt) return;
 	b->intv.n = 0;
 	for (i = 1; i < c->n; ++i) { // identify all (possibly overlapping) clusters within _radius_
 		if (c->a[i].x - c->a[start].x > radius) {
-			if (i - start >= min_cnt) {
-				kv_pushp(mm128_t, b->intv, &p);
-				p->x = i - start, p->y = start;
-			}
+			if (i - start >= min_cnt) push_intv(&b->intv, start, i);
 			for (++start; start < i && c->a[i].x - c->a[start].x > radius; ++start);
 		}
 	}
-	if (i - start >= min_cnt) { // the last cluster
-		kv_pushp(mm128_t, b->intv, &p);
-		p->x = i - start, p->y = start;
-	}
+	if (i - start >= min_cnt) push_intv(&b->intv, start, i);
 	radix_sort_128x(b->intv.a, b->intv.a + b->intv.n); // sort by the size of the cluster
 	for (i = b->intv.n - 1; i >= 0; --i) { // starting from the largest cluster
 		int start = b->intv.a[i].y;
