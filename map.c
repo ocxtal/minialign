@@ -42,10 +42,11 @@ static inline void push_intv(mm128_v *intv, int start, int end)
 {
 	mm128_t *p;
 	if (intv->n > 0) {
-		int last_start, last_end;
+		int last_start, last_end, min;
 		p = &intv->a[intv->n-1];
 		last_start = p->y, last_end = p->x + last_start;
-		if (last_end > start && (last_end - start) > (end - last_start)>>1) {
+		min = end - start < last_end - last_start? end - start : last_end - last_start;
+		if (last_end > start && last_end - start > min>>1 + min>>2) {
 			p->x = end - last_start;
 			return;
 		}
