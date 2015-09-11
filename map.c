@@ -10,7 +10,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 typedef struct {
 	int batch_size, n_processed, n_threads;
-	int radius, min_cnt;
+	int radius, max_gap, min_cnt;
 	uint32_t thres;
 	float f;
 	bseq_file_t *fp;
@@ -27,7 +27,7 @@ typedef struct { // per-thread buffer
 	mm128_v mini, coef, intv;
 	uint64_v stack;
 	kvec_t(mm_reg1_t) reg;
-	int n, m;
+	uint32_t n, m;
 	uint64_t *a;
 	size_t *b, *p;
 } tbuf_t;
@@ -41,6 +41,50 @@ typedef struct {
 	tbuf_t *buf;
 } step_t;
 
+#include "ksort.h"
+#define sort_key_64(a) (a)
+KRADIX_SORT_INIT(64, uint64_t, sort_key_64, 8) 
+#define lt_low32(a, b) ((uint32_t)(a) < (uint32_t)(b))
+KSORT_INIT(low32lt, uint64_t, lt_low32)
+#define gt_low32(a, b) ((uint32_t)(a) > (uint32_t)(b))
+KSORT_INIT(low32gt, uint64_t, gt_low32)
+
+static void proc_intv(tbuf_t *b, int which, int k, int min_cnt, int max_gap)
+{
+	int i, l_lis, rid = -1, rev = 0, start = b->intv.a[which].y, end = start + b->intv.a[which].x;
+	if (end - start > b->m) {
+		b->m = end - start;
+		kv_roundup32(b->m);
+		b->a = (uint64_t*)realloc(b->a, b->m * 8);
+		b->b = (size_t*)realloc(b->b, b->m * sizeof(size_t));
+		b->p = (size_t*)realloc(b->p, b->m * sizeof(size_t));
+	}
+	b->n = 0;
+	for (i = start; i < end; ++i)
+		if (b->coef.a[i].x != UINT64_MAX)
+			b->a[b->n++] = b->coef.a[i].y, rid = b->coef.a[i].x << 1 >> 33, rev = b->coef.a[i].x >> 63;
+	if (b->n < min_cnt) return;
+	radix_sort_64(b->a, b->a + b->n);
+	l_lis = rev? ks_lis_low32gt(b->n, b->a, b->b, b->p) : ks_lis_low32lt(b->n, b->a, b->b, b->p);
+	if (l_lis < min_cnt) return;
+	for (i = 1, start = 0; i <= l_lis; ++i) {
+		if (i == l_lis || ((b->a[b->b[i]]>>32) - (b->a[b->b[i-1]]>>32) > max_gap && abs((int32_t)b->a[b->b[i]] - (int32_t)b->a[b->b[i-1]]) > max_gap)) {
+			if (i - start >= min_cnt) {
+				mm_reg1_t *r;
+				kv_pushp(mm_reg1_t, b->reg, &r);
+				r->rid = rid, r->rev = rev, r->cnt = i - start;
+				r->qs = (b->a[b->b[start]]>>32) - (k - 1);
+				r->qe = (b->a[b->b[i-1]]>>32) + 1;
+				r->rs = rev? (uint32_t)b->a[b->b[i-1]] : (uint32_t)b->a[b->b[start]];
+				r->re = rev? (uint32_t)b->a[b->b[start]] : (uint32_t)b->a[b->b[i-1]];
+				r->rs -= k - 1;
+				r->re += 1;
+			}
+			start = i;
+		}
+	}
+}
+
 static inline void push_intv(mm128_v *intv, int start, int end)
 {
 	mm128_t *p;
@@ -49,7 +93,7 @@ static inline void push_intv(mm128_v *intv, int start, int end)
 		p = &intv->a[intv->n-1];
 		last_start = p->y, last_end = p->x + last_start;
 		min = end - start < last_end - last_start? end - start : last_end - last_start;
-		if (last_end > start && last_end - start > min>>1 + min>>2) {
+		if (last_end > start && last_end - start > (min>>1) + (min>>2)) {
 			p->x = end - last_start;
 			return;
 		}
@@ -58,10 +102,10 @@ static inline void push_intv(mm128_v *intv, int start, int end)
 	p->x = end - start, p->y = start;
 }
 
-static void get_reg(tbuf_t *b, int radius, int min_cnt, int k)
+static void get_reg(tbuf_t *b, int radius, int k, int min_cnt, int max_gap)
 {
 	mm128_v *c = &b->coef;
-	int i, j, start = 0;
+	int i, start = 0;
 	if (c->n < min_cnt) return;
 	b->intv.n = 0;
 	for (i = 1; i < c->n; ++i) { // identify all (possibly overlapping) clusters within _radius_
@@ -72,32 +116,7 @@ static void get_reg(tbuf_t *b, int radius, int min_cnt, int k)
 	}
 	if (i - start >= min_cnt) push_intv(&b->intv, start, i);
 	radix_sort_128x(b->intv.a, b->intv.a + b->intv.n); // sort by the size of the cluster
-	for (i = b->intv.n - 1; i >= 0; --i) { // starting from the largest cluster
-		int start = b->intv.a[i].y;
-		int end = start + b->intv.a[i].x;
-		int cnt = 0;
-		mm_reg1_t *r;
-		for (j = start; j < end; ++j) // exclude minimizer hits that have been used in larger clusters
-			if (c->a[j].x != UINT64_MAX) ++cnt;
-		if (cnt < min_cnt) continue;
-		while (c->a[start].x == UINT64_MAX) ++start; // we do this as we need the first to be present
-		kv_pushp(mm_reg1_t, b->reg, &r);
-		r->cnt = cnt, r->rid = c->a[start].x<<1>>33, r->rev = c->a[start].x>>63;
-		r->qs = r->rs = INT32_MAX; r->qe = r->re = 0;
-		for (j = start; j < end; ++j) {
-			int qpos, rpos;
-			if (c->a[j].x == UINT64_MAX) continue;
-			qpos = c->a[j].y>>32;
-			rpos = (int32_t)c->a[j].y;
-			r->qs = r->qs < qpos? r->qs : qpos;
-			r->rs = r->rs < rpos? r->rs : rpos;
-			r->qe = r->qe > qpos? r->qe : qpos;
-			r->re = r->re > rpos? r->re : rpos;
-			c->a[j].x = UINT64_MAX; // mark the minimizer hit having been used
-		}
-		r->qs -= k - 1, ++r->qe; // we need to correct for k
-		r->rs -= k - 1, ++r->re;
-	}
+	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap);
 }
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
@@ -140,7 +159,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		printf("//\n");
 	}
 	b->reg.n = 0;
-	get_reg(b, step->p->radius, step->p->min_cnt, mi->k);
+	get_reg(b, step->p->radius, mi->k, step->p->min_cnt, step->p->max_gap);
 	step->n_reg[i] = b->reg.n;
 	step->reg[i] = (mm_reg1_t*)malloc(b->reg.n * sizeof(mm_reg1_t));
 	memcpy(step->reg[i], b->reg.a, b->reg.n * sizeof(mm_reg1_t));
@@ -194,13 +213,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-int mm_map(const mm_idx_t *idx, const char *fn, int radius, int min_cnt, float f, int n_threads, int batch_size)
+int mm_map(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, float f, int n_threads, int batch_size)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return -1;
-	pl.mi = idx, pl.radius = radius, pl.min_cnt = min_cnt;
+	pl.mi = idx, pl.radius = radius, pl.min_cnt = min_cnt, pl.max_gap = max_gap;
 	pl.thres = mm_idx_thres(idx, f);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, pl.thres);

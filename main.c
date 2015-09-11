@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r43"
+#define MM_VERSION "r47"
 
 void liftrlimit()
 {
@@ -20,14 +20,14 @@ void liftrlimit()
 
 int main(int argc, char *argv[])
 {
-	int i, c, k = 15, w = -1, b = 14, radius = 500, min_cnt = 3, n_threads = 3, batch_size = 10000000, keep_name = 1;
+	int i, c, k = 15, w = -1, b = 14, radius = 500, max_gap = 10000, min_cnt = 3, n_threads = 3, batch_size = 10000000, keep_name = 1;
 	float f = 0.001;
 	mm_idx_t *mi = 0;
 
 	liftrlimit();
 	mm_realtime0 = realtime();
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:N")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -37,6 +37,7 @@ int main(int argc, char *argv[])
 		else if (c == 't') n_threads = atoi(optarg);
 		else if (c == 'B') batch_size = atoi(optarg);
 		else if (c == 'v') mm_verbose = atoi(optarg);
+		else if (c == 'g') max_gap = atoi(optarg);
 		else if (c == 'N') keep_name = 0;
 		else if (c == 'V') {
 			puts(MM_VERSION);
@@ -55,6 +56,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  -r INT     bandwidth [%d]\n", radius);
 		fprintf(stderr, "  -c INT     min minimizer match count [%d]\n", min_cnt);
 		fprintf(stderr, "  -f FLOAT   minimizer filteration threshold [%.3f]\n", f);
+		fprintf(stderr, "  -g INT     break a chain if there is a gap longer than INT [%d]\n", max_gap);
 		fprintf(stderr, "  -B INT     batch size [%d]\n", batch_size);
 		fprintf(stderr, "  -v INT     verbose level [%d]\n", mm_verbose);
 		fprintf(stderr, "  -N         use integer as target names\n");
@@ -64,7 +66,7 @@ int main(int argc, char *argv[])
 
 	mi = mm_idx_gen(argv[optind], w, k, b, batch_size, n_threads, keep_name);
 	if (argc - optind >= 2)
-		mm_map(mi, argv[optind+1], radius, min_cnt, f, n_threads, batch_size);
+		mm_map(mi, argv[optind+1], radius, max_gap, min_cnt, f, n_threads, batch_size);
 	mm_idx_destroy(mi);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);
