@@ -27,6 +27,9 @@ typedef struct { // per-thread buffer
 	mm128_v mini, coef, intv;
 	uint64_v stack;
 	kvec_t(mm_reg1_t) reg;
+	int n, m;
+	uint64_t *a;
+	size_t *b, *p;
 } tbuf_t;
 
 typedef struct {
@@ -170,6 +173,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			tbuf_t *b = &s->buf[i];
 			free(b->mini.a); free(b->coef.a); free(b->intv.a);
 			free(b->stack.a); free(b->reg.a);
+			free(b->a); free(b->b); free(b->p);
 		}
 		free(s->buf);
 		for (i = 0; i < s->n_seq; ++i) {
