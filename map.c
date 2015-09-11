@@ -51,7 +51,7 @@ KSORT_INIT(low32gt, uint64_t, gt_low32)
 
 static void proc_intv(tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 {
-	int i, l_lis, rid = -1, rev = 0, start = b->intv.a[which].y, end = start + b->intv.a[which].x;
+	int i, j, l_lis, rid = -1, rev = 0, start = b->intv.a[which].y, end = start + b->intv.a[which].x;
 	if (end - start > b->m) {
 		b->m = end - start;
 		kv_roundup32(b->m);
@@ -66,6 +66,11 @@ static void proc_intv(tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 	if (b->n < min_cnt) return;
 	radix_sort_64(b->a, b->a + b->n);
 	l_lis = rev? ks_lis_low32gt(b->n, b->a, b->b, b->p) : ks_lis_low32lt(b->n, b->a, b->b, b->p);
+	if (l_lis < min_cnt) return;
+	for (i = 1, j = 1; i < l_lis; ++i)
+		if (b->a[b->b[i]]>>32 != b->a[b->b[i-1]]>>32)
+			b->a[b->b[j++]] = b->a[b->b[i]];
+	l_lis = j;
 	if (l_lis < min_cnt) return;
 	for (i = 1, start = 0; i <= l_lis; ++i) {
 		if (i == l_lis || ((b->a[b->b[i]]>>32) - (b->a[b->b[i-1]]>>32) > max_gap && abs((int32_t)b->a[b->b[i]] - (int32_t)b->a[b->b[i-1]]) > max_gap)) {
