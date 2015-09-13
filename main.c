@@ -20,7 +20,7 @@ void liftrlimit()
 
 int main(int argc, char *argv[])
 {
-	int i, c, k = 15, w = -1, b = 14, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, batch_size = 10000000, keep_name = 1;
+	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, batch_size = 10000000, keep_name = 1;
 	float f = 0.001;
 	mm_idx_t *mi = 0;
 
@@ -56,8 +56,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  Mapping:\n");
 		fprintf(stderr, "    -f FLOAT   filter out top FLOAT fraction of repetitive minimizers [%.3f]\n", f);
 		fprintf(stderr, "    -r INT     bandwidth [%d]\n", radius);
-		fprintf(stderr, "    -c INT     min minimizer match count [%d]\n", min_cnt);
-		fprintf(stderr, "    -g INT     break a chain if there is a gap longer than INT [%d]\n", max_gap);
+		fprintf(stderr, "    -c INT     retain a mapping if it consists of >=INT minimizers [%d]\n", min_cnt);
+		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", max_gap);
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
 		fprintf(stderr, "    -B INT     batch size [%d]\n", batch_size);

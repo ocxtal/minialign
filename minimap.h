@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include <sys/types.h>
 
+#define MM_IDX_DEF_B 14
+
 typedef struct {
  	uint64_t x, y;
 } mm128_t;
