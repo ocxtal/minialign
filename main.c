@@ -54,7 +54,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -w INT     minizer window size [same as -k]\n");
 		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b);
 		fprintf(stderr, "  Mapping:\n");
-		fprintf(stderr, "    -f FLOAT   minimizer filteration threshold [%.3f]\n", f);
+		fprintf(stderr, "    -f FLOAT   filter out top FLOAT fraction of repetitive minimizers [%.3f]\n", f);
 		fprintf(stderr, "    -r INT     bandwidth [%d]\n", radius);
 		fprintf(stderr, "    -c INT     min minimizer match count [%d]\n", min_cnt);
 		fprintf(stderr, "    -g INT     break a chain if there is a gap longer than INT [%d]\n", max_gap);
