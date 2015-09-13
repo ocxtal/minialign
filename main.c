@@ -66,7 +66,7 @@ int main(int argc, char *argv[])
 
 	mi = mm_idx_gen(argv[optind], w, k, b, batch_size, n_threads, keep_name);
 	if (argc - optind >= 2)
-		mm_map(mi, argv[optind+1], radius, max_gap, min_cnt, f, n_threads, batch_size);
+		mm_map_file(mi, argv[optind+1], radius, max_gap, min_cnt, f, n_threads, batch_size);
 	mm_idx_destroy(mi);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);

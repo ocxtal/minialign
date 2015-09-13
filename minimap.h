@@ -26,8 +26,17 @@ typedef struct {
 	char **name; // TODO: if this uses too much RAM, switch one concatenated string
 } mm_idx_t;
 
+typedef struct {
+	uint32_t cnt:31, rev:1;
+	int32_t rid;
+	int32_t qs, qe, rs, re;
+} mm_reg1_t;
+
 extern int mm_verbose;
 extern double mm_realtime0;
+
+struct mm_tbuf_s;
+typedef struct mm_tbuf_s mm_tbuf_t;
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,7 +50,8 @@ mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_
 uint32_t mm_idx_thres(const mm_idx_t *mi, float f);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 
-int mm_map(const mm_idx_t *idx, const char *fn, int radius, int min_cnt, int max_gap, float f, int n_threads, int batch_size);
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int max_occ, int radius, int min_cnt, int max_gap);
+int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, float f, int n_threads, int batch_size);
 
 double cputime(void);
 double realtime(void);

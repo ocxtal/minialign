@@ -5,41 +5,25 @@
 #include "kvec.h"
 #include "minimap.h"
 
-void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
-void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
+/****************************
+ * Find approxiate mappings *
+ ****************************/
 
-typedef struct {
-	int batch_size, n_processed, n_threads;
-	int radius, max_gap, min_cnt;
-	uint32_t thres;
-	float f;
-	bseq_file_t *fp;
-	const mm_idx_t *mi;
-} pipeline_t;
-
-typedef struct {
-	uint32_t cnt:31, rev:1;
-	int32_t rid;
-	int32_t qs, qe, rs, re;
-} mm_reg1_t;
-
-typedef struct { // per-thread buffer
+struct mm_tbuf_s { // per-thread buffer
 	mm128_v mini, coef, intv;
 	uint64_v stack;
 	kvec_t(mm_reg1_t) reg;
 	uint32_t n, m;
 	uint64_t *a;
 	size_t *b, *p;
-} tbuf_t;
+};
 
-typedef struct {
-	const pipeline_t *p;
-    int n_seq;
-	bseq1_t *seq;
-	int *n_reg;
-	mm_reg1_t **reg;
-	tbuf_t *buf;
-} step_t;
+void mm_tbuf_free(mm_tbuf_t *b)
+{
+	if (b == 0) return;
+	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->stack.a); free(b->reg.a);
+	free(b->a); free(b->b); free(b->p);
+}
 
 #include "ksort.h"
 #define sort_key_64(a) (a)
@@ -49,7 +33,7 @@ KSORT_INIT(low32lt, uint64_t, lt_low32)
 #define gt_low32(a, b) ((uint32_t)(a) > (uint32_t)(b))
 KSORT_INIT(low32gt, uint64_t, gt_low32)
 
-static void proc_intv(tbuf_t *b, int which, int k, int min_cnt, int max_gap)
+static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 {
 	int i, j, l_lis, rid = -1, rev = 0, start = b->intv.a[which].y, end = start + b->intv.a[which].x;
 	if (end - start > b->m) {
@@ -107,7 +91,7 @@ static inline void push_intv(mm128_v *intv, int start, int end)
 	p->x = end - start, p->y = start;
 }
 
-static void get_reg(tbuf_t *b, int radius, int k, int min_cnt, int max_gap)
+static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap)
 {
 	mm128_v *c = &b->coef;
 	int i, start = 0;
@@ -124,22 +108,18 @@ static void get_reg(tbuf_t *b, int radius, int k, int min_cnt, int max_gap)
 	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap);
 }
 
-static void worker_for(void *_data, long i, int tid) // kt_for() callback
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int max_occ, int radius, int min_cnt, int max_gap)
 {
-    step_t *step = (step_t*)_data;
-	bseq1_t *t = &step->seq[i];
-	tbuf_t *b = &step->buf[tid];
-	const mm_idx_t *mi = step->p->mi;
 	int j;
 
 	b->mini.n = b->coef.n = 0;
-	mm_sketch(t->seq, t->l_seq, mi->w, mi->k, t->rid, &b->mini);
+	mm_sketch(seq, l_seq, mi->w, mi->k, 0, &b->mini);
 	for (j = 0; j < b->mini.n; ++j) {
 		int k, n;
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->mini.a[j].y>>1, strand = b->mini.a[j].y&1;
 		r = mm_idx_get(mi, b->mini.a[j].x, &n);
-		if (n > step->p->thres) continue;
+		if (n > max_occ) continue;
 		for (k = 0; k < n; ++k) {
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
@@ -154,20 +134,50 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 		}
 	}
 	radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
-	if (mm_verbose >= 5) { // NB: the following block may be corrupted by multi-threading
-		printf(">%s\n", t->name);
-		for (j = 0; j < b->coef.n; ++j) {
-			uint64_t x = b->coef.a[j].x;
-			uint32_t off = x>>63 == 0? 0x80000000U : 0;
-			printf("%d\t%d\t%c\t%d\n", j, (uint32_t)(x<<1>>33), "+-"[x>>63], (int32_t)((uint32_t)x - off));
-		}
-		printf("//\n");
-	}
 	b->reg.n = 0;
-	get_reg(b, step->p->radius, mi->k, step->p->min_cnt, step->p->max_gap);
-	step->n_reg[i] = b->reg.n;
-	step->reg[i] = (mm_reg1_t*)malloc(b->reg.n * sizeof(mm_reg1_t));
-	memcpy(step->reg[i], b->reg.a, b->reg.n * sizeof(mm_reg1_t));
+	get_reg(b, radius, mi->k, min_cnt, max_gap);
+	*n_regs = b->reg.n;
+	return b->reg.a;
+}
+
+/**************************
+ * Multi-threaded mapping *
+ **************************/
+
+void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
+void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
+
+typedef struct {
+	int batch_size, n_processed, n_threads;
+	int radius, max_gap, min_cnt;
+	uint32_t thres;
+	float f;
+	bseq_file_t *fp;
+	const mm_idx_t *mi;
+} pipeline_t;
+
+typedef struct {
+	const pipeline_t *p;
+    int n_seq;
+	bseq1_t *seq;
+	int *n_reg;
+	mm_reg1_t **reg;
+	mm_tbuf_t *buf;
+} step_t;
+
+static void worker_for(void *_data, long i, int tid) // kt_for() callback
+{
+    step_t *step = (step_t*)_data;
+	const mm_reg1_t *regs;
+	int n_regs;
+
+	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, &step->buf[tid],
+				  step->p->thres, step->p->radius, step->p->min_cnt, step->p->max_gap);
+	step->n_reg[i] = n_regs;
+	if (n_regs > 0) {
+		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
+		memcpy(step->reg[i], regs, n_regs * sizeof(mm_reg1_t));
+	}
 }
 
 static void *worker_pipeline(void *shared, int step, void *in)
@@ -182,7 +192,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			s->p = p;
 			for (i = 0; i < s->n_seq; ++i)
 				s->seq[i].rid = p->n_processed++;
-			s->buf = (tbuf_t*)calloc(p->n_threads, sizeof(tbuf_t));
+			s->buf = (mm_tbuf_t*)calloc(p->n_threads, sizeof(mm_tbuf_t));
 			s->n_reg = (int*)calloc(s->n_seq, sizeof(int));
 			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t**));
 			return s;
@@ -193,12 +203,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
     } else if (step == 2) { // step 2: output
         step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
-		for (i = 0; i < p->n_threads; ++i) { // free temporary data
-			tbuf_t *b = &s->buf[i];
-			free(b->mini.a); free(b->coef.a); free(b->intv.a);
-			free(b->stack.a); free(b->reg.a);
-			free(b->a); free(b->b); free(b->p);
-		}
+		for (i = 0; i < p->n_threads; ++i) mm_tbuf_free(&s->buf[i]);
 		free(s->buf);
 		for (i = 0; i < s->n_seq; ++i) {
 			bseq1_t *t = &s->seq[i];
@@ -218,7 +223,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-int mm_map(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, float f, int n_threads, int batch_size)
+int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, float f, int n_threads, int batch_size)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
