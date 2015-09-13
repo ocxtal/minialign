@@ -47,20 +47,23 @@ int main(int argc, char *argv[])
 	if (w < 0) w = k;
 
 	if (argc == optind) {
-		fprintf(stderr, "Usage: minimap [options] <target.fa> [query.fa]\n");
+		fprintf(stderr, "Usage: minimap [options] <target.fa> [query.fa] [...]\n");
 		fprintf(stderr, "Options:\n");
-		fprintf(stderr, "  -k INT     k-mer size [%d]\n", k);
-		fprintf(stderr, "  -w INT     minizer window size [same as -k]\n");
-		fprintf(stderr, "  -b INT     bucket bits [%d]\n", b);
-		fprintf(stderr, "  -t INT     number of threads [%d]\n", n_threads);
-		fprintf(stderr, "  -r INT     bandwidth [%d]\n", radius);
-		fprintf(stderr, "  -c INT     min minimizer match count [%d]\n", min_cnt);
-		fprintf(stderr, "  -f FLOAT   minimizer filteration threshold [%.3f]\n", f);
-		fprintf(stderr, "  -g INT     break a chain if there is a gap longer than INT [%d]\n", max_gap);
-		fprintf(stderr, "  -B INT     batch size [%d]\n", batch_size);
-		fprintf(stderr, "  -v INT     verbose level [%d]\n", mm_verbose);
-		fprintf(stderr, "  -N         use integer as target names\n");
-		fprintf(stderr, "  -V         show version number\n");
+		fprintf(stderr, "  Indexing:\n");
+		fprintf(stderr, "    -k INT     k-mer size [%d]\n", k);
+		fprintf(stderr, "    -w INT     minizer window size [same as -k]\n");
+		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b);
+		fprintf(stderr, "  Mapping:\n");
+		fprintf(stderr, "    -f FLOAT   minimizer filteration threshold [%.3f]\n", f);
+		fprintf(stderr, "    -r INT     bandwidth [%d]\n", radius);
+		fprintf(stderr, "    -c INT     min minimizer match count [%d]\n", min_cnt);
+		fprintf(stderr, "    -g INT     break a chain if there is a gap longer than INT [%d]\n", max_gap);
+		fprintf(stderr, "  Input/Output:\n");
+		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
+		fprintf(stderr, "    -B INT     batch size [%d]\n", batch_size);
+		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
+		fprintf(stderr, "    -N         use integer as target names\n");
+		fprintf(stderr, "    -V         show version number\n");
 		return 1;
 	}
 
