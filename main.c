@@ -52,7 +52,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  Indexing:\n");
 		fprintf(stderr, "    -k INT     k-mer size [%d]\n", k);
 		fprintf(stderr, "    -w INT     minizer window size [same as -k]\n");
-		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b);
+//		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b); // most users would care about this
 		fprintf(stderr, "  Mapping:\n");
 		fprintf(stderr, "    -f FLOAT   filter out top FLOAT fraction of repetitive minimizers [%.3f]\n", f);
 		fprintf(stderr, "    -r INT     bandwidth [%d]\n", radius);
