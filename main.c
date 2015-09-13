@@ -65,8 +65,11 @@ int main(int argc, char *argv[])
 	}
 
 	mi = mm_idx_gen(argv[optind], w, k, b, batch_size, n_threads, keep_name);
-	if (argc - optind >= 2)
-		mm_map_file(mi, argv[optind+1], radius, max_gap, min_cnt, f, n_threads, batch_size);
+	mm_idx_set_max_occ(mi, f);
+	if (mm_verbose >= 3)
+		fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, mi->max_occ);
+	for (i = optind + 1; i < argc; ++i)
+		mm_map_file(mi, argv[i], radius, max_gap, min_cnt, n_threads, batch_size);
 	mm_idx_destroy(mi);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);

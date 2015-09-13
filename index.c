@@ -19,6 +19,7 @@ mm_idx_t *mm_idx_init(int w, int k, int b)
 	if (w < 1) w = 1;
 	mi = (mm_idx_t*)calloc(1, sizeof(mm_idx_t));
 	mi->w = w, mi->k = k, mi->b = b;
+	mi->max_occ = UINT32_MAX;
 	mi->B = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t));
 	return mi;
 }
@@ -61,7 +62,7 @@ const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n)
 #include "ksort.h"
 KSORT_INIT_GENERIC(uint32_t)
 
-uint32_t mm_idx_thres(const mm_idx_t *mi, float f)
+uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
 {
 	int i;
 	size_t n = 0;
@@ -82,6 +83,12 @@ uint32_t mm_idx_thres(const mm_idx_t *mi, float f)
 	thres = ks_ksmall(uint32_t, n, a, (uint32_t)((1. - f) * n)) + 1;
 	free(a);
 	return thres;
+}
+
+void mm_idx_set_max_occ(mm_idx_t *mi, float f)
+{
+	mi->freq_thres = f;
+	mi->max_occ = mm_idx_cal_max_occ(mi, f);
 }
 
 /*********************************

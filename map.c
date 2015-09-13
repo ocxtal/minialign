@@ -108,7 +108,7 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap)
 	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap);
 }
 
-const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int max_occ, int radius, int min_cnt, int max_gap)
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap)
 {
 	int j;
 
@@ -119,7 +119,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->mini.a[j].y>>1, strand = b->mini.a[j].y&1;
 		r = mm_idx_get(mi, b->mini.a[j].x, &n);
-		if (n > max_occ) continue;
+		if (n > mi->max_occ) continue;
 		for (k = 0; k < n; ++k) {
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
@@ -150,8 +150,6 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 typedef struct {
 	int batch_size, n_processed, n_threads;
 	int radius, max_gap, min_cnt;
-	uint32_t thres;
-	float f;
 	bseq_file_t *fp;
 	const mm_idx_t *mi;
 } pipeline_t;
@@ -172,7 +170,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	int n_regs;
 
 	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, &step->buf[tid],
-				  step->p->thres, step->p->radius, step->p->min_cnt, step->p->max_gap);
+				  step->p->radius, step->p->min_cnt, step->p->max_gap);
 	step->n_reg[i] = n_regs;
 	if (n_regs > 0) {
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
@@ -223,16 +221,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, float f, int n_threads, int batch_size)
+int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int n_threads, int batch_size)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return -1;
 	pl.mi = idx, pl.radius = radius, pl.min_cnt = min_cnt, pl.max_gap = max_gap;
-	pl.thres = mm_idx_thres(idx, f);
-	if (mm_verbose >= 3)
-		fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, pl.thres);
 	pl.n_threads = n_threads, pl.batch_size = batch_size;
 	kt_pipeline(n_threads == 1? 1 : 2, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);
