@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r49"
+#define MM_VERSION "r57"
 
 void liftrlimit()
 {
@@ -20,15 +20,16 @@ void liftrlimit()
 
 int main(int argc, char *argv[])
 {
-	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, batch_size = 10000000, keep_name = 1;
+	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, keep_name = 1;
+	int tbatch_size = 10000000, n_processed = 0;
+	uint64_t ibatch_size = 10000000000ULL;
 	float f = 0.001;
-	mm_idx_t *mi = 0;
 	bseq_file_t *fp;
 
 	liftrlimit();
 	mm_realtime0 = realtime();
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -36,13 +37,22 @@ int main(int argc, char *argv[])
 		else if (c == 'c') min_cnt = atoi(optarg);
 		else if (c == 'f') f = atof(optarg);
 		else if (c == 't') n_threads = atoi(optarg);
-		else if (c == 'B') batch_size = atoi(optarg);
 		else if (c == 'v') mm_verbose = atoi(optarg);
 		else if (c == 'g') max_gap = atoi(optarg);
 		else if (c == 'N') keep_name = 0;
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
+		}
+		else if (c == 'B' || c == 'I') {
+			double x;
+			char *p;
+			x = strtod(optarg, &p);
+			if (*p == 'G' || *p == 'g') x *= 1e9;
+			else if (*p == 'M' || *p == 'm') x *= 1e6;
+			else if (*p == 'K' || *p == 'k') x *= 1e3;
+			if (c == 'B') tbatch_size = (uint64_t)(x + .499);
+			else ibatch_size = (uint64_t)(x + .499);
 		}
 	}
 	if (w < 0) w = k;
@@ -61,7 +71,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", max_gap);
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
-		fprintf(stderr, "    -B INT     batch size [%d]\n", batch_size);
+		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [10M]\n");
+		fprintf(stderr, "    -I NUM     create an index for every ~NUM bp [10G]\n");
 		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
 		fprintf(stderr, "    -N         use integer as target names\n");
 		fprintf(stderr, "    -V         show version number\n");
@@ -69,13 +80,16 @@ int main(int argc, char *argv[])
 	}
 
 	fp = bseq_open(argv[optind]);
-	mi = mm_idx_gen(fp, w, k, b, batch_size, n_threads, keep_name);
-	mm_idx_set_max_occ(mi, f);
-	if (mm_verbose >= 3)
-		fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, mi->max_occ);
-	for (i = optind + 1; i < argc; ++i)
-		mm_map_file(mi, argv[i], radius, max_gap, min_cnt, n_threads, batch_size);
-	mm_idx_destroy(mi);
+	while (!bseq_eof(fp)) {
+		mm_idx_t *mi;
+		mi = mm_idx_gen(fp, w, k, b, tbatch_size, n_threads, ibatch_size, &n_processed, keep_name);
+		mm_idx_set_max_occ(mi, f);
+		if (mm_verbose >= 3)
+			fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, mi->max_occ);
+		for (i = optind + 1; i < argc; ++i)
+			mm_map_file(mi, argv[i], radius, max_gap, min_cnt, n_threads, tbatch_size);
+		mm_idx_destroy(mi);
+	}
 	bseq_close(fp);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);

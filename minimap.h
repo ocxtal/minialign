@@ -51,7 +51,7 @@ void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 
 mm_idx_t *mm_idx_init(int w, int k, int b);
 void mm_idx_destroy(mm_idx_t *mi);
-mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, int keep_name);
+mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, uint64_t ibatch_size, int *rid0, int keep_name);
 void mm_idx_set_max_occ(mm_idx_t *mi, float f);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 

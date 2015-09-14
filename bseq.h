@@ -14,5 +14,6 @@ typedef struct {
 bseq_file_t *bseq_open(const char *fn);
 void bseq_close(bseq_file_t *fp);
 bseq1_t *bseq_read(bseq_file_t *fp, int chunk_size, int *n_);
+int bseq_eof(bseq_file_t *fp);
 
 #endif

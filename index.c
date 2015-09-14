@@ -165,6 +165,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 typedef struct {
 	int tbatch_size, n_processed, keep_name;
 	bseq_file_t *fp;
+	uint64_t ibatch_size, n_read;
 	mm_idx_t *mi;
 } pipeline_t;
 
@@ -190,6 +191,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
     if (step == 0) { // step 0: read sequences
         step_t *s;
         s = (step_t*)calloc(1, sizeof(step_t));
+		if (p->n_read > p->ibatch_size) return 0;
 		s->seq = bseq_read(p->fp, p->tbatch_size, &s->n_seq);
 		if (s->seq) {
 			uint32_t old_m = p->mi->n, m, n;
@@ -206,6 +208,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 					p->mi->name[p->mi->n] = strdup(s->seq[i].name);
 				p->mi->len[p->mi->n++] = s->seq[i].l_seq;
 				s->seq[i].rid = p->n_processed++;
+				p->n_read += s->seq[i].l_seq;
 			}
 			return s;
 		} else free(s);
@@ -226,15 +229,18 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, int keep_name)
+mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, uint64_t ibatch_size, int *rid0, int keep_name)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.tbatch_size = tbatch_size;
 	pl.keep_name = keep_name;
+	pl.ibatch_size = ibatch_size;
+	pl.n_processed = *rid0;
 	pl.fp = fp;
 	if (pl.fp == 0) return 0;
 	pl.mi = mm_idx_init(w, k, b);
+	*rid0 = pl.n_processed;
 
 	kt_pipeline(n_threads < 3? n_threads : 3, worker_pipeline, &pl, 3);
 	if (mm_verbose >= 3)

@@ -10,6 +10,7 @@ KSEQ_INIT(gzFile, gzread)
 extern unsigned char seq_nt4_table[256];
 
 struct bseq_file_s {
+	int is_eof;
 	gzFile fp;
 	kseq_t *ks;
 };
@@ -53,6 +54,12 @@ bseq1_t *bseq_read(bseq_file_t *fp, int chunk_size, int *n_)
 		size += seqs[n++].l_seq;
 		if (size >= chunk_size) break;
 	}
+	if (n == 0) fp->is_eof = 1;
 	*n_ = n;
 	return seqs;
+}
+
+int bseq_eof(bseq_file_t *fp)
+{
+	return fp->is_eof;
 }
