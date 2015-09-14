@@ -23,6 +23,7 @@ int main(int argc, char *argv[])
 	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, batch_size = 10000000, keep_name = 1;
 	float f = 0.001;
 	mm_idx_t *mi = 0;
+	bseq_file_t *fp;
 
 	liftrlimit();
 	mm_realtime0 = realtime();
@@ -67,13 +68,15 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	mi = mm_idx_gen(argv[optind], w, k, b, batch_size, n_threads, keep_name);
+	fp = bseq_open(argv[optind]);
+	mi = mm_idx_gen(fp, w, k, b, batch_size, n_threads, keep_name);
 	mm_idx_set_max_occ(mi, f);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, mi->max_occ);
 	for (i = optind + 1; i < argc; ++i)
 		mm_map_file(mi, argv[i], radius, max_gap, min_cnt, n_threads, batch_size);
 	mm_idx_destroy(mi);
+	bseq_close(fp);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);
 	fprintf(stderr, "[M::%s] CMD:", __func__);

@@ -163,7 +163,7 @@ static void mm_idx_post(mm_idx_t *mi, int n_threads)
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
 
 typedef struct {
-	int batch_size, n_processed, keep_name;
+	int tbatch_size, n_processed, keep_name;
 	bseq_file_t *fp;
 	mm_idx_t *mi;
 } pipeline_t;
@@ -190,7 +190,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
     if (step == 0) { // step 0: read sequences
         step_t *s;
         s = (step_t*)calloc(1, sizeof(step_t));
-		s->seq = bseq_read(p->fp, p->batch_size, &s->n_seq);
+		s->seq = bseq_read(p->fp, p->tbatch_size, &s->n_seq);
 		if (s->seq) {
 			uint32_t old_m = p->mi->n, m, n;
 			assert((uint64_t)p->n_processed + s->n_seq <= INT32_MAX);
@@ -226,18 +226,17 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-mm_idx_t *mm_idx_gen(const char *fn, int w, int k, int b, int batch_size, int n_threads, int keep_name)
+mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, int keep_name)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
-	pl.batch_size = batch_size;
+	pl.tbatch_size = tbatch_size;
 	pl.keep_name = keep_name;
-	pl.fp = bseq_open(fn);
+	pl.fp = fp;
 	if (pl.fp == 0) return 0;
 	pl.mi = mm_idx_init(w, k, b);
 
 	kt_pipeline(n_threads < 3? n_threads : 3, worker_pipeline, &pl, 3);
-	bseq_close(pl.fp);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 

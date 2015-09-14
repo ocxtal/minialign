@@ -221,14 +221,14 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int n_threads, int batch_size)
+int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int n_threads, int tbatch_size)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return -1;
 	pl.mi = idx, pl.radius = radius, pl.min_cnt = min_cnt, pl.max_gap = max_gap;
-	pl.n_threads = n_threads, pl.batch_size = batch_size;
+	pl.n_threads = n_threads, pl.batch_size = tbatch_size;
 	kt_pipeline(n_threads == 1? 1 : 2, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);
 	return 0;
