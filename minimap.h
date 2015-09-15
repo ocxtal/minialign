@@ -27,7 +27,7 @@ typedef struct {
 	mm_idx_bucket_t *B;
 	uint32_t max_occ;
 	float freq_thres;
-	int *len;    // length of each reference sequence
+	int32_t *len;    // length of each reference sequence
 	char **name; // TODO: if this uses too much RAM, switch one concatenated string
 } mm_idx_t;
 

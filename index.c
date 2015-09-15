@@ -204,8 +204,10 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				p->mi->len = (int*)realloc(p->mi->len, m * sizeof(int));
 			}
 			for (i = 0; i < s->n_seq; ++i) {
-				if (p->keep_name)
+				if (p->keep_name) {
+					assert(strlen(s->seq[i].name) <= 254);
 					p->mi->name[p->mi->n] = strdup(s->seq[i].name);
+				}
 				p->mi->len[p->mi->n++] = s->seq[i].l_seq;
 				s->seq[i].rid = p->n_processed++;
 				p->n_read += s->seq[i].l_seq;
@@ -251,4 +253,33 @@ mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int 
 		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
 	return pl.mi;
+}
+
+/*************
+ * index I/O *
+ *************/
+
+#define MM_IDX_MAGIC "MMI\1"
+
+void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
+{
+	uint32_t x[6];
+	int i;
+	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b, x[3] = mi->n, x[4] = mi->name? 1 : 0, x[5] = mi->max_occ;
+	fwrite(MM_IDX_MAGIC, 1, 4, fp);
+	fwrite(x, 4, 6, fp);
+	fwrite(&mi->freq_thres, sizeof(float), 1, fp);
+	fwrite(mi->len, 4, mi->n, fp);
+	if (mi->name) {
+		for (i = 0; i < mi->n; ++i) {
+			uint8_t l = strlen(mi->name[i]);
+			fwrite(&l, 1, 1, fp);
+			fwrite(mi->name[i], 1, l, fp);
+		}
+	}
+}
+
+mm_idx_t *mm_idx_restore(FILE *fp)
+{
+	return 0;
 }
