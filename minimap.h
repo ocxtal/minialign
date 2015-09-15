@@ -16,7 +16,7 @@ typedef struct { size_t n, m; uint64_t *a; } uint64_v;
 
 typedef struct {
 	mm128_v a;   // (minimizer, position) array
-	int n;       // size of the _p_ array
+	int32_t n;       // size of the _p_ array
 	uint64_t *p; // position array for minimizers appearing >1 times
 	void *h;     // hash table indexing _p_ and minimizers appearing once
 } mm_idx_bucket_t;

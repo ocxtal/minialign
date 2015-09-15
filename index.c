@@ -270,14 +270,71 @@ void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 	fwrite(mi->len, 4, mi->n, fp);
 	if (mi->name) {
 		for (i = 0; i < mi->n; ++i) {
-			uint8_t l = strlen(mi->name[i]);
+			uint8_t l;
+			l = strlen(mi->name[i]);
 			fwrite(&l, 1, 1, fp);
 			fwrite(mi->name[i], 1, l, fp);
+		}
+	}
+	for (i = 0; i < 1<<mi->b; ++i) {
+		mm_idx_bucket_t *b = &mi->B[i];
+		khint_t k;
+		idxhash_t *h = (idxhash_t*)b->h;
+		fwrite(&b->n, 4, 1, fp);
+		fwrite(b->p, 8, b->n, fp);
+		fwrite(&h->size, 4, 1, fp);
+		for (k = 0; k < kh_end(h); ++k) {
+			uint64_t x[2];
+			if (!kh_exist(h, k)) continue;
+			x[0] = kh_key(h, k), x[1] = kh_val(h, k);
+			fwrite(x, 8, 2, fp);
 		}
 	}
 }
 
 mm_idx_t *mm_idx_restore(FILE *fp)
 {
-	return 0;
+	int i;
+	char magic[4];
+	uint32_t x[6];
+	mm_idx_t *mi;
+	if (fread(magic, 1, 4, fp) != 4) return 0;
+	if (strncmp(magic, MM_IDX_MAGIC, 4) != 0) return 0;
+	if (fread(x, 4, 6, fp) != 6) return 0;
+	mi = mm_idx_init(x[0], x[1], x[2]);
+	mi->n = x[3], mi->max_occ = x[5];
+	fread(&mi->freq_thres, sizeof(float), 1, fp);
+	mi->len = (int32_t*)malloc(mi->n * 4);
+	fread(mi->len, 4, mi->n, fp);
+	if (x[4]) { // has names
+		mi->name = (char**)calloc(mi->n, sizeof(char*));
+		for (i = 0; i < mi->n; ++i) {
+			uint8_t l;
+			fread(&l, 1, 1, fp);
+			mi->name[i] = (char*)malloc(l + 1);
+			fread(mi->name[i], 1, l, fp);
+			mi->name[i][l] = 0;
+		}
+	}
+	for (i = 0; i < 1<<mi->b; ++i) {
+		mm_idx_bucket_t *b = &mi->B[i];
+		uint32_t j, size;
+		khint_t k;
+		idxhash_t *h;
+		fread(&b->n, 4, 1, fp);
+		b->p = (uint64_t*)malloc(b->n * 8);
+		fread(b->p, 8, b->n, fp);
+		fread(&size, 4, 1, fp);
+		b->h = h = kh_init(idx);
+		kh_resize(idx, h, size);
+		for (j = 0; j < size; ++j) {
+			uint64_t x[2];
+			int absent;
+			fread(x, 8, 2, fp);
+			k = kh_put(idx, h, x[0], &absent);
+			assert(absent);
+			kh_val(h, k) = x[1];
+		}
+	}
+	return mi;
 }
