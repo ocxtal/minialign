@@ -21,7 +21,7 @@ void liftrlimit()
 int main(int argc, char *argv[])
 {
 	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, keep_name = 1;
-	int tbatch_size = 10000000, n_processed = 0;
+	int tbatch_size = 10000000;
 	uint64_t ibatch_size = 10000000000ULL;
 	float f = 0.001;
 	bseq_file_t *fp;
@@ -82,7 +82,7 @@ int main(int argc, char *argv[])
 	fp = bseq_open(argv[optind]);
 	while (!bseq_eof(fp)) {
 		mm_idx_t *mi;
-		mi = mm_idx_gen(fp, w, k, b, tbatch_size, n_threads, ibatch_size, &n_processed, keep_name);
+		mi = mm_idx_gen(fp, w, k, b, tbatch_size, n_threads, ibatch_size, keep_name);
 		mm_idx_set_max_occ(mi, f);
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, mi->max_occ);
