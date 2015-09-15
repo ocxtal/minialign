@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r61"
+#define MM_VERSION "r62"
 
 void liftrlimit()
 {
@@ -20,18 +20,18 @@ void liftrlimit()
 
 int main(int argc, char *argv[])
 {
-	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, keep_name = 1;
+	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, keep_name = 1, is_idx = 0;
 	int tbatch_size = 10000000;
 	uint64_t ibatch_size = 10000000000ULL;
 	float f = 0.001;
-	bseq_file_t *fp;
-	char *fnr = 0, *fnw = 0;
+	bseq_file_t *fp = 0;
+	char *fnw = 0;
 	FILE *fpr = 0, *fpw = 0;
 
 	liftrlimit();
 	mm_realtime0 = realtime();
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:l:")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:l")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -43,7 +43,7 @@ int main(int argc, char *argv[])
 		else if (c == 'g') max_gap = atoi(optarg);
 		else if (c == 'N') keep_name = 0;
 		else if (c == 'd') fnw = optarg;
-		else if (c == 'l') fnr = optarg;
+		else if (c == 'l') is_idx = 1;
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
@@ -68,7 +68,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -k INT     k-mer size [%d]\n", k);
 		fprintf(stderr, "    -w INT     minizer window size [same as -k]\n");
 		fprintf(stderr, "    -d FILE    dump index to FILE []\n");
-		fprintf(stderr, "    -l FILE    load index from FILE []\n");
+		fprintf(stderr, "    -l         the 1st argument is a index file\n");
 //		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b); // most users would care about this
 		fprintf(stderr, "  Mapping:\n");
 		fprintf(stderr, "    -f FLOAT   filter out top FLOAT fraction of repetitive minimizers [%.3f]\n", f);
@@ -85,8 +85,8 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	fp = bseq_open(argv[optind]);
-	if (fnr) fpr = fopen(fnr, "rb");
+	if (is_idx) fpr = fopen(argv[optind], "rb");
+	else fp = bseq_open(argv[optind]);
 	if (fnw) fpw = fopen(fnw, "wb");
 	for (;;) {
 		mm_idx_t *mi = 0;
@@ -107,7 +107,7 @@ int main(int argc, char *argv[])
 	}
 	if (fpw) fclose(fpw);
 	if (fpr) fclose(fpr);
-	bseq_close(fp);
+	if (fp)  bseq_close(fp);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);
 	fprintf(stderr, "[M::%s] CMD:", __func__);
