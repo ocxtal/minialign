@@ -280,9 +280,11 @@ void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 		mm_idx_bucket_t *b = &mi->B[i];
 		khint_t k;
 		idxhash_t *h = (idxhash_t*)b->h;
+		uint32_t size = h? h->size : 0;
 		fwrite(&b->n, 4, 1, fp);
 		fwrite(b->p, 8, b->n, fp);
-		fwrite(&h->size, 4, 1, fp);
+		fwrite(&size, 4, 1, fp);
+		if (size == 0) continue;
 		for (k = 0; k < kh_end(h); ++k) {
 			uint64_t x[2];
 			if (!kh_exist(h, k)) continue;
@@ -292,7 +294,7 @@ void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 	}
 }
 
-mm_idx_t *mm_idx_restore(FILE *fp)
+mm_idx_t *mm_idx_load(FILE *fp)
 {
 	int i;
 	char magic[4];
@@ -325,6 +327,7 @@ mm_idx_t *mm_idx_restore(FILE *fp)
 		b->p = (uint64_t*)malloc(b->n * 8);
 		fread(b->p, 8, b->n, fp);
 		fread(&size, 4, 1, fp);
+		if (size == 0) continue;
 		b->h = h = kh_init(idx);
 		kh_resize(idx, h, size);
 		for (j = 0; j < size; ++j) {

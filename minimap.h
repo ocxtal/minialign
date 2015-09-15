@@ -2,6 +2,7 @@
 #define MINIMAP_H
 
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/types.h>
 #include "bseq.h"
 
@@ -54,6 +55,9 @@ void mm_idx_destroy(mm_idx_t *mi);
 mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, uint64_t ibatch_size, int keep_name);
 void mm_idx_set_max_occ(mm_idx_t *mi, float f);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
+
+void mm_idx_dump(FILE *fp, const mm_idx_t *mi);
+mm_idx_t *mm_idx_load(FILE *fp);
 
 const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap);
 int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int n_threads, int tbatch_size);

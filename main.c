@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r57"
+#define MM_VERSION "r61"
 
 void liftrlimit()
 {
@@ -25,11 +25,13 @@ int main(int argc, char *argv[])
 	uint64_t ibatch_size = 10000000000ULL;
 	float f = 0.001;
 	bseq_file_t *fp;
+	char *fnr = 0, *fnw = 0;
+	FILE *fpr = 0, *fpw = 0;
 
 	liftrlimit();
 	mm_realtime0 = realtime();
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:l:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -40,6 +42,8 @@ int main(int argc, char *argv[])
 		else if (c == 'v') mm_verbose = atoi(optarg);
 		else if (c == 'g') max_gap = atoi(optarg);
 		else if (c == 'N') keep_name = 0;
+		else if (c == 'd') fnw = optarg;
+		else if (c == 'l') fnr = optarg;
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
@@ -63,6 +67,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  Indexing:\n");
 		fprintf(stderr, "    -k INT     k-mer size [%d]\n", k);
 		fprintf(stderr, "    -w INT     minizer window size [same as -k]\n");
+		fprintf(stderr, "    -d FILE    dump index to FILE []\n");
+		fprintf(stderr, "    -l FILE    load index from FILE []\n");
 //		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b); // most users would care about this
 		fprintf(stderr, "  Mapping:\n");
 		fprintf(stderr, "    -f FLOAT   filter out top FLOAT fraction of repetitive minimizers [%.3f]\n", f);
@@ -80,16 +86,27 @@ int main(int argc, char *argv[])
 	}
 
 	fp = bseq_open(argv[optind]);
-	while (!bseq_eof(fp)) {
-		mm_idx_t *mi;
-		mi = mm_idx_gen(fp, w, k, b, tbatch_size, n_threads, ibatch_size, keep_name);
+	if (fnr) fpr = fopen(fnr, "rb");
+	if (fnw) fpw = fopen(fnw, "wb");
+	for (;;) {
+		mm_idx_t *mi = 0;
+		if (fpr) mi = mm_idx_load(fpr);
+		else if (!bseq_eof(fp))
+			mi = mm_idx_gen(fp, w, k, b, tbatch_size, n_threads, ibatch_size, keep_name);
+		if (mi == 0) break;
+		if (mm_verbose >= 3)
+			fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built the index for %d target sequence(s)\n",
+					__func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->n);
 		mm_idx_set_max_occ(mi, f);
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, mi->max_occ);
+		if (fpw) mm_idx_dump(fpw, mi);
 		for (i = optind + 1; i < argc; ++i)
 			mm_map_file(mi, argv[i], radius, max_gap, min_cnt, n_threads, tbatch_size);
 		mm_idx_destroy(mi);
 	}
+	if (fpw) fclose(fpw);
+	if (fpr) fclose(fpr);
 	bseq_close(fp);
 
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);
