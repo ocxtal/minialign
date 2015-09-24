@@ -44,13 +44,9 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 		b->p = (size_t*)realloc(b->p, b->m * sizeof(size_t));
 	}
 	b->n = 0;
-	for (i = start; i < end; ++i) {
-		int32_t qpos;
-		if (b->coef.a[i].x == UINT64_MAX) continue;
-		qpos = (uint32_t)b->mini.a[b->coef.a[i].y>>32].y>>1;
-		b->a[b->n++] = (uint64_t)qpos << 32 | (uint32_t)b->coef.a[i].y;
-		rid = b->coef.a[i].x << 1 >> 33, rev = b->coef.a[i].x >> 63;
-	}
+	for (i = start; i < end; ++i)
+		if (b->coef.a[i].x != UINT64_MAX)
+			b->a[b->n++] = b->coef.a[i].y, rid = b->coef.a[i].x << 1 >> 33, rev = b->coef.a[i].x >> 63;
 	if (b->n < min_cnt) return;
 	radix_sort_64(b->a, b->a + b->n);
 	l_lis = rev? ks_lis_low32gt(b->n, b->a, b->b, b->p) : ks_lis_low32lt(b->n, b->a, b->b, b->p);
@@ -61,13 +57,14 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 	l_lis = j;
 	if (l_lis < min_cnt) return;
 	for (i = 1, start = 0; i <= l_lis; ++i) {
-		if (i == l_lis || ((b->a[b->b[i]]>>32) - (b->a[b->b[i-1]]>>32) > max_gap && abs((int32_t)b->a[b->b[i]] - (int32_t)b->a[b->b[i-1]]) > max_gap)) {
+		int32_t qgap = i == l_lis? 0 : ((uint32_t)b->mini.a[b->a[b->b[i]]>>32].y>>1) - ((uint32_t)b->mini.a[b->a[b->b[i-1]]>>32].y>>1);
+		if (i == l_lis || (qgap > max_gap && abs((int32_t)b->a[b->b[i]] - (int32_t)b->a[b->b[i-1]]) > max_gap)) {
 			if (i - start >= min_cnt) {
 				mm_reg1_t *r;
 				kv_pushp(mm_reg1_t, b->reg, &r);
 				r->rid = rid, r->rev = rev, r->cnt = i - start;
-				r->qs = (b->a[b->b[start]]>>32) - (k - 1);
-				r->qe = (b->a[b->b[i-1]]>>32) + 1;
+				r->qs = ((uint32_t)b->mini.a[b->a[b->b[start]]>>32].y>>1) - (k - 1);
+				r->qe = ((uint32_t)b->mini.a[b->a[b->b[i-1]]>>32].y>>1) + 1;
 				r->rs = rev? (uint32_t)b->a[b->b[i-1]] : (uint32_t)b->a[b->b[start]];
 				r->re = rev? (uint32_t)b->a[b->b[start]] : (uint32_t)b->a[b->b[i-1]];
 				r->rs -= k - 1;
@@ -122,6 +119,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 		int k, n;
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->mini.a[j].y>>1, strand = b->mini.a[j].y&1;
+		b->mini.a[j].y = b->mini.a[j].y<<32>>32; // clear the rid field
 		r = mm_idx_get(mi, b->mini.a[j].x, &n);
 		if (n > mi->max_occ) continue;
 		for (k = 0; k < n; ++k) {
