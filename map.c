@@ -44,9 +44,13 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 		b->p = (size_t*)realloc(b->p, b->m * sizeof(size_t));
 	}
 	b->n = 0;
-	for (i = start; i < end; ++i)
-		if (b->coef.a[i].x != UINT64_MAX)
-			b->a[b->n++] = b->coef.a[i].y, rid = b->coef.a[i].x << 1 >> 33, rev = b->coef.a[i].x >> 63;
+	for (i = start; i < end; ++i) {
+		int32_t qpos;
+		if (b->coef.a[i].x == UINT64_MAX) continue;
+		qpos = (uint32_t)b->mini.a[b->coef.a[i].y>>32].y>>1;
+		b->a[b->n++] = (uint64_t)qpos << 32 | (uint32_t)b->coef.a[i].y;
+		rid = b->coef.a[i].x << 1 >> 33, rev = b->coef.a[i].x >> 63;
+	}
 	if (b->n < min_cnt) return;
 	radix_sort_64(b->a, b->a + b->n);
 	l_lis = rev? ks_lis_low32gt(b->n, b->a, b->b, b->p) : ks_lis_low32lt(b->n, b->a, b->b, b->p);
@@ -126,10 +130,10 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 			kv_pushp(mm128_t, b->coef, &p);
 			if ((r[k]&1) == strand) { // forward strand
 				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);
-				p->y = (uint64_t)qpos << 32 | rpos;
+				p->y = (uint64_t)j << 32 | rpos;
 			} else { // reverse strand
 				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos) | 1ULL<<63;
-				p->y = (uint64_t)qpos << 32 | rpos;
+				p->y = (uint64_t)j << 32 | rpos;
 			}
 		}
 	}
