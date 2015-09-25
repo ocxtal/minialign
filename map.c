@@ -10,18 +10,21 @@
  ****************************/
 
 struct mm_tbuf_s { // per-thread buffer
-	mm128_v mini, coef, intv;
-	uint64_v stack;
-	kvec_t(mm_reg1_t) reg;
+	mm128_v mini; // query minimizers
+	mm128_v coef; // Hough transform coefficient
+	mm128_v intv; // intervals on sorted coef
+	// the following are for computing LIS
 	uint32_t n, m;
 	uint64_t *a;
 	size_t *b, *p;
+	// final output
+	kvec_t(mm_reg1_t) reg;
 };
 
 void mm_tbuf_free(mm_tbuf_t *b)
 {
 	if (b == 0) return;
-	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->stack.a); free(b->reg.a);
+	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->reg.a);
 	free(b->a); free(b->b); free(b->p);
 }
 
@@ -75,7 +78,7 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 	}
 }
 
-static inline void push_intv(mm128_v *intv, int start, int end)
+static inline void push_intv(mm128_v *intv, int start, int end) // used by get_reg() only
 {
 	mm128_t *p;
 	if (intv->n > 0) {
