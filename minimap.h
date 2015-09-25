@@ -6,7 +6,11 @@
 #include <sys/types.h>
 #include "bseq.h"
 
-#define MM_IDX_DEF_B 14
+#define MM_IDX_DEF_B    14
+#define MM_DEREP_Q50    5.0
+
+#define MM_F_WITH_REP  0x1
+#define MM_F_NO_SELF   0x2
 
 typedef struct {
  	uint64_t x, y;
@@ -14,6 +18,7 @@ typedef struct {
 
 typedef struct { size_t n, m; mm128_t *a; } mm128_v;
 typedef struct { size_t n, m; uint64_t *a; } uint64_v;
+typedef struct { size_t n, m; uint32_t *a; } uint32_v;
 
 typedef struct {
 	mm128_v a;   // (minimizer, position) array
@@ -34,7 +39,7 @@ typedef struct {
 
 typedef struct {
 	uint32_t cnt:31, rev:1;
-	int32_t rid;
+	uint32_t rid:31, rep:1;
 	int32_t qs, qe, rs, re;
 } mm_reg1_t;
 
@@ -59,8 +64,8 @@ const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 void mm_idx_dump(FILE *fp, const mm_idx_t *mi);
 mm_idx_t *mm_idx_load(FILE *fp);
 
-const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap);
-int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int n_threads, int tbatch_size);
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap, int flag);
+int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int flag, int n_threads, int tbatch_size);
 
 double cputime(void);
 double realtime(void);

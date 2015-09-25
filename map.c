@@ -13,6 +13,8 @@ struct mm_tbuf_s { // per-thread buffer
 	mm128_v mini; // query minimizers
 	mm128_v coef; // Hough transform coefficient
 	mm128_v intv; // intervals on sorted coef
+	uint32_v reg2mini;
+	uint32_v rep_aux;
 	// the following are for computing LIS
 	uint32_t n, m;
 	uint64_t *a;
@@ -24,7 +26,7 @@ struct mm_tbuf_s { // per-thread buffer
 void mm_tbuf_free(mm_tbuf_t *b)
 {
 	if (b == 0) return;
-	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->reg.a);
+	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->reg.a); free(b->reg2mini.a); free(b->rep_aux.a);
 	free(b->a); free(b->b); free(b->p);
 }
 
@@ -36,10 +38,35 @@ KSORT_INIT(low32lt, uint64_t, lt_low32)
 #define gt_low32(a, b) ((uint32_t)(a) > (uint32_t)(b))
 KSORT_INIT(low32gt, uint64_t, gt_low32)
 
+uint32_t ks_ksmall_uint32_t(size_t n, uint32_t arr[], size_t kk); // defined in index.c via KSORT_INIT_GENERIC(uint32_t)
+
+static void drop_rep(mm_tbuf_t *b, int min_cnt)
+{
+	int i, j, n, m;
+	uint32_t thres;
+	b->rep_aux.n = 0;
+	for (i = 0; i < b->mini.n; ++i)
+		if (b->mini.a[i].y>>32)
+			kv_push(uint32_t, b->rep_aux, b->mini.a[i].y>>32);
+	if (b->rep_aux.n < 3) return;
+	thres = (uint32_t)(ks_ksmall_uint32_t(b->rep_aux.n, b->rep_aux.a, b->rep_aux.n>>1) * MM_DEREP_Q50 + .499);
+	for (i = n = m = 0; i < b->reg.n; ++i) {
+		int cnt = 0, all_cnt = b->reg.a[i].cnt;
+		for (j = 0; j < all_cnt; ++j)
+			if (b->mini.a[b->reg2mini.a[m + j]].y>>32 <= thres)
+				++cnt;
+		if (cnt >= min_cnt)
+			b->reg.a[n++] = b->reg.a[i];
+		m += all_cnt;
+	}
+//	printf("%ld=>%d\t%d\n", b->reg.n, n, thres);
+	b->reg.n = n;
+}
+
 static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 {
 	int i, j, l_lis, rid = -1, rev = 0, start = b->intv.a[which].y, end = start + b->intv.a[which].x;
-	if (end - start > b->m) {
+	if (end - start > b->m) { // make room for arrays needed by LIS
 		b->m = end - start;
 		kv_roundup32(b->m);
 		b->a = (uint64_t*)realloc(b->a, b->m * 8);
@@ -47,31 +74,36 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 		b->p = (size_t*)realloc(b->p, b->m * sizeof(size_t));
 	}
 	b->n = 0;
-	for (i = start; i < end; ++i)
+	for (i = start; i < end; ++i) // prepare the input array _a_ for LIS
 		if (b->coef.a[i].x != UINT64_MAX)
 			b->a[b->n++] = b->coef.a[i].y, rid = b->coef.a[i].x << 1 >> 33, rev = b->coef.a[i].x >> 63;
 	if (b->n < min_cnt) return;
 	radix_sort_64(b->a, b->a + b->n);
-	l_lis = rev? ks_lis_low32gt(b->n, b->a, b->b, b->p) : ks_lis_low32lt(b->n, b->a, b->b, b->p);
+	l_lis = rev? ks_lis_low32gt(b->n, b->a, b->b, b->p) : ks_lis_low32lt(b->n, b->a, b->b, b->p); // LIS
 	if (l_lis < min_cnt) return;
-	for (i = 1, j = 1; i < l_lis; ++i)
+	for (i = 1, j = 1; i < l_lis; ++i) // squeeze out reused minimizers
 		if (b->a[b->b[i]]>>32 != b->a[b->b[i-1]]>>32)
 			b->a[b->b[j++]] = b->a[b->b[i]];
 	l_lis = j;
 	if (l_lis < min_cnt) return;
-	for (i = 1, start = 0; i <= l_lis; ++i) {
+	for (i = 1, start = 0; i <= l_lis; ++i) { // convert LIS to a region; possibly break LIS at long gaps
 		int32_t qgap = i == l_lis? 0 : ((uint32_t)b->mini.a[b->a[b->b[i]]>>32].y>>1) - ((uint32_t)b->mini.a[b->a[b->b[i-1]]>>32].y>>1);
 		if (i == l_lis || (qgap > max_gap && abs((int32_t)b->a[b->b[i]] - (int32_t)b->a[b->b[i-1]]) > max_gap)) {
 			if (i - start >= min_cnt) {
 				mm_reg1_t *r;
 				kv_pushp(mm_reg1_t, b->reg, &r);
-				r->rid = rid, r->rev = rev, r->cnt = i - start;
+				r->rid = rid, r->rev = rev, r->cnt = i - start, r->rep = 0;
 				r->qs = ((uint32_t)b->mini.a[b->a[b->b[start]]>>32].y>>1) - (k - 1);
 				r->qe = ((uint32_t)b->mini.a[b->a[b->b[i-1]]>>32].y>>1) + 1;
 				r->rs = rev? (uint32_t)b->a[b->b[i-1]] : (uint32_t)b->a[b->b[start]];
 				r->re = rev? (uint32_t)b->a[b->b[start]] : (uint32_t)b->a[b->b[i-1]];
 				r->rs -= k - 1;
 				r->re += 1;
+				for (j = start; j < i; ++j) { // count the number of times each minimizer is used
+					int jj = b->a[b->b[j]]>>32;
+					b->mini.a[jj].y += 1ULL<<32;
+					kv_push(uint32_t, b->reg2mini, jj); // keep minimizer<=>reg mapping for derep
+				}
 			}
 			start = i;
 		}
@@ -95,7 +127,7 @@ static inline void push_intv(mm128_v *intv, int start, int end) // used by get_r
 	p->x = end - start, p->y = start;
 }
 
-static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap)
+static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, int skip_derep)
 {
 	mm128_v *c = &b->coef;
 	int i, start = 0;
@@ -109,10 +141,12 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap)
 	}
 	if (i - start >= min_cnt) push_intv(&b->intv, start, i);
 	radix_sort_128x(b->intv.a, b->intv.a + b->intv.n); // sort by the size of the cluster
+	b->reg2mini.n = 0;
 	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap);
+	if (!skip_derep) drop_rep(b, min_cnt);
 }
 
-const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap)
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap, int flag)
 {
 	int j;
 
@@ -140,7 +174,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 	}
 	radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
 	b->reg.n = 0;
-	get_reg(b, radius, mi->k, min_cnt, max_gap);
+	get_reg(b, radius, mi->k, min_cnt, max_gap, flag&MM_F_WITH_REP);
 	*n_regs = b->reg.n;
 	return b->reg.a;
 }
@@ -154,7 +188,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 typedef struct {
 	int batch_size, n_processed, n_threads;
-	int radius, max_gap, min_cnt;
+	int radius, max_gap, min_cnt, flag;
 	bseq_file_t *fp;
 	const mm_idx_t *mi;
 } pipeline_t;
@@ -175,7 +209,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	int n_regs;
 
 	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, &step->buf[tid],
-				  step->p->radius, step->p->min_cnt, step->p->max_gap);
+				  step->p->radius, step->p->min_cnt, step->p->max_gap, step->p->flag);
 	step->n_reg[i] = n_regs;
 	if (n_regs > 0) {
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
@@ -226,13 +260,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int n_threads, int tbatch_size)
+int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int flag, int n_threads, int tbatch_size)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return -1;
-	pl.mi = idx, pl.radius = radius, pl.min_cnt = min_cnt, pl.max_gap = max_gap;
+	pl.mi = idx, pl.radius = radius, pl.min_cnt = min_cnt, pl.max_gap = max_gap, pl.flag = flag;
 	pl.n_threads = n_threads, pl.batch_size = tbatch_size;
 	kt_pipeline(n_threads == 1? 1 : 2, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);

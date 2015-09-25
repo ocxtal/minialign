@@ -20,7 +20,7 @@ void liftrlimit()
 
 int main(int argc, char *argv[])
 {
-	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, keep_name = 1, is_idx = 0;
+	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, keep_name = 1, is_idx = 0, flag = 0;
 	int tbatch_size = 10000000;
 	uint64_t ibatch_size = 10000000000ULL;
 	float f = 0.001;
@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
 	liftrlimit();
 	mm_realtime0 = realtime();
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:l")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:lR")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -44,6 +44,7 @@ int main(int argc, char *argv[])
 		else if (c == 'N') keep_name = 0;
 		else if (c == 'd') fnw = optarg;
 		else if (c == 'l') is_idx = 1;
+		else if (c == 'R') flag |= MM_F_WITH_REP;
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
@@ -75,6 +76,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -r INT     bandwidth [%d]\n", radius);
 		fprintf(stderr, "    -c INT     retain a mapping if it consists of >=INT minimizers [%d]\n", min_cnt);
 		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", max_gap);
+		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n");
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
 		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [10M]\n");
@@ -102,7 +104,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, mi->max_occ);
 		if (fpw) mm_idx_dump(fpw, mi);
 		for (i = optind + 1; i < argc; ++i)
-			mm_map_file(mi, argv[i], radius, max_gap, min_cnt, n_threads, tbatch_size);
+			mm_map_file(mi, argv[i], radius, max_gap, min_cnt, flag, n_threads, tbatch_size);
 		mm_idx_destroy(mi);
 	}
 	if (fpw) fclose(fpw);
