@@ -64,7 +64,7 @@ const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 void mm_idx_dump(FILE *fp, const mm_idx_t *mi);
 mm_idx_t *mm_idx_load(FILE *fp);
 
-const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap, int flag);
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap, int flag, const char *name);
 int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int flag, int n_threads, int tbatch_size);
 
 double cputime(void);

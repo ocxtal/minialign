@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r68"
+#define MM_VERSION "r69"
 
 void liftrlimit()
 {
@@ -31,7 +31,7 @@ int main(int argc, char *argv[])
 	liftrlimit();
 	mm_realtime0 = realtime();
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:lR")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:lRS")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -45,11 +45,11 @@ int main(int argc, char *argv[])
 		else if (c == 'd') fnw = optarg;
 		else if (c == 'l') is_idx = 1;
 		else if (c == 'R') flag |= MM_F_WITH_REP;
+		else if (c == 'S') flag |= MM_F_NO_SELF;
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
-		}
-		else if (c == 'B' || c == 'I') {
+		} else if (c == 'B' || c == 'I') {
 			double x;
 			char *p;
 			x = strtod(optarg, &p);
@@ -82,6 +82,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [10M]\n");
 		fprintf(stderr, "    -I NUM     create an index for every ~NUM bp [10G]\n");
 		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
+		fprintf(stderr, "    -S         skip self mapping\n");
 		fprintf(stderr, "    -N         use integer as target names\n");
 		fprintf(stderr, "    -V         show version number\n");
 		return 1;

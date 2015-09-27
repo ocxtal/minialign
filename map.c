@@ -146,7 +146,7 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, i
 	if (!skip_derep) drop_rep(b, min_cnt);
 }
 
-const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap, int flag)
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap, int flag, const char *name)
 {
 	int j;
 
@@ -162,6 +162,8 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 		for (k = 0; k < n; ++k) {
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
+			if ((flag&MM_F_NO_SELF) && mi->name && strcmp(name, mi->name[r[k]>>32]) == 0 && rpos == qpos)
+				continue;
 			kv_pushp(mm128_t, b->coef, &p);
 			if ((r[k]&1) == strand) { // forward strand
 				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);
@@ -209,7 +211,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	int n_regs;
 
 	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, &step->buf[tid],
-				  step->p->radius, step->p->min_cnt, step->p->max_gap, step->p->flag);
+				  step->p->radius, step->p->min_cnt, step->p->max_gap, step->p->flag, step->seq[i].name);
 	step->n_reg[i] = n_regs;
 	if (n_regs > 0) {
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
