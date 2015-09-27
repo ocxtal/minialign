@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r69"
+#define MM_VERSION "r70"
 
 void liftrlimit()
 {
@@ -60,14 +60,14 @@ int main(int argc, char *argv[])
 			else ibatch_size = (uint64_t)(x + .499);
 		}
 	}
-	if (w < 0) w = k;
+	if (w < 0) w = (int)(.6666667 * k + .499);
 
 	if (argc == optind) {
 		fprintf(stderr, "Usage: minimap [options] <target.fa> [query.fa] [...]\n");
 		fprintf(stderr, "Options:\n");
 		fprintf(stderr, "  Indexing:\n");
 		fprintf(stderr, "    -k INT     k-mer size [%d]\n", k);
-		fprintf(stderr, "    -w INT     minizer window size [same as -k]\n");
+		fprintf(stderr, "    -w INT     minizer window size [{-k}*2/3]\n");
 		fprintf(stderr, "    -d FILE    dump index to FILE []\n");
 		fprintf(stderr, "    -l         the 1st argument is a index file\n");
 //		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b); // most users would care about this
