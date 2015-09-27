@@ -59,9 +59,6 @@ const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n)
 	}
 }
 
-#include "ksort.h"
-KSORT_INIT_GENERIC(uint32_t)
-
 uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
 {
 	int i;
@@ -80,7 +77,7 @@ uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
 			a[n++] = kh_key(h, k)&1? 1 : (uint32_t)kh_val(h, k);
 		}
 	}
-	thres = ks_ksmall(uint32_t, n, a, (uint32_t)((1. - f) * n)) + 1;
+	thres = ks_ksmall_uint32_t(n, a, (uint32_t)((1. - f) * n)) + 1;
 	free(a);
 	return thres;
 }

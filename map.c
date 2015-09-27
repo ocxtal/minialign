@@ -38,8 +38,6 @@ KSORT_INIT(low32lt, uint64_t, lt_low32)
 #define gt_low32(a, b) ((uint32_t)(a) > (uint32_t)(b))
 KSORT_INIT(low32gt, uint64_t, gt_low32)
 
-uint32_t ks_ksmall_uint32_t(size_t n, uint32_t arr[], size_t kk); // defined in index.c via KSORT_INIT_GENERIC(uint32_t)
-
 static void drop_rep(mm_tbuf_t *b, int min_cnt)
 {
 	int i, j, n, m;
