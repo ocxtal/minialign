@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r72"
+#define MM_VERSION "r73"
 
 void liftrlimit()
 {
@@ -68,8 +68,9 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  Indexing:\n");
 		fprintf(stderr, "    -k INT     k-mer size [%d]\n", k);
 		fprintf(stderr, "    -w INT     minizer window size [{-k}*2/3]\n");
+		fprintf(stderr, "    -I NUM     split index for every ~NUM input bases [4G]\n");
 		fprintf(stderr, "    -d FILE    dump index to FILE []\n");
-		fprintf(stderr, "    -l         the 1st argument is a index file\n");
+		fprintf(stderr, "    -l         the 1st argument is a index file (overriding -k, -w and -I)\n");
 //		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b); // most users would care about this
 		fprintf(stderr, "  Mapping:\n");
 		fprintf(stderr, "    -f FLOAT   filter out top FLOAT fraction of repetitive minimizers [%.3f]\n", f);
@@ -80,7 +81,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
 		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [100M]\n");
-		fprintf(stderr, "    -I NUM     create an index for every ~NUM bp [4G]\n");
 		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
 		fprintf(stderr, "    -S         skip self mapping\n");
 		fprintf(stderr, "    -N         use integer as target names\n");

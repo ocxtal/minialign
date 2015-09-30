@@ -187,8 +187,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
         step_t *s;
-        s = (step_t*)calloc(1, sizeof(step_t));
 		if (p->n_read > p->ibatch_size) return 0;
+        s = (step_t*)calloc(1, sizeof(step_t));
 		s->seq = bseq_read(p->fp, p->tbatch_size, &s->n_seq);
 		if (s->seq) {
 			uint32_t old_m = p->mi->n, m, n;
