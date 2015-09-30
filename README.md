@@ -44,9 +44,9 @@ existing tools.
 
 ## Algorithm Overview
 
-1. Indexing. Collect all [(*w*,*k*)-minimizers][mini] in a batch (**-I**=4 billion) of
-   target sequences and store them in a hash table. Mark top **-f**=0.001
-   fraction of most frequent minimizers as repeats.
+1. Indexing. Collect all [(*w*,*k*)-minimizers][mini] in a batch (**-I**=4
+   billion bp) of target sequences and store them in a hash table. Mark top
+   **-f**=0.001 fraction of most frequent minimizers as repeats.
 
 2. For each query, collect all (*w*,*k*)-minimizers and look up the hash table for
    matches (*q<sub>i</sub>*,*t<sub>i</sub>*,*s<sub>i</sub>*), where
