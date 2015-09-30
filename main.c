@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r71"
+#define MM_VERSION "r72"
 
 void liftrlimit()
 {
@@ -21,8 +21,8 @@ void liftrlimit()
 int main(int argc, char *argv[])
 {
 	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, keep_name = 1, is_idx = 0, flag = 0;
-	int tbatch_size = 10000000;
-	uint64_t ibatch_size = 10000000000ULL;
+	int tbatch_size = 100000000;
+	uint64_t ibatch_size = 4000000000ULL;
 	float f = 0.001;
 	bseq_file_t *fp = 0;
 	char *fnw = 0;
@@ -79,8 +79,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n");
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
-		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [10M]\n");
-		fprintf(stderr, "    -I NUM     create an index for every ~NUM bp [10G]\n");
+		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [100M]\n");
+		fprintf(stderr, "    -I NUM     create an index for every ~NUM bp [4G]\n");
 		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
 		fprintf(stderr, "    -S         skip self mapping\n");
 		fprintf(stderr, "    -N         use integer as target names\n");
