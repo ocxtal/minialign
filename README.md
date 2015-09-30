@@ -46,7 +46,9 @@ existing tools.
 
 1. Indexing. Collect all [(*w*,*k*)-minimizers][mini] in a batch (**-I**=4
    billion bp) of target sequences and store them in a hash table. Mark top
-   **-f**=0.001 fraction of most frequent minimizers as repeats.
+   **-f**=0.001 fraction of most frequent minimizers as repeats. Minimap
+   uses [invertible hash function][invhash] to avoid taking ploy-A as
+   minimizers.
 
 2. For each query, collect all (*w*,*k*)-minimizers and look up the hash table for
    matches (*q<sub>i</sub>*,*t<sub>i</sub>*,*s<sub>i</sub>*), where
@@ -85,3 +87,4 @@ of a query may not be adjacent.
 [mini]: http://bioinformatics.oxfordjournals.org/content/20/18/3363.abstract
 [lis]: https://en.wikipedia.org/wiki/Longest_increasing_subsequence
 [hough]: https://en.wikipedia.org/wiki/Hough_transform
+[invhash]: https://gist.github.com/lh3/974ced188be2f90422cc
