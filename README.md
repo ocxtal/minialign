@@ -44,7 +44,7 @@ existing tools.
 
 ## Algorithm Overview
 
-1. Indexing. Collect all (*w*,*k*)-minimizers in a batch (**-I**=4 billion) of
+1. Indexing. Collect all [(*w*,*k*)-minimizers][mini] in a batch (**-I**=4 billion) of
    target sequences and store them in a hash table. Mark top **-f**=0.001
    fraction of most frequent minimizers as repeats.
 
@@ -61,7 +61,7 @@ existing tools.
    clustering procedure.
 
 4. For each cluster, sort (*q<sub>i</sub>*,*t<sub>i</sub>*) by *q<sub>i</sub>*
-   and solve a longest increasing sequence problem for *t<sub>i</sub>*. This
+   and solve a [longest increasing sequence problem][lis] for *t<sub>i</sub>*. This
    finds the longest co-linear matching chain. Break the chain whenever there
    is a gap longer than **-g**=10000.
 
@@ -81,3 +81,6 @@ all the query sequences in one go. The multiple hits of a query sequence is
 adjacent to each other in the output. If the total length is greater than
 4Gbp, minimap needs to read query sequences multiple times. The multiple hits
 of a query may not be adjacent.
+
+[mini]: http://bioinformatics.oxfordjournals.org/content/20/18/3363.abstract
+[lis]: https://en.wikipedia.org/wiki/Longest_increasing_subsequence
