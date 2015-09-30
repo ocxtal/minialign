@@ -58,7 +58,7 @@ existing tools.
    and then cluster matches within a **-r**=500bp window. Minimap merges
    two windows if 75% of minimizer matches overlap. For matches on different
    strand, sort {*q<sub>i</sub>*+*t<sub>i</sub>*} and apply a similar
-   clustering procedure.
+   clustering procedure. This is inspired by the [Hough transformation][hough].
 
 4. For each cluster, sort (*q<sub>i</sub>*,*t<sub>i</sub>*) by *q<sub>i</sub>*
    and solve a [longest increasing sequence problem][lis] for *t<sub>i</sub>*. This
@@ -84,3 +84,4 @@ of a query may not be adjacent.
 
 [mini]: http://bioinformatics.oxfordjournals.org/content/20/18/3363.abstract
 [lis]: https://en.wikipedia.org/wiki/Longest_increasing_subsequence
+[hough]: https://en.wikipedia.org/wiki/Hough_transform
