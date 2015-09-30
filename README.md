@@ -34,7 +34,7 @@ existing tools.
   minimap -l target.mmi query.fa.gz > out.mini
   ```
   Minimap indexing is very fast (less than 1 minute for human genome), but for
-  huge repeatedly used databases, indexing is still preferred.
+  huge repeatedly used databases, prebuilding index is still preferred.
 
 * Map sequences against themselve without diagnal matches:
   ```sh
@@ -46,7 +46,7 @@ existing tools.
 
 1. Indexing. Collect all [(*w*,*k*)-minimizers][mini] in a batch (**-I**=4
    billion bp) of target sequences and store them in a hash table. Mark top
-   **-f**=0.001 fraction of most frequent minimizers as repeats. Minimap
+   **-f**=0.1% of most frequent minimizers as repeats. Minimap
    uses [invertible hash function][invhash] to avoid taking ploy-A as
    minimizers.
 
@@ -56,10 +56,10 @@ existing tools.
    and *s<sub>i</sub>* indicates whether the minimizer match is on the same
    strand.
 
-3. For matches on the same strand, sort {*q<sub>i</sub>*-*t<sub>i</sub>*}
+3. For matches on the same strand, sort by {*q<sub>i</sub>*-*t<sub>i</sub>*}
    and then cluster matches within a **-r**=500bp window. Minimap merges
    two windows if 75% of minimizer matches overlap. For matches on different
-   strand, sort {*q<sub>i</sub>*+*t<sub>i</sub>*} and apply a similar
+   strands, sort {*q<sub>i</sub>*+*t<sub>i</sub>*} and apply a similar
    clustering procedure. This is inspired by the [Hough transformation][hough].
 
 4. For each cluster, sort (*q<sub>i</sub>*,*t<sub>i</sub>*) by *q<sub>i</sub>*
