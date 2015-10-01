@@ -7,11 +7,13 @@ is tuned to have high sensitivity to 2kb matches around 20% divergence but with
 low specificity. Minimap does not generate alignments as of now and because of
 this, it is usually tens of times faster than mainstream *aligners*. With four
 CPU cores, minimap can map 1.6Gbp PacBio reads to human in 2.5 minutes, 1Gbp
-PacBio E. coli reads to pre-indexed 9.6Gbp bacterial genomes in 3 minutes and
-map mouse genome to human in 20 minutes (with one CPU as multi-threading is
-ineffective for chromosome-long queries). Minimap can also find long matches
-between 1Gbp E. coli reads in one minute, though the sensitivity is probably
-not good enough.
+PacBio E. coli reads to pre-indexed 9.6Gbp bacterial genomes in 3 minutes, to
+pre-indexed >100Gbp nt database in ~1 hour (of which ~20 minutes are spent on
+loading index from the network filesystem; peak RAM: 10GB), map 2800 bacteria
+to themselves in 1 hour, and map mouse genome to human in 20 minutes (with one
+CPU as multi-threading is ineffective for chromosome-long queries). Minimap can
+also find long matches between 1Gbp E.  coli reads in one minute, though the
+sensitivity is probably not good enough.
 
 Minimap does not replace mainstream aligners, but it can be useful when you
 want to quickly identify long approximate matches at moderate divergence among
@@ -33,8 +35,9 @@ existing tools.
   minimap -d target.mmi target.fa.gz
   minimap -l target.mmi query.fa.gz > out.mini
   ```
-  Minimap indexing is very fast (less than 1 minute for human genome), but for
-  huge repeatedly used databases, prebuilding index is still preferred.
+  Minimap indexing is very fast (1 minute for human genome; 50 minutes for
+  >100Gbp nt database retrieved on 2015-09-30), but for huge
+  repeatedly used databases, prebuilding index is still preferred.
 
 * Map sequences against themselve without diagnal matches:
   ```sh
