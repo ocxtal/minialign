@@ -35,8 +35,8 @@ existing tools.
   minimap -d target.mmi target.fa.gz
   minimap -l target.mmi query.fa.gz > out.mini
   ```
-  Minimap indexing is very fast (1 minute for human genome; 50 minutes for
-  >100Gbp nt database retrieved on 2015-09-30), but for huge
+  Minimap indexing is very fast (1 minute for human genome; 50 minutes for >100Gbp
+  nt database retrieved on 2015-09-30), but for huge
   repeatedly used databases, prebuilding index is still preferred.
 
 * Map sequences against themselve without diagnal matches:
