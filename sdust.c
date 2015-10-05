@@ -9,7 +9,8 @@
 #define SD_WMSK (SD_WTOT - 1)
 
 typedef struct {
-	int start, finish, S;
+	int start, finish;
+	double S;
 } perf_intv_t;
 
 typedef kvec_t(perf_intv_t) perf_intv_v;
