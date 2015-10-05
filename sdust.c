@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdio.h>
 #include "kdq.h"
 #include "kvec.h"
 
@@ -38,25 +39,25 @@ unsigned char seq_nt4_table[256] = {
 extern unsigned char seq_nt4_table[256];
 #endif
 
-static inline void shift_window(int t, kdq_t(int) *w, double T, int W, int *L, int rw, int rv, int *cw, int *cv)
+static inline void shift_window(int t, kdq_t(int) *w, double T, int W, int *L, int *rw, int *rv, int *cw, int *cv)
 {
 	int s;
 	if (kdq_size(w) >= W - SD_WLEN + 1) { // TODO: is this right for SD_WLEN!=3?
 		s = *kdq_shift(int, w);
-		rw -= --cw[s];
+		*rw -= --cw[s];
 		if (*L > kdq_size(w))
-			--*L, rv -= --cv[s];
+			--*L, *rv -= --cv[s];
 	}
 	kdq_push(int, w, t);
 	++*L;
-	rw += cw[t]++;
-	rv += cv[t]++;
+	*rw += cw[t]++;
+	*rv += cv[t]++;
 	if (cv[t] > 2. * T) {
 		do {
 			s = kdq_at(w, kdq_size(w) - *L);
-			rv -= --cv[s];
+			*rv -= --cv[s];
 			--*L;
-		} while (s == t);
+		} while (s != t);
 	}
 }
 
@@ -116,17 +117,18 @@ uint64_t *sdust(const uint8_t *seq, int l_seq, double T, int W, int *n)
 
 	for (i = l = t = 0; i <= l_seq; ++i) {
 		int b = i < l_seq? seq_nt4_table[seq[i]] : 4;
-		if (b < 3) { // an A/C/G/T base
+		if (b < 4) { // an A/C/G/T base
 			++l, t = (t<<2 | b) & SD_WMSK;
 			if (l >= SD_WLEN) { // we have seen a word
-				start = (l - W + 1 > 0? l - W + 1 : 0) + (i - l); // set the start of the current window
+				start = (l - W + 1 > 0? l - W + 1 : 0) + (i + 1 - l); // set the start of the current window
+				//printf("[%d] L=%d #w=%ld #P=%ld rv=%d\n", i, L, kdq_size(w), P.n, rv);
 				save_masked_regions(&res, &P, start); // save intervals falling out of the current window?
-				shift_window(t, w, T, W, &L, rw, rv, cw, cv);
+				shift_window(t, w, T, W, &L, &rw, &rv, cw, cv);
 				if (rw > L * T)
 					find_perfect(&P, w, T, start, L, rv, cv);
 			}
 		} else { // N or the end of sequence; N effectively breaks input into pieces of independent sequences
-			start = (l - W + 1 > 0? l - W + 1 : 0) + (i - l);
+			start = (l - W + 1 > 0? l - W + 1 : 0) + (i + 1 - l);
 			while (P.n) save_masked_regions(&res, &P, start++); // clear up unsaved perfect intervals
 			l = t = 0;
 		}
