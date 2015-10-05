@@ -1,4 +1,5 @@
 #include <string.h>
+#include <stdint.h>
 #include <stdio.h>
 #include "kdq.h"
 #include "kvec.h"
@@ -69,7 +70,7 @@ static inline void save_masked_regions(uint64_v *res, perf_intv_v *P, int start)
 	p = &P->a[P->n - 1];
 	if (res->n) {
 		int s = res->a[res->n - 1]>>32, f = (uint32_t)res->a[res->n - 1];
-		if (p->start <= f + 1)
+		if (p->start <= f) // if overlapping with or adjacent to the previous interval
 			saved = 1, res->a[res->n - 1] = (uint64_t)s<<32 | (f > p->finish? f : p->finish);
 	}
 	if (!saved) kv_push(uint64_t, *res, (uint64_t)p->start<<32|p->finish);
@@ -95,7 +96,7 @@ static void find_perfect(perf_intv_v *P, const kdq_t(int) *w, double T, int star
 				if (P->n == P->m) kv_resize(perf_intv_t, *P, P->n + 1);
 				memmove(&P->a[j+1], &P->a[j], (P->n - j) * sizeof(perf_intv_t)); // make room
 				++P->n;
-				P->a[j].start = i + start, P->a[j].finish = kdq_size(w) + 1 + start, P->a[j].S = new_score;
+				P->a[j].start = i + start, P->a[j].finish = kdq_size(w) + (SD_WLEN - 1) + start, P->a[j].S = new_score;
 			}
 		}
 	}
