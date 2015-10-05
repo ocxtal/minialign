@@ -17,10 +17,10 @@ minimap:$(OBJS) main.o
 		$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
 
 sdust:sdust.c kdq.h kvec.h kseq.h
-		$(CC) -DSDUST_MAIN $(CFLAGS) $< -o $@ -lz
+		$(CC) -D_SDUST_MAIN $(CFLAGS) $< -o $@ -lz
 
 clean:
-		rm -fr gmon.out *.o ext/*.o a.out $(PROG) *~ *.a *.dSYM session*
+		rm -fr gmon.out *.o ext/*.o a.out $(PROG) sdust *~ *.a *.dSYM session*
 
 depend:
 		(LC_ALL=C; export LC_ALL; makedepend -Y -- $(CFLAGS) $(DFLAGS) -- *.c)

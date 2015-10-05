@@ -10,7 +10,7 @@
 
 typedef struct {
 	int start, finish;
-	double S;
+	int r, l;
 } perf_intv_t;
 
 typedef kvec_t(perf_intv_t) perf_intv_v;
@@ -18,7 +18,7 @@ typedef kvec_t(uint64_t) uint64_v;
 
 KDQ_INIT(int)
 
-#ifndef HAVE_NT4_TBL
+#if defined(_NO_NT4_TBL) || defined(_SDUST_MAIN)
 unsigned char seq_nt4_table[256] = {
 	0, 1, 2, 3,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
 	4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4,  4, 4, 4, 4, 
@@ -41,7 +41,7 @@ unsigned char seq_nt4_table[256] = {
 extern unsigned char seq_nt4_table[256];
 #endif
 
-static inline void shift_window(int t, kdq_t(int) *w, double T, int W, int *L, int *rw, int *rv, int *cw, int *cv)
+static inline void shift_window(int t, kdq_t(int) *w, int T, int W, int *L, int *rw, int *rv, int *cw, int *cv)
 {
 	int s;
 	if (kdq_size(w) >= W - SD_WLEN + 1) { // TODO: is this right for SD_WLEN!=3?
@@ -54,7 +54,7 @@ static inline void shift_window(int t, kdq_t(int) *w, double T, int W, int *L, i
 	++*L;
 	*rw += cw[t]++;
 	*rv += cv[t]++;
-	if (cv[t] > 2. * T) {
+	if (cv[t] * 10 > T<<1) {
 		do {
 			s = kdq_at(w, kdq_size(w) - *L);
 			*rv -= --cv[s];
@@ -79,31 +79,33 @@ static inline void save_masked_regions(uint64_v *res, perf_intv_v *P, int start)
 	P->n = i + 1;
 }
 
-static void find_perfect(perf_intv_v *P, const kdq_t(int) *w, double T, int start, int L, int rv, const int *cv)
+static void find_perfect(perf_intv_v *P, const kdq_t(int) *w, int T, int start, int L, int rv, const int *cv)
 {
-	int c[SD_WTOT], r = rv, i;
-	double max_score = 0.;
+	int c[SD_WTOT], r = rv, i, max_r = 0, max_l = 0;
 	memcpy(c, cv, SD_WTOT * sizeof(int));
 	for (i = (long)kdq_size(w) - L - 1; i >= 0; --i) {
-		int j, t = kdq_at(w, i);
-		double new_score;
+		int j, t = kdq_at(w, i), new_r, new_l;
 		r += c[t]++;
-		new_score = (double)r / (kdq_size(w) - i - 1);
-		if (new_score > T) {
-			for (j = 0; j < P->n && P->a[j].start >= i + start; ++j) // find insertion position
-				max_score = max_score > P->a[j].S? max_score : P->a[j].S;
-			if (new_score >= max_score) { // then insert
-				max_score = new_score;
+		new_r = r, new_l = kdq_size(w) - i - 1;
+		if (new_r * 10 > T * new_l) {
+			for (j = 0; j < P->n && P->a[j].start >= i + start; ++j) { // find insertion position
+				perf_intv_t *p = &P->a[j];
+				if (max_r == 0 || p->r * max_l > max_r * p->l)
+					max_r = p->r, max_l = p->l;
+			}
+			if (max_r == 0 || new_r * max_l >= max_r * new_l) { // then insert
+				max_r = new_r, max_l = new_l;
 				if (P->n == P->m) kv_resize(perf_intv_t, *P, P->n + 1);
 				memmove(&P->a[j+1], &P->a[j], (P->n - j) * sizeof(perf_intv_t)); // make room
 				++P->n;
-				P->a[j].start = i + start, P->a[j].finish = kdq_size(w) + (SD_WLEN - 1) + start, P->a[j].S = new_score;
+				P->a[j].start = i + start, P->a[j].finish = kdq_size(w) + (SD_WLEN - 1) + start;
+				P->a[j].r = new_r, P->a[j].l = new_l;
 			}
 		}
 	}
 }
 
-uint64_t *sdust(const uint8_t *seq, int l_seq, double T, int W, int *n)
+uint64_t *sdust(const uint8_t *seq, int l_seq, int T, int W, int *n)
 {
 	int rv = 0, rw = 0, L = 0, cv[SD_WTOT], cw[SD_WTOT];
 	uint64_v res = {0,0,0};  // the result
@@ -123,10 +125,9 @@ uint64_t *sdust(const uint8_t *seq, int l_seq, double T, int W, int *n)
 			++l, t = (t<<2 | b) & SD_WMSK;
 			if (l >= SD_WLEN) { // we have seen a word
 				start = (l - W > 0? l - W : 0) + (i + 1 - l); // set the start of the current window
-				//printf("[%d] L=%d #w=%ld #P=%ld rv=%d\n", i, L, kdq_size(w), P.n, rv);
 				save_masked_regions(&res, &P, start); // save intervals falling out of the current window?
 				shift_window(t, w, T, W, &L, &rw, &rv, cw, cv);
-				if (rw > L * T)
+				if (rw * 10 > L * T)
 					find_perfect(&P, w, T, start, L, rv, cv);
 			}
 		} else { // N or the end of sequence; N effectively breaks input into pieces of independent sequences
@@ -141,7 +142,7 @@ uint64_t *sdust(const uint8_t *seq, int l_seq, double T, int W, int *n)
 	return res.a;
 }
 
-#ifdef SDUST_MAIN
+#ifdef _SDUST_MAIN
 #include <zlib.h>
 #include <stdio.h>
 #include <unistd.h>
@@ -152,15 +153,14 @@ int main(int argc, char *argv[])
 {
 	gzFile fp;
 	kseq_t *ks;
-	int W = 64, c;
-	double T = 2.0;
+	int W = 64, T = 20, c;
 
 	while ((c = getopt(argc, argv, "w:t:")) >= 0) {
 		if (c == 'w') W = atoi(optarg);
-		else if (c == 't') T = atof(optarg);
+		else if (c == 't') T = atoi(optarg);
 	}
 	if (optind == argc) {
-		fprintf(stderr, "Usage: sdust [-w %d] [-t %.1f] <in.fa>\n", W, T);
+		fprintf(stderr, "Usage: sdust [-w %d] [-t %d] <in.fa>\n", W, T);
 		return 1;
 	}
 	fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
