@@ -122,7 +122,7 @@ uint64_t *sdust(const uint8_t *seq, int l_seq, double T, int W, int *n)
 		if (b < 4) { // an A/C/G/T base
 			++l, t = (t<<2 | b) & SD_WMSK;
 			if (l >= SD_WLEN) { // we have seen a word
-				start = (l - W + 1 > 0? l - W + 1 : 0) + (i + 1 - l); // set the start of the current window
+				start = (l - W > 0? l - W : 0) + (i + 1 - l); // set the start of the current window
 				//printf("[%d] L=%d #w=%ld #P=%ld rv=%d\n", i, L, kdq_size(w), P.n, rv);
 				save_masked_regions(&res, &P, start); // save intervals falling out of the current window?
 				shift_window(t, w, T, W, &L, &rw, &rv, cw, cv);
