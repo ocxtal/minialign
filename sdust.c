@@ -121,7 +121,7 @@ uint64_t *sdust(const uint8_t *seq, int l_seq, double T, int W, int *n)
 			if (l >= SD_WLEN) { // we have seen a word
 				start = (l - W + 1 > 0? l - W + 1 : 0) + (i - l); // set the start of the current window
 				save_masked_regions(&res, &P, start); // save intervals falling out of the current window?
-				shift_window(t, w, T, start, &L, rw, rv, cw, cv);
+				shift_window(t, w, T, W, &L, rw, rv, cw, cv);
 				if (rw > L * T)
 					find_perfect(&P, w, T, start, L, rv, cv);
 			}
@@ -136,3 +136,41 @@ uint64_t *sdust(const uint8_t *seq, int l_seq, double T, int W, int *n)
 	*n = res.n;
 	return res.a;
 }
+
+#ifdef SDUST_MAIN
+#include <zlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include "kseq.h"
+KSEQ_INIT(gzFile, gzread)
+
+int main(int argc, char *argv[])
+{
+	gzFile fp;
+	kseq_t *ks;
+	int W = 64, c;
+	double T = 2.0;
+
+	while ((c = getopt(argc, argv, "w:t:")) >= 0) {
+		if (c == 'w') W = atoi(optarg);
+		else if (c == 't') T = atof(optarg);
+	}
+	if (optind == argc) {
+		fprintf(stderr, "Usage: sdust [-w %d] [-t %.1f] <in.fa>\n", W, T);
+		return 1;
+	}
+	fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
+	ks = kseq_init(fp);
+	while (kseq_read(ks) >= 0) {
+		uint64_t *r;
+		int i, n;
+		r = sdust((uint8_t*)ks->seq.s, -1, T, W, &n);
+		for (i = 0; i < n; ++i)
+			printf("%s\t%d\t%d\n", ks->name.s, (int)(r[i]>>32), (int)r[i]);
+		free(r);
+	}
+	kseq_destroy(ks);
+	gzclose(fp);
+	return 0;
+}
+#endif
