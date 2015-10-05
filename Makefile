@@ -16,6 +16,9 @@ all:$(PROG)
 minimap:$(OBJS) main.o
 		$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
 
+sdust:sdust.c kdq.h kvec.h kseq.h
+		$(CC) -DSDUST_MAIN $(CFLAGS) $< -o $@ -lz
+
 clean:
 		rm -fr gmon.out *.o ext/*.o a.out $(PROG) *~ *.a *.dSYM session*
 
@@ -25,8 +28,9 @@ depend:
 # DO NOT DELETE
 
 bseq.o: bseq.h kseq.h
-index.o: minimap.h bseq.h kvec.h khash.h ksort.h
+index.o: minimap.h bseq.h kvec.h khash.h
 main.o: minimap.h bseq.h
 map.o: bseq.h kvec.h minimap.h ksort.h
 misc.o: minimap.h bseq.h ksort.h
+sdust.o: kdq.h kvec.h
 sketch.o: kvec.h minimap.h bseq.h
