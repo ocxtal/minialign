@@ -38,40 +38,41 @@ unsigned char seq_nt4_table[256] = {
 extern unsigned char seq_nt4_table[256];
 #endif
 
-static inline void shift_window(int t, kdq_t(int) *w, double T, int W, int L, int rw, int rv, int *cw, int *cv)
+static inline void shift_window(int t, kdq_t(int) *w, double T, int W, int *L, int rw, int rv, int *cw, int *cv)
 {
 	int s;
-	if (kdq_size(w) >= W - 2) {
-		s = kdq_shift(int, w);
-		rw -= --cw[t];
-		if (L > kdq_size(w))
-			--L, rv -= --cv[t];
+	if (kdq_size(w) >= W - SD_WLEN + 1) { // TODO: is this right for SD_WLEN!=3?
+		s = *kdq_shift(int, w);
+		rw -= --cw[s];
+		if (*L > kdq_size(w))
+			--*L, rv -= --cv[s];
 	}
 	kdq_push(int, w, t);
-	++L;
+	++*L;
 	rw += cw[t]++;
 	rv += cv[t]++;
 	if (cv[t] > 2. * T) {
 		do {
-			s = kdq_at(w, kdq_size(w) - L);
-			rv -= --cv[t];
-			--L;
+			s = kdq_at(w, kdq_size(w) - *L);
+			rv -= --cv[s];
+			--*L;
 		} while (s == t);
 	}
 }
 
-static inline void save_masked_region(uint64_v *res, perf_intv_v *P, int start)
+static inline void save_masked_regions(uint64_v *res, perf_intv_v *P, int start)
 {
 	int i, saved = 0;
+	perf_intv_t *p;
 	if (P->n == 0 || P->a[P->n - 1].start >= start) return;
+	p = &P->a[P->n - 1];
 	if (res->n) {
 		int s = res->a[res->n - 1]>>32, f = (uint32_t)res->a[res->n - 1];
-		perf_intv_t *p = &P->a[P->n - 1];
 		if (p->start <= f + 1)
 			saved = 1, res->a[res->n - 1] = (uint64_t)s<<32 | (f > p->finish? f : p->finish);
 	}
 	if (!saved) kv_push(uint64_t, *res, (uint64_t)p->start<<32|p->finish);
-	for (i = P->n - 1; i >= 0 && P->a[i].start < start; --i);
+	for (i = P->n - 1; i >= 0 && P->a[i].start < start; --i); // remove perfect intervals that have falled out of the window
 	P->n = i + 1;
 }
 
@@ -80,18 +81,18 @@ static void find_perfect(perf_intv_v *P, const kdq_t(int) *w, double T, int star
 	int c[SD_WTOT], r = rv, i;
 	double max_score = 0.;
 	memcpy(c, cv, SD_WTOT * sizeof(int));
-	for (i = kdq_size(w) - L - 1; i >= 0; --i) {
+	for (i = (long)kdq_size(w) - L - 1; i >= 0; --i) {
 		int j, t = kdq_at(w, i);
 		double new_score;
 		r += c[t]++;
 		new_score = (double)r / (kdq_size(w) - i - 1);
 		if (new_score > T) {
-			for (j = 0; j < P->n && P->a[j].start >= i + start; ++j) // find insert point
+			for (j = 0; j < P->n && P->a[j].start >= i + start; ++j) // find insertion position
 				max_score = max_score > P->a[j].S? max_score : P->a[j].S;
 			if (new_score >= max_score) { // then insert
-				if (P->n == P->m)
-					kv_resize(perf_intv_t, *P, P->n + 1);
-				memmove(&P->a[j+1], &P->a[j], (P->n - j) * sizeof(perf_intv_t));
+				max_score = new_score;
+				if (P->n == P->m) kv_resize(perf_intv_t, *P, P->n + 1);
+				memmove(&P->a[j+1], &P->a[j], (P->n - j) * sizeof(perf_intv_t)); // make room
 				++P->n;
 				P->a[j].start = i + start, P->a[j].finish = kdq_size(w) + 1 + start, P->a[j].S = new_score;
 			}
@@ -103,29 +104,33 @@ uint64_t *sdust(const uint8_t *seq, int l_seq, double T, int W, int *n)
 {
 	int rv = 0, rw = 0, L = 0, cv[SD_WTOT], cw[SD_WTOT];
 	uint64_v res = {0,0,0};  // the result
-	perf_intv_v P = {0,0,0}; // _P_ keeps the list of perfect intervals for the current window, sorted by ascending start and then by descending finish
-	kdq_t(int) *w;
-	int i, start, l;
-	unsigned t;
+	perf_intv_v P = {0,0,0}; // _P_ keeps the list of perfect intervals for the current window, sorted by descending start and then by ascending finish
+	kdq_t(int) *w; // this caches previous words
+	int i, start, l; // _start_: start of the current window; _l_: length of a contiguous A/C/G/T (sub)sequence
+	unsigned t; // current word
 
 	memset(cv, 0, SD_WTOT * sizeof(int));
 	memset(cw, 0, SD_WTOT * sizeof(int));
 	w = kdq_init(int);
+	if (l_seq < 0) l_seq = strlen((const char*)seq);
 
-	for (i = l = t = 0; i < l_seq; ++i) {
-		int b = seq_nt4_table[seq[i]];
-		if (b < 3) {
+	for (i = l = t = 0; i <= l_seq; ++i) {
+		int b = i < l_seq? seq_nt4_table[seq[i]] : 4;
+		if (b < 3) { // an A/C/G/T base
 			++l, t = (t<<2 | b) & SD_WMSK;
-			if (l >= SD_WLEN) {
-				start = i - W + 1 > 0? i - W + 1 : 0;
-				save_masked_regions(&res, &P, start);
-				shift_window(t, w, T, start, L, rv, cv);
+			if (l >= SD_WLEN) { // we have seen a word
+				start = (l - W + 1 > 0? l - W + 1 : 0) + (i - l); // set the start of the current window
+				save_masked_regions(&res, &P, start); // save intervals falling out of the current window?
+				shift_window(t, w, T, start, &L, rw, rv, cw, cv);
+				if (rw > L * T)
+					find_perfect(&P, w, T, start, L, rv, cv);
 			}
-		} else l = t = 0;
+		} else { // N or the end of sequence; N effectively breaks input into pieces of independent sequences
+			start = (l - W + 1 > 0? l - W + 1 : 0) + (i - l);
+			while (P.n) save_masked_regions(&res, &P, start++); // clear up unsaved perfect intervals
+			l = t = 0;
+		}
 	}
-	start = l_seq - W + 1 > 0? l_seq - W + 1 : 0;
-	while (P->n)
-		save_masked_regions(&res, &P, start++);
 
 	kdq_destroy(int, w); free(P.a);
 	*n = res.n;
