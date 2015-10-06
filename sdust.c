@@ -61,6 +61,7 @@ void sdust_buf_destroy(sdust_buf_t *buf)
 	if (buf == 0) return;
 	kdq_destroy(int, buf->w);
 	free(buf->P.a); free(buf->res.a);
+	free(buf);
 }
 
 static inline void shift_window(int t, kdq_t(int) *w, int T, int W, int *L, int *rw, int *rv, int *cw, int *cv)
