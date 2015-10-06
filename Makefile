@@ -2,7 +2,7 @@ CC=			gcc
 CFLAGS=		-g -Wall -O2 -Wc++-compat -Wno-unused-function
 CPPFLAGS=
 INCLUDES=	
-OBJS=		kthread.o misc.o bseq.o sketch.o index.o map.o
+OBJS=		kthread.o misc.o bseq.o sketch.o sdust.o index.o map.o
 PROG=		minimap
 LIBS=		-lm -lz -lpthread
 

@@ -4,6 +4,16 @@
 #include "bseq.h"
 #include "kvec.h"
 #include "minimap.h"
+#include "sdust.h"
+
+void mm_mapopt_init(mm_mapopt_t *opt)
+{
+	opt->radius = 500;
+	opt->max_gap = 10000;
+	opt->min_cnt = 4;
+	opt->sdust_thres = 25;
+	opt->flag = 0;
+}
 
 /****************************
  * Find approxiate mappings *
@@ -15,6 +25,7 @@ struct mm_tbuf_s { // per-thread buffer
 	mm128_v intv; // intervals on sorted coef
 	uint32_v reg2mini;
 	uint32_v rep_aux;
+	sdust_buf_t *sdb;
 	// the following are for computing LIS
 	uint32_t n, m;
 	uint64_t *a;
@@ -23,11 +34,21 @@ struct mm_tbuf_s { // per-thread buffer
 	kvec_t(mm_reg1_t) reg;
 };
 
-void mm_tbuf_free(mm_tbuf_t *b)
+mm_tbuf_t *mm_tbuf_init()
+{
+	mm_tbuf_t *b;
+	b = (mm_tbuf_t*)calloc(1, sizeof(mm_tbuf_t));
+	b->sdb = sdust_buf_init();
+	return b;
+}
+
+void mm_tbuf_destroy(mm_tbuf_t *b)
 {
 	if (b == 0) return;
 	free(b->mini.a); free(b->coef.a); free(b->intv.a); free(b->reg.a); free(b->reg2mini.a); free(b->rep_aux.a);
 	free(b->a); free(b->b); free(b->p);
+	sdust_buf_destroy(b->sdb);
+	free(b);
 }
 
 #include "ksort.h"
@@ -145,7 +166,7 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, i
 	if (!skip_derep) drop_rep(b, min_cnt);
 }
 
-const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap, int flag, const char *name)
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *name)
 {
 	int j;
 
@@ -161,7 +182,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 		for (k = 0; k < n; ++k) {
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
-			if ((flag&MM_F_NO_SELF) && mi->name && strcmp(name, mi->name[r[k]>>32]) == 0 && rpos == qpos)
+			if ((opt->flag&MM_F_NO_SELF) && mi->name && strcmp(name, mi->name[r[k]>>32]) == 0 && rpos == qpos)
 				continue;
 			kv_pushp(mm128_t, b->coef, &p);
 			if ((r[k]&1) == strand) { // forward strand
@@ -175,7 +196,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 	}
 	radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
 	b->reg.n = 0;
-	get_reg(b, radius, mi->k, min_cnt, max_gap, flag&MM_F_WITH_REP);
+	get_reg(b, opt->radius, mi->k, opt->min_cnt, opt->max_gap, opt->flag&MM_F_WITH_REP);
 	*n_regs = b->reg.n;
 	return b->reg.a;
 }
@@ -189,7 +210,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 typedef struct {
 	int batch_size, n_processed, n_threads;
-	int radius, max_gap, min_cnt, flag;
+	const mm_mapopt_t *opt;
 	bseq_file_t *fp;
 	const mm_idx_t *mi;
 } pipeline_t;
@@ -200,7 +221,7 @@ typedef struct {
 	bseq1_t *seq;
 	int *n_reg;
 	mm_reg1_t **reg;
-	mm_tbuf_t *buf;
+	mm_tbuf_t **buf;
 } step_t;
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
@@ -209,8 +230,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	const mm_reg1_t *regs;
 	int n_regs;
 
-	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, &step->buf[tid],
-				  step->p->radius, step->p->min_cnt, step->p->max_gap, step->p->flag, step->seq[i].name);
+	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, step->buf[tid], step->p->opt, step->seq[i].name);
 	step->n_reg[i] = n_regs;
 	if (n_regs > 0) {
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
@@ -230,7 +250,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			s->p = p;
 			for (i = 0; i < s->n_seq; ++i)
 				s->seq[i].rid = p->n_processed++;
-			s->buf = (mm_tbuf_t*)calloc(p->n_threads, sizeof(mm_tbuf_t));
+			s->buf = (mm_tbuf_t**)calloc(p->n_threads, sizeof(mm_tbuf_t*));
+			for (i = 0; i < p->n_threads; ++i)
+				s->buf[i] = mm_tbuf_init();
 			s->n_reg = (int*)calloc(s->n_seq, sizeof(int));
 			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t**));
 			return s;
@@ -241,7 +263,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
     } else if (step == 2) { // step 2: output
         step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
-		for (i = 0; i < p->n_threads; ++i) mm_tbuf_free(&s->buf[i]);
+		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
 		free(s->buf);
 		for (i = 0; i < s->n_seq; ++i) {
 			bseq1_t *t = &s->seq[i];
@@ -261,13 +283,13 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int flag, int n_threads, int tbatch_size)
+int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int n_threads, int tbatch_size)
 {
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.fp = bseq_open(fn);
 	if (pl.fp == 0) return -1;
-	pl.mi = idx, pl.radius = radius, pl.min_cnt = min_cnt, pl.max_gap = max_gap, pl.flag = flag;
+	pl.opt = opt, pl.mi = idx;
 	pl.n_threads = n_threads, pl.batch_size = tbatch_size;
 	kt_pipeline(n_threads == 1? 1 : 2, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);

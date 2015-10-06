@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r81"
+#define MM_VERSION "r93"
 
 void liftrlimit()
 {
@@ -20,7 +20,8 @@ void liftrlimit()
 
 int main(int argc, char *argv[])
 {
-	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, radius = 500, max_gap = 10000, min_cnt = 4, n_threads = 3, keep_name = 1, is_idx = 0, flag = 0;
+	mm_mapopt_t opt;
+	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, n_threads = 3, keep_name = 1, is_idx = 0;
 	int tbatch_size = 100000000;
 	uint64_t ibatch_size = 4000000000ULL;
 	float f = 0.001;
@@ -30,22 +31,23 @@ int main(int argc, char *argv[])
 
 	liftrlimit();
 	mm_realtime0 = realtime();
+	mm_mapopt_init(&opt);
 
 	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:lRS")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
-		else if (c == 'r') radius = atoi(optarg);
-		else if (c == 'c') min_cnt = atoi(optarg);
+		else if (c == 'r') opt.radius = atoi(optarg);
+		else if (c == 'c') opt.min_cnt = atoi(optarg);
 		else if (c == 'f') f = atof(optarg);
 		else if (c == 't') n_threads = atoi(optarg);
 		else if (c == 'v') mm_verbose = atoi(optarg);
-		else if (c == 'g') max_gap = atoi(optarg);
+		else if (c == 'g') opt.max_gap = atoi(optarg);
 		else if (c == 'N') keep_name = 0;
 		else if (c == 'd') fnw = optarg;
 		else if (c == 'l') is_idx = 1;
-		else if (c == 'R') flag |= MM_F_WITH_REP;
-		else if (c == 'S') flag |= MM_F_NO_SELF;
+		else if (c == 'R') opt.flag |= MM_F_WITH_REP;
+		else if (c == 'S') opt.flag |= MM_F_NO_SELF;
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
@@ -74,9 +76,9 @@ int main(int argc, char *argv[])
 //		fprintf(stderr, "    -b INT     bucket bits [%d]\n", b); // most users would care about this
 		fprintf(stderr, "  Mapping:\n");
 		fprintf(stderr, "    -f FLOAT   filter out top FLOAT fraction of repetitive minimizers [%.3f]\n", f);
-		fprintf(stderr, "    -r INT     bandwidth [%d]\n", radius);
-		fprintf(stderr, "    -c INT     retain a mapping if it consists of >=INT minimizers [%d]\n", min_cnt);
-		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", max_gap);
+		fprintf(stderr, "    -r INT     bandwidth [%d]\n", opt.radius);
+		fprintf(stderr, "    -c INT     retain a mapping if it consists of >=INT minimizers [%d]\n", opt.min_cnt);
+		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", opt.max_gap);
 		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n");
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
@@ -105,7 +107,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %d\n", __func__, mi->max_occ);
 		if (fpw) mm_idx_dump(fpw, mi);
 		for (i = optind + 1; i < argc; ++i)
-			mm_map_file(mi, argv[i], radius, max_gap, min_cnt, flag, n_threads, tbatch_size);
+			mm_map_file(mi, argv[i], &opt, n_threads, tbatch_size);
 		mm_idx_destroy(mi);
 	}
 	if (fpw) fclose(fpw);

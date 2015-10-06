@@ -44,6 +44,10 @@ typedef struct {
 	int32_t qs, qe, rs, re;
 } mm_reg1_t;
 
+typedef struct {
+	int radius, max_gap, min_cnt, sdust_thres, flag;
+} mm_mapopt_t;
+
 extern int mm_verbose;
 extern double mm_realtime0;
 
@@ -54,26 +58,34 @@ typedef struct mm_tbuf_s mm_tbuf_t;
 extern "C" {
 #endif
 
+// compute minimizers
 void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p);
 
+// minimizer indexing
 mm_idx_t *mm_idx_init(int w, int k, int b);
 void mm_idx_destroy(mm_idx_t *mi);
 mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, uint64_t ibatch_size, int keep_name);
 void mm_idx_set_max_occ(mm_idx_t *mi, float f);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 
+// minimizer index I/O
 void mm_idx_dump(FILE *fp, const mm_idx_t *mi);
 mm_idx_t *mm_idx_load(FILE *fp);
 
-const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, int radius, int min_cnt, int max_gap, int flag, const char *name);
-int mm_map_file(const mm_idx_t *idx, const char *fn, int radius, int max_gap, int min_cnt, int flag, int n_threads, int tbatch_size);
+// mapping
+void mm_mapopt_init(mm_mapopt_t *opt);
+mm_tbuf_t *mm_tbuf_init(void);
+void mm_tbuf_destroy(mm_tbuf_t *b);
+const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *name);
 
+int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int n_threads, int tbatch_size);
+
+// private functions (may be moved to a "mmpriv.h" in future)
 double cputime(void);
 double realtime(void);
 void radix_sort_128x(mm128_t *beg, mm128_t *end);
 void radix_sort_64(uint64_t *beg, uint64_t *end);
 uint32_t ks_ksmall_uint32_t(size_t n, uint32_t arr[], size_t kk);
-
 
 #ifdef __cplusplus
 }
