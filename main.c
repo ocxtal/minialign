@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r95"
+#define MM_VERSION "r96"
 
 void liftrlimit()
 {
@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:lRS")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:Ng:I:d:lRST:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -48,6 +48,7 @@ int main(int argc, char *argv[])
 		else if (c == 'l') is_idx = 1;
 		else if (c == 'R') opt.flag |= MM_F_WITH_REP;
 		else if (c == 'S') opt.flag |= MM_F_NO_SELF;
+		else if (c == 'T') opt.sdust_thres = atoi(optarg);
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
@@ -79,6 +80,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -r INT     bandwidth [%d]\n", opt.radius);
 		fprintf(stderr, "    -c INT     retain a mapping if it consists of >=INT minimizers [%d]\n", opt.min_cnt);
 		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", opt.max_gap);
+		fprintf(stderr, "    -T INT     SDUST threshold; 0 to disable SDUST [%d]\n", opt.sdust_thres);
 		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n");
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);

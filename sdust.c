@@ -134,6 +134,8 @@ const uint64_t *sdust_core(const uint8_t *seq, int l_seq, int T, int W, int *n, 
 	int i, start, l; // _start_: start of the current window; _l_: length of a contiguous A/C/G/T (sub)sequence
 	unsigned t; // current word
 
+	buf->P.n = buf->res.n = 0;
+	buf->w->front = buf->w->count = 0;
 	memset(cv, 0, SD_WTOT * sizeof(int));
 	memset(cw, 0, SD_WTOT * sizeof(int));
 	if (l_seq < 0) l_seq = strlen((const char*)seq);

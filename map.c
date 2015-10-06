@@ -11,7 +11,7 @@ void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->radius = 500;
 	opt->max_gap = 10000;
 	opt->min_cnt = 4;
-	opt->sdust_thres = 25;
+	opt->sdust_thres = 0;
 	opt->flag = 0;
 }
 
@@ -180,15 +180,31 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, i
 
 const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *name)
 {
-	int j;
+	int j, n_dreg = 0, u = 0;
+	const uint64_t *dreg = 0;
 
 	b->mini.n = b->coef.n = 0;
 	mm_sketch(seq, l_seq, mi->w, mi->k, 0, &b->mini);
+	if (opt->sdust_thres > 0)
+		dreg = sdust_core((const uint8_t*)seq, l_seq, opt->sdust_thres, 64, &n_dreg, b->sdb);
 	for (j = 0; j < b->mini.n; ++j) {
 		int k, n;
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->mini.a[j].y>>1, strand = b->mini.a[j].y&1;
 		b->mini.a[j].y = b->mini.a[j].y<<32>>32; // clear the rid field
+		if (dreg && n_dreg) { // test complexity
+			int s = qpos - (mi->k - 1), e = s + mi->k;
+			while (u < n_dreg && (uint32_t)dreg[u] <= s) ++u;
+			if (u < n_dreg && dreg[u]>>32 < e) {
+				int v, l = 0;
+				for (v = u; v < n_dreg && dreg[v]>>32 < e; ++v) { // iterate over LCRs overlapping this minimizer
+					int ss = s > dreg[v]>>32? s : dreg[v]>>32;
+					int ee = e < (uint32_t)dreg[v]? e : (uint32_t)dreg[v];
+					l += ee - ss;
+				}
+				if (l > mi->k>>1) continue;
+			}
+		}
 		r = mm_idx_get(mi, b->mini.a[j].x, &n);
 		if (n > mi->max_occ) continue;
 		for (k = 0; k < n; ++k) {
