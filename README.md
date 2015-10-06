@@ -28,7 +28,8 @@ existing tools.
   ```
   The output is TAB-delimited with each line consisting of query name, length,
   0-based start, end, strand, target name, length, start, end, the number of
-  co-linear minimizers in the match and the fraction of matching minimizers.
+  matching bases, the number of co-linear minimizers in the match and the
+  fraction of matching minimizers.
 
 * Prebuild index and then map:
   ```sh

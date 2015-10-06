@@ -40,7 +40,7 @@ typedef struct {
 typedef struct {
 	uint32_t cnt:31, rev:1;
 	uint32_t rid:31, rep:1;
-	uint32_t mini_cnt;
+	uint32_t mini_cnt, len;
 	int32_t qs, qe, rs, re;
 } mm_reg1_t;
 

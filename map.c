@@ -109,6 +109,7 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 		int32_t qgap = i == l_lis? 0 : ((uint32_t)b->mini.a[b->a[b->b[i]]>>32].y>>1) - ((uint32_t)b->mini.a[b->a[b->b[i-1]]>>32].y>>1);
 		if (i == l_lis || (qgap > max_gap && abs((int32_t)b->a[b->b[i]] - (int32_t)b->a[b->b[i-1]]) > max_gap)) {
 			if (i - start >= min_cnt) {
+				uint32_t lq = 0, lr = 0, eq = 0, er = 0, sq = 0, sr = 0;
 				mm_reg1_t *r;
 				kv_pushp(mm_reg1_t, b->reg, &r);
 				r->rid = rid, r->rev = rev, r->cnt = i - start, r->rep = 0;
@@ -124,6 +125,17 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 					b->mini.a[jj].y += 1ULL<<32;
 					kv_push(uint32_t, b->reg2mini, jj); // keep minimizer<=>reg mapping for derep
 				}
+				for (j = start; j < i; ++j) { // compute ->len
+					uint32_t q = ((uint32_t)b->mini.a[b->a[b->b[j]]>>32].y>>1) - (k - 1);
+					uint32_t r = (uint32_t)b->a[b->b[j]];
+					r = !rev? r - (k - 1) : (0x80000000U - r);
+					if (r > er) lr += er - sr, sr = r, er = sr + k;
+					else er = r + k;
+					if (q > eq) lq += eq - sq, sq = q, eq = sq + k;
+					else eq = q + k;
+				}
+				lr += er - sr, lq += eq - sq;
+				r->len = lr < lq? lr : lq;
 			}
 			start = i;
 		}
@@ -272,7 +284,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
 				if (mi->name) fputs(mi->name[r->rid], stdout);
 				else printf("%d", r->rid + 1);
-				printf("\t%d\t%d\t%d\t%d\t%.4f\n", mi->len[r->rid], r->rs, r->re, r->cnt, (double)r->cnt / r->mini_cnt);
+				printf("\t%d\t%d\t%d\t%d\t%d\t%.4f\n", mi->len[r->rid], r->rs, r->re, r->len, r->cnt, (double)r->cnt / r->mini_cnt);
 			}
 			free(s->reg[i]);
 			free(s->seq[i].seq); free(s->seq[i].name);
