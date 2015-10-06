@@ -119,7 +119,6 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 				r->re = rev? (uint32_t)b->a[b->b[start]] : (uint32_t)b->a[b->b[i-1]];
 				r->rs -= k - 1;
 				r->re += 1;
-				r->mini_cnt = (b->a[b->b[i-1]]>>32) - (b->a[b->b[start]]>>32) + 1;
 				for (j = start; j < i; ++j) { // count the number of times each minimizer is used
 					int jj = b->a[b->b[j]]>>32;
 					b->mini.a[jj].y += 1ULL<<32;
@@ -300,7 +299,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
 				if (mi->name) fputs(mi->name[r->rid], stdout);
 				else printf("%d", r->rid + 1);
-				printf("\t%d\t%d\t%d\t%d\t%d\t%.4f\n", mi->len[r->rid], r->rs, r->re, r->len, r->cnt, (double)r->cnt / r->mini_cnt);
+				printf("\t%d\t%d\t%d\t%d\t%d\t%.4f\n", mi->len[r->rid], r->rs, r->re, r->len, r->cnt,
+						(double)r->len / (r->re - r->rs < r->qe - r->qs? r->re - r->rs : r->qe - r->qs));
 			}
 			free(s->reg[i]);
 			free(s->seq[i].seq); free(s->seq[i].name);
