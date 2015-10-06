@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include "kdq.h"
 #include "kvec.h"
+#include "sdust.h"
 
 #define SD_WLEN 3
 #define SD_WTOT (1<<(SD_WLEN<<1))
@@ -40,6 +41,27 @@ unsigned char seq_nt4_table[256] = {
 #else
 extern unsigned char seq_nt4_table[256];
 #endif
+
+struct sdust_buf_s {
+	kdq_t(int) *w;
+	perf_intv_v P; // the list of perfect intervals for the current window, sorted by descending start and then by ascending finish
+	uint64_v res;  // the result
+};
+
+sdust_buf_t *sdust_buf_init(void)
+{
+	sdust_buf_t *buf;
+	buf = (sdust_buf_t*)calloc(1, sizeof(sdust_buf_t));
+	buf->w = kdq_init(int);
+	return buf;
+}
+
+void sdust_buf_destroy(sdust_buf_t *buf)
+{
+	if (buf == 0) return;
+	kdq_destroy(int, buf->w);
+	free(buf->P.a); free(buf->res.a);
+}
 
 static inline void shift_window(int t, kdq_t(int) *w, int T, int W, int *L, int *rw, int *rv, int *cw, int *cv)
 {
@@ -105,41 +127,45 @@ static void find_perfect(perf_intv_v *P, const kdq_t(int) *w, int T, int start, 
 	}
 }
 
-uint64_t *sdust(const uint8_t *seq, int l_seq, int T, int W, int *n)
+const uint64_t *sdust_core(const uint8_t *seq, int l_seq, int T, int W, int *n, sdust_buf_t *buf)
 {
 	int rv = 0, rw = 0, L = 0, cv[SD_WTOT], cw[SD_WTOT];
-	uint64_v res = {0,0,0};  // the result
-	perf_intv_v P = {0,0,0}; // _P_ keeps the list of perfect intervals for the current window, sorted by descending start and then by ascending finish
-	kdq_t(int) *w; // this caches previous words
 	int i, start, l; // _start_: start of the current window; _l_: length of a contiguous A/C/G/T (sub)sequence
 	unsigned t; // current word
 
 	memset(cv, 0, SD_WTOT * sizeof(int));
 	memset(cw, 0, SD_WTOT * sizeof(int));
-	w = kdq_init(int);
 	if (l_seq < 0) l_seq = strlen((const char*)seq);
-
 	for (i = l = t = 0; i <= l_seq; ++i) {
 		int b = i < l_seq? seq_nt4_table[seq[i]] : 4;
 		if (b < 4) { // an A/C/G/T base
 			++l, t = (t<<2 | b) & SD_WMSK;
 			if (l >= SD_WLEN) { // we have seen a word
 				start = (l - W > 0? l - W : 0) + (i + 1 - l); // set the start of the current window
-				save_masked_regions(&res, &P, start); // save intervals falling out of the current window?
-				shift_window(t, w, T, W, &L, &rw, &rv, cw, cv);
+				save_masked_regions(&buf->res, &buf->P, start); // save intervals falling out of the current window?
+				shift_window(t, buf->w, T, W, &L, &rw, &rv, cw, cv);
 				if (rw * 10 > L * T)
-					find_perfect(&P, w, T, start, L, rv, cv);
+					find_perfect(&buf->P, buf->w, T, start, L, rv, cv);
 			}
 		} else { // N or the end of sequence; N effectively breaks input into pieces of independent sequences
 			start = (l - W + 1 > 0? l - W + 1 : 0) + (i + 1 - l);
-			while (P.n) save_masked_regions(&res, &P, start++); // clear up unsaved perfect intervals
+			while (buf->P.n) save_masked_regions(&buf->res, &buf->P, start++); // clear up unsaved perfect intervals
 			l = t = 0;
 		}
 	}
+	*n = buf->res.n;
+	return buf->res.a;
+}
 
-	kdq_destroy(int, w); free(P.a);
-	*n = res.n;
-	return res.a;
+uint64_t *sdust(const uint8_t *seq, int l_seq, int T, int W, int *n)
+{
+	uint64_t *ret;
+	sdust_buf_t *buf;
+	buf = sdust_buf_init();
+	ret = (uint64_t*)sdust_core(seq, l_seq, T, W, n, buf);
+	buf->res.a = 0;
+	sdust_buf_destroy(buf);
+	return ret;
 }
 
 #ifdef _SDUST_MAIN

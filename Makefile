@@ -16,7 +16,7 @@ all:$(PROG)
 minimap:$(OBJS) main.o
 		$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
 
-sdust:sdust.c kdq.h kvec.h kseq.h
+sdust:sdust.c kdq.h kvec.h kseq.h sdust.h
 		$(CC) -D_SDUST_MAIN $(CFLAGS) $< -o $@ -lz
 
 clean:
@@ -32,5 +32,5 @@ index.o: minimap.h bseq.h kvec.h khash.h
 main.o: minimap.h bseq.h
 map.o: bseq.h kvec.h minimap.h ksort.h
 misc.o: minimap.h bseq.h ksort.h
-sdust.o: kdq.h kvec.h
+sdust.o: kdq.h kvec.h sdust.h
 sketch.o: kvec.h minimap.h bseq.h
