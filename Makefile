@@ -4,7 +4,7 @@ CPPFLAGS=
 INCLUDES=	-I.
 OBJS=		kthread.o misc.o bseq.o sketch.o sdust.o index.o map.o
 PROG=		minimap
-PROG_EXTRA=	pa-sel
+PROG_EXTRA=	pa-sel sdust
 LIBS=		-lm -lz -lpthread
 
 .SUFFIXES:.c .o
@@ -14,7 +14,7 @@ LIBS=		-lm -lz -lpthread
 
 all:$(PROG)
 
-extra:all sdust pa-sel
+extra:all $(PROG_EXTRA)
 
 minimap:$(OBJS) main.o
 		$(CC) $(CFLAGS) $^ -o $@ $(LIBS)

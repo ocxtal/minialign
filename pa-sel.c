@@ -63,7 +63,7 @@ void pas_process1(const pas_opt_t *opt, pas_t *p, kstring_t *s)
 						p->name = (char**)realloc(p->name, sizeof(char*) * p->m_seq);
 						p->len = (int*)realloc(p->len, sizeof(int) * p->m_seq);
 					}
-					id = p->n_seq++;
+					kh_val(p->h, itr) = id = p->n_seq++;
 					kh_key(p->h, itr) = p->name[id] = strdup(q);
 				} else id = kh_val(p->h, itr);
 			} else if (k == 1) { // length
@@ -106,6 +106,7 @@ pas_t *pas_read(const char *fn, const pas_opt_t *opt)
 	p->h = kh_init(str);
 	while (ks_getuntil(ks, KS_SEP_LINE, &str, &dret) >= 0)
 		pas_process1(opt, p, &str);
+	free(str.s);
 	ks_destroy(ks);
 	gzclose(fp);
 	return p;
