@@ -38,6 +38,6 @@ index.o: minimap.h bseq.h kvec.h khash.h
 main.o: minimap.h bseq.h
 map.o: bseq.h kvec.h minimap.h sdust.h ksort.h
 misc.o: minimap.h bseq.h ksort.h
-pa-sel.o: kseq.h khash.h
+pa-sel.o: kseq.h khash.h ksort.h
 sdust.o: kdq.h kvec.h sdust.h
 sketch.o: kvec.h minimap.h bseq.h

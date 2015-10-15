@@ -15,6 +15,8 @@ typedef khash_t(str) shash_t;
 
 typedef struct {
 	int min_match;
+	int min_len;
+	float min_match_frac;
 } pas_opt_t;
 
 typedef struct {
@@ -23,26 +25,36 @@ typedef struct {
 } pas_reg_t;
 
 typedef struct {
+	char *name;
+	int len, start, end, type;
+} pas_seq_t;
+
+typedef struct {
 	int n_seq, m_seq;
-	char **name;
-	int *len;
+	pas_seq_t *seq;
 	shash_t *h;
 	uint64_t n_reg, m_reg;
 	pas_reg_t *reg;
 } pas_t;
 
+#include "ksort.h"
+#define sort_reg(a) ((a).id_start)
+KRADIX_SORT_INIT(reg, pas_reg_t, sort_reg, 8) 
+
 void pas_opt_init(pas_opt_t *opt)
 {
 	opt->min_match = 40;
+	opt->min_len = 1000;
+	opt->min_match_frac = .1;
 }
 
 void pas_destroy(pas_t *p)
 {
 	uint64_t i;
 	if (p == 0) return;
-	for (i = 0; i < p->n_seq; ++i) free(p->name[i]);
+	for (i = 0; i < p->n_seq; ++i) free(p->seq[i].name);
 	kh_destroy(str, p->h);
-	free(p->name); free(p->len); free(p->reg);
+	free(p->seq); free(p->reg);
 	free(p);
 }
 
@@ -53,31 +65,34 @@ void pas_process1(const pas_opt_t *opt, pas_t *p, kstring_t *s)
 	for (i = k = 0, q = s->s; i <= s->l; ++i) {
 		if (i == s->l || s->s[i] == '\t') {
 			s->s[i] = 0;
-			if (k == 0) { // name
+			if (k == 1) { // length
 				khint_t itr;
-				int absent;
-				itr = kh_put(str, p->h, q, &absent);
+				int len, absent;
+				len = strtol(q, &r, 10);
+				if (len < opt->min_len) break;
+				itr = kh_put(str, p->h, s->s, &absent);
 				if (absent) {
 					if (p->n_seq == p->m_seq) {
 						p->m_seq = p->m_seq? p->m_seq<<1 : 16;
-						p->name = (char**)realloc(p->name, sizeof(char*) * p->m_seq);
-						p->len = (int*)realloc(p->len, sizeof(int) * p->m_seq);
+						p->seq = (pas_seq_t*)realloc(p->seq, sizeof(pas_seq_t) * p->m_seq);
 					}
 					kh_val(p->h, itr) = id = p->n_seq++;
-					kh_key(p->h, itr) = p->name[id] = strdup(q);
+					kh_key(p->h, itr) = p->seq[id].name = strdup(s->s);
+					p->seq[id].len = p->seq[id].end = strtol(q, &r, 10);
+					p->seq[id].start = 0;
 				} else id = kh_val(p->h, itr);
-			} else if (k == 1) { // length
-				p->len[id] = strtol(q, &r, 10);
 			} else if (k == 2) { // start
 				start = strtol(q, &r, 10);
 			} else if (k == 3) { // end
 				end = strtol(q, &r, 10);
+				if (end - start < opt->min_len) break;
 			} else if (k == 4) { // strand
 				rev = (*q == '-');
 			} else if (k == 9) { // match length
 				pas_reg_t *t;
 				score = strtol(q, &r, 10);
 				if (score < opt->min_match) break; // do nothing
+				if ((float)score / (end - start) < opt->min_match_frac) break;
 				if (p->n_reg == p->m_reg) {
 					p->m_reg = p->m_reg? p->m_reg<<1 : 16;
 					p->reg = (pas_reg_t*)realloc(p->reg, sizeof(pas_reg_t) * p->m_reg);
@@ -109,6 +124,7 @@ pas_t *pas_read(const char *fn, const pas_opt_t *opt)
 	free(str.s);
 	ks_destroy(ks);
 	gzclose(fp);
+	radix_sort_reg(p->reg, p->reg + p->n_reg);
 	return p;
 }
 
@@ -117,15 +133,20 @@ int main(int argc, char *argv[])
 	int c;
 	pas_opt_t opt;
 	pas_t *p;
+	char *r;
 
 	pas_opt_init(&opt);
-	while ((c = getopt(argc, argv, "m:")) >= 0) {
-		if (c == 'm') opt.min_match = atoi(optarg);
+	while ((c = getopt(argc, argv, "m:l:")) >= 0) {
+		if (c == 'm') {
+			opt.min_match = strtol(optarg, &r, 10);
+			if (*r == ',') opt.min_match_frac = strtod(r, &r);
+		} else if (c == 'l') opt.min_len = atoi(optarg);
 	}
 	if (argc == optind) {
 		fprintf(stderr, "Usage: pa-sel [options] <in.pmf>\n");
 		fprintf(stderr, "Options:\n");
-		fprintf(stderr, "  -m INT     min match length [%d]\n", opt.min_match);
+		fprintf(stderr, "  -m INT[,FLOAT]   min match length and fraction [%d,%.2f]\n", opt.min_match, opt.min_match_frac);
+		fprintf(stderr, "  -l INT           min length [%d]\n", opt.min_len);
 		return 1;
 	}
 	p = pas_read(argv[optind], &opt);
