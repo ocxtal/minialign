@@ -4,7 +4,7 @@ CPPFLAGS=
 INCLUDES=	-I.
 OBJS=		kthread.o misc.o bseq.o sketch.o sdust.o index.o map.o
 PROG=		minimap
-PROG_EXTRA=	pa-sel sdust
+PROG_EXTRA=	sdust
 LIBS=		-lm -lz -lpthread
 
 .SUFFIXES:.c .o
@@ -22,9 +22,6 @@ minimap:$(OBJS) main.o
 sdust:sdust.c kdq.h kvec.h kseq.h sdust.h
 		$(CC) -D_SDUST_MAIN $(CFLAGS) $< -o $@ -lz
 
-pa-sel:pa-sel.o
-		$(CC) $(CFLAGS) $^ -o $@ $(LIBS)
-
 clean:
 		rm -fr gmon.out *.o a.out $(PROG) $(PROG_EXTRA) *~ *.a *.dSYM session*
 
@@ -38,6 +35,5 @@ index.o: minimap.h bseq.h kvec.h khash.h
 main.o: minimap.h bseq.h
 map.o: bseq.h kvec.h minimap.h sdust.h ksort.h
 misc.o: minimap.h bseq.h ksort.h
-pa-sel.o: kseq.h khash.h ksort.h
 sdust.o: kdq.h kvec.h sdust.h
 sketch.o: kvec.h minimap.h bseq.h
