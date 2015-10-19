@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r102"
+#define MM_VERSION "r103"
 
 void liftrlimit()
 {

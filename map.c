@@ -59,6 +59,10 @@ KSORT_INIT(low32lt, uint64_t, lt_low32)
 #define gt_low32(a, b) ((uint32_t)(a) > (uint32_t)(b))
 KSORT_INIT(low32gt, uint64_t, gt_low32)
 
+/* TODO: drop_rep() is not robust. For all-vs-all mapping but without the -S
+ * flag, all minimizers have at least one hit. The _thres_ computed below will
+ * be highly skewed. Some improvements need to be made. */
+
 static void drop_rep(mm_tbuf_t *b, int min_cnt)
 {
 	int i, j, n, m;
