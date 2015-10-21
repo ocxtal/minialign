@@ -13,6 +13,7 @@ void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->min_cnt = 4;
 	opt->sdust_thres = 0;
 	opt->flag = 0;
+	opt->merge_frac = .75;
 }
 
 /****************************
@@ -145,7 +146,7 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 	}
 }
 
-static inline void push_intv(mm128_v *intv, int start, int end) // used by get_reg() only
+static inline void push_intv(mm128_v *intv, int start, int end, float merge_frac) // used by get_reg() only
 {
 	mm128_t *p;
 	if (intv->n > 0) {
@@ -153,7 +154,7 @@ static inline void push_intv(mm128_v *intv, int start, int end) // used by get_r
 		p = &intv->a[intv->n-1];
 		last_start = p->y, last_end = p->x + last_start;
 		min = end - start < last_end - last_start? end - start : last_end - last_start;
-		if (last_end > start && last_end - start > (min>>1) + (min>>2)) {
+		if (last_end > start && last_end - start > min * merge_frac) {
 			p->x = end - last_start;
 			return;
 		}
@@ -162,7 +163,7 @@ static inline void push_intv(mm128_v *intv, int start, int end) // used by get_r
 	p->x = end - start, p->y = start;
 }
 
-static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, int skip_derep)
+static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, float merge_frac, int skip_derep)
 {
 	mm128_v *c = &b->coef;
 	int i, start = 0;
@@ -170,11 +171,11 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, i
 	b->intv.n = 0;
 	for (i = 1; i < c->n; ++i) { // identify all (possibly overlapping) clusters within _radius_
 		if (c->a[i].x - c->a[start].x > radius) {
-			if (i - start >= min_cnt) push_intv(&b->intv, start, i);
+			if (i - start >= min_cnt) push_intv(&b->intv, start, i, merge_frac);
 			for (++start; start < i && c->a[i].x - c->a[start].x > radius; ++start);
 		}
 	}
-	if (i - start >= min_cnt) push_intv(&b->intv, start, i);
+	if (i - start >= min_cnt) push_intv(&b->intv, start, i, merge_frac);
 	radix_sort_128x(b->intv.a, b->intv.a + b->intv.n); // sort by the size of the cluster
 	b->reg2mini.n = 0;
 	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap);
@@ -227,7 +228,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 	}
 	radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
 	b->reg.n = 0;
-	get_reg(b, opt->radius, mi->k, opt->min_cnt, opt->max_gap, opt->flag&MM_F_WITH_REP);
+	get_reg(b, opt->radius, mi->k, opt->min_cnt, opt->max_gap, opt->merge_frac, opt->flag&MM_F_WITH_REP);
 	*n_regs = b->reg.n;
 	return b->reg.a;
 }

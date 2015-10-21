@@ -46,6 +46,7 @@ typedef struct {
 
 typedef struct {
 	int radius, max_gap, min_cnt, sdust_thres, flag;
+	float merge_frac;
 } mm_mapopt_t;
 
 extern int mm_verbose;
