@@ -17,10 +17,10 @@ all:$(PROG)
 extra:all $(PROG_EXTRA)
 
 minimap:main.o libminimap.a
-		$(CC) $(CFLAGS) $< -o $@ $(LIBS) -L. -lminimap
+		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap $(LIBS)
 
 minimap-lite:example.o libminimap.a
-		$(CC) $(CFLAGS) $< -o $@ $(LIBS) -L. -lminimap
+		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap $(LIBS)
 
 libminimap.a:$(OBJS)
 		$(AR) -csru $@ $(OBJS)
