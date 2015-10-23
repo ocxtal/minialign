@@ -22,7 +22,7 @@ typedef struct { size_t n, m; uint32_t *a; } uint32_v;
 
 typedef struct {
 	mm128_v a;   // (minimizer, position) array
-	int32_t n;       // size of the _p_ array
+	int32_t n;   // size of the _p_ array
 	uint64_t *p; // position array for minimizers appearing >1 times
 	void *h;     // hash table indexing _p_ and minimizers appearing once
 } mm_idx_bucket_t;
@@ -45,8 +45,12 @@ typedef struct {
 } mm_reg1_t;
 
 typedef struct {
-	int radius, max_gap, min_cnt, sdust_thres, flag;
-	float merge_frac;
+	int radius;  // bandwidth to cluster hits
+	int max_gap; // break a chain if there are no minimizers in a max_gap window
+	int min_cnt; // minimum number of minimizers to start a chain
+	int sdust_thres;  // score threshold for SDUST; 0 to disable
+	int flag;    // see MM_F_* macros
+	float merge_frac; // merge two chains if merge_frac fraction of minimzers are shared between the chains
 } mm_mapopt_t;
 
 extern int mm_verbose;
