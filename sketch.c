@@ -37,7 +37,7 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 }
 
 /**
- * Find (w,k)-minimizers on a DNA sequence
+ * Find symmetric (w,k)-minimizers on a DNA sequence
  *
  * @param str    DNA sequence
  * @param len    length of $str
@@ -47,7 +47,8 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
  * @param p      minimizers; p->a[i].x is the 2k-bit hash value;
  *               p->a[i].y = rid<<32 | lastPos<<1 | strand
  *               where lastPos is the position of the last base of the i-th minimizer,
- *               and strand indicates whether the top or bottom strand of the minimizer is hashed
+ *               and strand indicates whether the minimizer comes from the top or the bottom strand.
+ *               Callers may want to set "p->n = 0"; otherwise results are appended to p
  */
 void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 {
