@@ -39,9 +39,7 @@ int main(int argc, char *argv[])
 		for (j = 0; j < n_reg; ++j) {
 			const mm_reg1_t *r = &reg[j];
 			printf("%s\t%d\t%d\t%d\t%c\t", ks->name.s, ks->seq.l, r->qs, r->qe, "+-"[r->rev]);
-			if (mi->name) fputs(mi->name[r->rid], stdout);
-			else printf("%d", r->rid + 1);
-			printf("\t%d\t%d\t%d\t%d\t%d\n", mi->len[r->rid], r->rs, r->re, r->len, r->cnt);
+			printf("%s\t%d\t%d\t%d\t%d\t%d\n", mi->name[r->rid], mi->len[r->rid], r->rs, r->re, r->len, r->cnt);
 		}
 	}
 	mm_tbuf_destroy(tbuf);
