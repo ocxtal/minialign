@@ -1,3 +1,6 @@
+// To compile:
+//   gcc -g -O2 example.c libminimap.a -lz
+
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
