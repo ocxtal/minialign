@@ -8,30 +8,25 @@ KSEQ_INIT(gzFile, gzread)
 
 int main(int argc, char *argv[])
 {
-	mm_mapopt_t opt;
-	mm_idx_t *mi;
-	gzFile f;
-	kseq_t *ks;
-	mm_tbuf_t *tbuf;
-	int n_threads = 4, w = 10, k = 15;
-
 	if (argc < 3) {
 		fprintf(stderr, "Usage: minimap-lite <target.fa> <query.fa>\n");
 		return 1;
 	}
 	
 	// open query file for reading; you may use your favorite FASTA/Q parser
-	f = gzopen(argv[2], "r");
+	gzFile f = gzopen(argv[2], "r");
 	assert(f);
-	ks = kseq_init(f);
+	kseq_t *ks = kseq_init(f);
 
 	// create index for target; we are creating one index for all target sequence
-	mi = mm_idx_build(argv[1], w, k, n_threads);
+	int n_threads = 4, w = 10, k = 15;
+	mm_idx_t *mi = mm_idx_build(argv[1], w, k, n_threads);
 	assert(mi);
 
 	// mapping
+	mm_mapopt_t opt;
 	mm_mapopt_init(&opt); // initialize mapping parameters
-	tbuf = mm_tbuf_init(); // thread buffer; for multi-threading, allocate one tbuf for each thread
+	mm_tbuf_t *tbuf = mm_tbuf_init(); // thread buffer; for multi-threading, allocate one tbuf for each thread
 	while (kseq_read(ks) >= 0) { // each kseq_read() call reads one query sequence
 		const mm_reg1_t *reg;
 		int j, n_reg;
