@@ -250,6 +250,18 @@ mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int 
 	return pl.mi;
 }
 
+mm_idx_t *mm_idx_build(const char *fn, int w, int k, int n_threads) // a simpler interface
+{
+	bseq_file_t *fp;
+	mm_idx_t *mi;
+	fp = bseq_open(fn);
+	if (fp == 0) return 0;
+	mi = mm_idx_gen(fp, w, k, MM_IDX_DEF_B, 1<<18, n_threads, UINT64_MAX, 1);
+	mm_idx_set_max_occ(mi, 0.001);
+	bseq_close(fp);
+	return mi;
+}
+
 /*************
  * index I/O *
  *************/

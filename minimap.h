@@ -73,6 +73,8 @@ mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int 
 void mm_idx_set_max_occ(mm_idx_t *mi, float f);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 
+mm_idx_t *mm_idx_build(const char *fn, int w, int k, int n_threads);
+
 // minimizer index I/O
 void mm_idx_dump(FILE *fp, const mm_idx_t *mi);
 mm_idx_t *mm_idx_load(FILE *fp);
