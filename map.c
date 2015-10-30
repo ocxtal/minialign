@@ -165,9 +165,26 @@ static inline void push_intv(mm128_v *intv, int start, int end, float merge_frac
 
 static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, float merge_frac, int skip_derep)
 {
+	const uint64_t v_kept = ~(1ULL<<31), v_dropped = 1ULL<<31;
 	mm128_v *c = &b->coef;
-	int i, start = 0;
+	int i, j, start = 0, iso_dist = radius * 2;
 	if (c->n < min_cnt) return;
+	for (i = 0; i < c->n; ++i) c->a[i].y |= v_dropped;
+	for (i = 1; i < c->n; ++i) { // drop isolated minimizer matches
+		uint64_t x = c->a[i].x;
+		int32_t rpos = (uint32_t)c->a[i].y;
+		for (j = i - 1; j >= 0 && x - c->a[j].x < radius; --j) {
+			int32_t y = c->a[j].y;
+			if (abs(y - rpos) < iso_dist) {
+				c->a[i].y &= v_kept, c->a[j].y &= v_kept;
+				break;
+			}
+		}
+	}
+	for (i = j = 0; i < c->n; ++i)
+		if ((c->a[i].y&v_dropped) == 0)
+			c->a[j++] = c->a[i];
+	c->n = j;
 	b->intv.n = 0;
 	for (i = 1; i < c->n; ++i) { // identify all (possibly overlapping) clusters within _radius_
 		if (c->a[i].x - c->a[start].x > radius) {
