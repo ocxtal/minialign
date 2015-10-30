@@ -13,7 +13,7 @@ void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->min_cnt = 4;
 	opt->sdust_thres = 0;
 	opt->flag = 0;
-	opt->merge_frac = .75;
+	opt->merge_frac = .5;
 }
 
 /****************************
