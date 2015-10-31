@@ -11,6 +11,7 @@
 
 #define MM_F_WITH_REP  0x1
 #define MM_F_NO_SELF   0x2
+#define MM_F_NO_ISO    0x4
 
 typedef struct {
  	uint64_t x, y;

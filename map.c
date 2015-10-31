@@ -173,7 +173,7 @@ static inline void push_intv(mm128_v *intv, int start, int end, float merge_frac
 }
 
 // find mapping regions from a list of minimizer hits
-static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, float merge_frac, int skip_derep)
+static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, float merge_frac, int flag)
 {
 	const uint64_t v_kept = ~(1ULL<<31), v_dropped = 1ULL<<31;
 	mm128_v *c = &b->coef;
@@ -182,25 +182,27 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, f
 	if (c->n < min_cnt) return;
 
 	// drop isolated minimizer hits
-	for (i = 0; i < c->n; ++i) c->a[i].y |= v_dropped;
-	for (i = 1; i < c->n; ++i) {
-		uint64_t x = c->a[i].x;
-		int32_t rpos = (uint32_t)c->a[i].y;
-		for (j = i - 1; j >= 0 && x - c->a[j].x < radius; --j) {
-			int32_t y = c->a[j].y;
-			if (abs(y - rpos) < iso_dist) {
-				c->a[i].y &= v_kept, c->a[j].y &= v_kept;
-				break;
+	if (flag&MM_F_NO_ISO) {
+		for (i = 0; i < c->n; ++i) c->a[i].y |= v_dropped;
+		for (i = 1; i < c->n; ++i) {
+			uint64_t x = c->a[i].x;
+			int32_t rpos = (uint32_t)c->a[i].y;
+			for (j = i - 1; j >= 0 && x - c->a[j].x < radius; --j) {
+				int32_t y = c->a[j].y;
+				if (abs(y - rpos) < iso_dist) {
+					c->a[i].y &= v_kept, c->a[j].y &= v_kept;
+					break;
+				}
 			}
 		}
+		for (i = j = 0; i < c->n; ++i) // squeeze out hits still marked as v_dropped
+			if ((c->a[i].y&v_dropped) == 0)
+				c->a[j++] = c->a[i];
+		c->n = j;
 	}
-	for (i = j = 0; i < c->n; ++i) // squeeze out hits still marked as v_dropped
-		if ((c->a[i].y&v_dropped) == 0)
-			c->a[j++] = c->a[i];
-	c->n = j;
-	b->intv.n = 0;
 
 	// identify (possibly overlapping) intervals within _radius_; an interval is a cluster of hits
+	b->intv.n = 0;
 	for (i = 1; i < c->n; ++i) {
 		if (c->a[i].x - c->a[start].x > radius) {
 			if (i - start >= min_cnt) push_intv(&b->intv, start, i, merge_frac);
@@ -217,7 +219,7 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, f
 	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap);
 
 	// post repeat removal
-	if (!skip_derep) drop_rep(b, min_cnt);
+	if (!(flag&MM_F_WITH_REP)) drop_rep(b, min_cnt);
 }
 
 const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_regs, mm_tbuf_t *b, const mm_mapopt_t *opt, const char *name)
@@ -266,7 +268,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 	}
 	radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
 	b->reg.n = 0;
-	get_reg(b, opt->radius, mi->k, opt->min_cnt, opt->max_gap, opt->merge_frac, opt->flag&MM_F_WITH_REP);
+	get_reg(b, opt->radius, mi->k, opt->min_cnt, opt->max_gap, opt->merge_frac, opt->flag);
 	*n_regs = b->reg.n;
 	return b->reg.a;
 }
