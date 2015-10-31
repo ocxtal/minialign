@@ -90,27 +90,35 @@ static void drop_rep(mm_tbuf_t *b, int min_cnt)
 static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 {
 	int i, j, l_lis, rid = -1, rev = 0, start = b->intv.a[which].y, end = start + b->intv.a[which].x;
-	if (end - start > b->m) { // make room for arrays needed by LIS
+
+	// make room for arrays needed by LIS (longest increasing sequence)
+	if (end - start > b->m) {
 		b->m = end - start;
 		kv_roundup32(b->m);
 		b->a = (uint64_t*)realloc(b->a, b->m * 8);
 		b->b = (size_t*)realloc(b->b, b->m * sizeof(size_t));
 		b->p = (size_t*)realloc(b->p, b->m * sizeof(size_t));
 	}
+
+	// prepare the input array _a_ for LIS
 	b->n = 0;
-	for (i = start; i < end; ++i) // prepare the input array _a_ for LIS
+	for (i = start; i < end; ++i)
 		if (b->coef.a[i].x != UINT64_MAX)
 			b->a[b->n++] = b->coef.a[i].y, rid = b->coef.a[i].x << 1 >> 33, rev = b->coef.a[i].x >> 63;
 	if (b->n < min_cnt) return;
 	radix_sort_64(b->a, b->a + b->n);
+
+	// find the longest increasing sequence
 	l_lis = rev? ks_lis_low32gt(b->n, b->a, b->b, b->p) : ks_lis_low32lt(b->n, b->a, b->b, b->p); // LIS
 	if (l_lis < min_cnt) return;
-	for (i = 1, j = 1; i < l_lis; ++i) // squeeze out reused minimizers
+	for (i = 1, j = 1; i < l_lis; ++i) // squeeze out minimizaers reused in the LIS sequence
 		if (b->a[b->b[i]]>>32 != b->a[b->b[i-1]]>>32)
 			b->a[b->b[j++]] = b->a[b->b[i]];
 	l_lis = j;
 	if (l_lis < min_cnt) return;
-	for (i = 1, start = 0; i <= l_lis; ++i) { // convert LIS to a region; possibly break LIS at long gaps
+
+	// convert LISes to regions; possibly break an LIS at a long gaps
+	for (i = 1, start = 0; i <= l_lis; ++i) {
 		int32_t qgap = i == l_lis? 0 : ((uint32_t)b->mini.a[b->a[b->b[i]]>>32].y>>1) - ((uint32_t)b->mini.a[b->a[b->b[i-1]]>>32].y>>1);
 		if (i == l_lis || (qgap > max_gap && abs((int32_t)b->a[b->b[i]] - (int32_t)b->a[b->b[i-1]]) > max_gap)) {
 			if (i - start >= min_cnt) {
@@ -146,31 +154,36 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 	}
 }
 
-static inline void push_intv(mm128_v *intv, int start, int end, float merge_frac) // used by get_reg() only
+// merge or add a Hough interval; only used by get_reg()
+static inline void push_intv(mm128_v *intv, int start, int end, float merge_frac)
 {
 	mm128_t *p;
-	if (intv->n > 0) {
+	if (intv->n > 0) { // test overlap
 		int last_start, last_end, min;
 		p = &intv->a[intv->n-1];
 		last_start = p->y, last_end = p->x + last_start;
 		min = end - start < last_end - last_start? end - start : last_end - last_start;
-		if (last_end > start && last_end - start > min * merge_frac) {
+		if (last_end > start && last_end - start > min * merge_frac) { // large overlap; then merge
 			p->x = end - last_start;
 			return;
 		}
 	}
-	kv_pushp(mm128_t, *intv, &p);
+	kv_pushp(mm128_t, *intv, &p); // a new interval
 	p->x = end - start, p->y = start;
 }
 
+// find mapping regions from a list of minimizer hits
 static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, float merge_frac, int skip_derep)
 {
 	const uint64_t v_kept = ~(1ULL<<31), v_dropped = 1ULL<<31;
 	mm128_v *c = &b->coef;
 	int i, j, start = 0, iso_dist = radius * 2;
+
 	if (c->n < min_cnt) return;
+
+	// drop isolated minimizer hits
 	for (i = 0; i < c->n; ++i) c->a[i].y |= v_dropped;
-	for (i = 1; i < c->n; ++i) { // drop isolated minimizer matches
+	for (i = 1; i < c->n; ++i) {
 		uint64_t x = c->a[i].x;
 		int32_t rpos = (uint32_t)c->a[i].y;
 		for (j = i - 1; j >= 0 && x - c->a[j].x < radius; --j) {
@@ -181,21 +194,29 @@ static void get_reg(mm_tbuf_t *b, int radius, int k, int min_cnt, int max_gap, f
 			}
 		}
 	}
-	for (i = j = 0; i < c->n; ++i)
+	for (i = j = 0; i < c->n; ++i) // squeeze out hits still marked as v_dropped
 		if ((c->a[i].y&v_dropped) == 0)
 			c->a[j++] = c->a[i];
 	c->n = j;
 	b->intv.n = 0;
-	for (i = 1; i < c->n; ++i) { // identify all (possibly overlapping) clusters within _radius_
+
+	// identify (possibly overlapping) intervals within _radius_; an interval is a cluster of hits
+	for (i = 1; i < c->n; ++i) {
 		if (c->a[i].x - c->a[start].x > radius) {
 			if (i - start >= min_cnt) push_intv(&b->intv, start, i, merge_frac);
 			for (++start; start < i && c->a[i].x - c->a[start].x > radius; ++start);
 		}
 	}
 	if (i - start >= min_cnt) push_intv(&b->intv, start, i, merge_frac);
-	radix_sort_128x(b->intv.a, b->intv.a + b->intv.n); // sort by the size of the cluster
+
+	// sort by the size of the interval
+	radix_sort_128x(b->intv.a, b->intv.a + b->intv.n);
+
+	// generate hits, starting from the largest interval
 	b->reg2mini.n = 0;
 	for (i = b->intv.n - 1; i >= 0; --i) proc_intv(b, i, k, min_cnt, max_gap);
+
+	// post repeat removal
 	if (!skip_derep) drop_rep(b, min_cnt);
 }
 
