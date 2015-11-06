@@ -10,10 +10,8 @@ CPU cores, minimap can map 1.6Gbp PacBio reads to human in 2.5 minutes, 1Gbp
 PacBio E. coli reads to pre-indexed 9.6Gbp bacterial genomes in 3 minutes, to
 pre-indexed >100Gbp nt database in ~1 hour (of which ~20 minutes are spent on
 loading index from the network filesystem; peak RAM: 10GB), map 2800 bacteria
-to themselves in 1 hour, and map mouse genome to human in 20 minutes (with one
-CPU as multi-threading is ineffective for chromosome-long queries). Minimap can
-also find long matches between 1Gbp E.  coli reads in one minute, though the
-sensitivity is probably not good enough.
+to themselves in 1 hour, and map 1Gbp E. coli reads against themselves in a
+couple of minutes.
 
 Minimap does not replace mainstream aligners, but it can be useful when you
 want to quickly identify long approximate matches at moderate divergence among
@@ -30,6 +28,11 @@ existing tools.
   0-based start, end, strand, target name, length, start, end, the number of
   matching bases, the number of co-linear minimizers in the match and the
   fraction of matching bases.
+
+* All-vs-all PacBio mapping for miniasm:
+  ```sh
+  minimap -Sw5 -L100 -m0 reads.fa reads.fa | gzip -1 > reads.paf.gz
+  ```
 
 * Prebuild index and then map:
   ```sh

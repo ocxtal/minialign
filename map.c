@@ -11,6 +11,7 @@ void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->radius = 500;
 	opt->max_gap = 10000;
 	opt->min_cnt = 4;
+	opt->min_match = 40;
 	opt->sdust_thres = 0;
 	opt->flag = 0;
 	opt->merge_frac = .5;
@@ -341,6 +342,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			bseq1_t *t = &s->seq[i];
 			for (j = 0; j < s->n_reg[i]; ++j) {
 				mm_reg1_t *r = &s->reg[i][j];
+				if (r->len < p->opt->min_match) continue;
 				printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
 				if (mi->name) fputs(mi->name[r->rid], stdout);
 				else printf("%d", r->rid + 1);

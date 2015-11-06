@@ -49,6 +49,7 @@ typedef struct {
 	int radius;  // bandwidth to cluster hits
 	int max_gap; // break a chain if there are no minimizers in a max_gap window
 	int min_cnt; // minimum number of minimizers to start a chain
+	int min_match;
 	int sdust_thres;  // score threshold for SDUST; 0 to disable
 	int flag;    // see MM_F_* macros
 	float merge_frac; // merge two chains if merge_frac fraction of minimzers are shared between the chains

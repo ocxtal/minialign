@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r116"
+#define MM_VERSION "r117"
 
 void liftrlimit()
 {
@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRST:m:")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRST:m:L:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -51,6 +51,7 @@ int main(int argc, char *argv[])
 		else if (c == 'S') opt.flag |= MM_F_NO_SELF;
 		else if (c == 'O') opt.flag |= MM_F_NO_ISO;
 		else if (c == 'T') opt.sdust_thres = atoi(optarg);
+		else if (c == 'L') opt.min_match = atoi(optarg);
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
@@ -82,6 +83,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -r INT     bandwidth [%d]\n", opt.radius);
 		fprintf(stderr, "    -m FLOAT   merge two chains if FLOAT fraction of minimizers are shared [%.2f]\n", opt.merge_frac);
 		fprintf(stderr, "    -c INT     retain a mapping if it consists of >=INT minimizers [%d]\n", opt.min_cnt);
+		fprintf(stderr, "    -L INT     min matching length [%d]\n", opt.min_match);
 		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", opt.max_gap);
 		fprintf(stderr, "    -T INT     SDUST threshold; 0 to disable SDUST [%d]\n", opt.sdust_thres);
 		fprintf(stderr, "    -O         drop isolated hits before chaining\n");
