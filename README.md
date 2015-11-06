@@ -29,7 +29,7 @@ existing tools.
   matching bases, the number of co-linear minimizers in the match and the
   fraction of matching bases.
 
-* All-vs-all PacBio mapping for miniasm:
+* All-vs-all PacBio read self-mapping for [miniasm][miniasm]:
   ```sh
   minimap -Sw5 -L100 -m0 reads.fa reads.fa | gzip -1 > reads.paf.gz
   ```
@@ -95,3 +95,4 @@ of a query may not be adjacent.
 [lis]: https://en.wikipedia.org/wiki/Longest_increasing_subsequence
 [hough]: https://en.wikipedia.org/wiki/Hough_transform
 [invhash]: https://gist.github.com/lh3/974ced188be2f90422cc
+[miniasm]: https://github.com/lh3/miniasm
