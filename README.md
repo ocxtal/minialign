@@ -65,7 +65,7 @@ existing tools.
 
 3. For matches on the same strand, sort by {*q<sub>i</sub>*-*t<sub>i</sub>*}
    and then cluster matches within a **-r**=500bp window. Minimap merges
-   two windows if 75% of minimizer matches overlap. For matches on different
+   two windows if **-m**=50% of minimizer matches overlap. For matches on different
    strands, sort {*q<sub>i</sub>*+*t<sub>i</sub>*} and apply a similar
    clustering procedure. This is inspired by the [Hough transformation][hough].
 
@@ -75,7 +75,7 @@ existing tools.
    is a gap longer than **-g**=10000.
 
 5. Output the start and end of the chain if it contains **-c**=4 or more
-   minimizer matches.
+   minimizer matches and the matching length is no less than **-L**=40.
 
 6. Go to 1 and rewind to the first record of query if there are more target
    sequences; otherwise stop.
