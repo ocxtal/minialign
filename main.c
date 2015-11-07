@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r117"
+#define MM_VERSION "r120"
 
 void liftrlimit()
 {
@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRST:m:L:")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRPST:m:L:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -48,6 +48,7 @@ int main(int argc, char *argv[])
 		else if (c == 'd') fnw = optarg;
 		else if (c == 'l') is_idx = 1;
 		else if (c == 'R') opt.flag |= MM_F_WITH_REP;
+		else if (c == 'P') opt.flag &= ~MM_F_WITH_REP;
 		else if (c == 'S') opt.flag |= MM_F_NO_SELF;
 		else if (c == 'O') opt.flag |= MM_F_NO_ISO;
 		else if (c == 'T') opt.sdust_thres = atoi(optarg);
@@ -87,7 +88,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", opt.max_gap);
 		fprintf(stderr, "    -T INT     SDUST threshold; 0 to disable SDUST [%d]\n", opt.sdust_thres);
 		fprintf(stderr, "    -O         drop isolated hits before chaining\n");
-		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n");
+		fprintf(stderr, "    -P         filtering potential repeats after mapping (EXPERIMENTAL)\n");
+//		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n");
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
 		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [100M]\n");
@@ -95,6 +97,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -S         skip self mapping\n");
 		fprintf(stderr, "    -N         use integer as target names\n");
 		fprintf(stderr, "    -V         show version number\n");
+		fprintf(stderr, "\nRecommended settings:\n");
+		fprintf(stderr, "  PacBio/ONT read-to-read mapping: -Sw5 -L100 -m0\n");
 		return 1;
 	}
 
