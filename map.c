@@ -257,6 +257,8 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 			mm128_t *p;
 			if (name && (opt->flag&MM_F_NO_SELF) && mi->name && strcmp(name, mi->name[r[k]>>32]) == 0 && rpos == qpos)
 				continue;
+			if (name && (opt->flag&MM_F_AVA) && mi->name && strcmp(name, mi->name[r[k]>>32]) > 0)
+				continue;
 			kv_pushp(mm128_t, b->coef, &p);
 			if ((r[k]&1) == strand) { // forward strand
 				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);
