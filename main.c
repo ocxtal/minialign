@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r121"
+#define MM_VERSION "r122"
 
 void liftrlimit()
 {
@@ -49,9 +49,9 @@ int main(int argc, char *argv[])
 		else if (c == 'l') is_idx = 1;
 		else if (c == 'R') opt.flag |= MM_F_WITH_REP;
 		else if (c == 'P') opt.flag &= ~MM_F_WITH_REP;
-		else if (c == 'S') opt.flag |= MM_F_NO_SELF;
+		else if (c == 'D') opt.flag |= MM_F_NO_SELF;
 		else if (c == 'O') opt.flag |= MM_F_NO_ISO;
-		else if (c == 'D') opt.flag |= MM_F_AVA | MM_F_NO_SELF;
+		else if (c == 'S') opt.flag |= MM_F_AVA | MM_F_NO_SELF;
 		else if (c == 'T') opt.sdust_thres = atoi(optarg);
 		else if (c == 'L') opt.min_match = atoi(optarg);
 		else if (c == 'V') {
@@ -95,8 +95,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
 		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [100M]\n");
 		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
-		fprintf(stderr, "    -D         skip dual mappings (force -S)\n");
-		fprintf(stderr, "    -S         skip self mapping\n");
+//		fprintf(stderr, "    -D         skip self mappings but keep dual mappings\n"); // too confusing to expose to end users
+		fprintf(stderr, "    -S         skip self and dual mappings\n");
 		fprintf(stderr, "    -N         use integer as target names\n");
 		fprintf(stderr, "    -V         show version number\n");
 		fprintf(stderr, "\nRecommended settings:\n");
