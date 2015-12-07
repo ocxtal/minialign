@@ -43,7 +43,7 @@ typedef struct {
 	{ /* translated from: http://www.algorithmist.com/index.php/Longest_Increasing_Subsequence.cpp */ \
 		size_t i, u, v, *top = b, *p; \
 		if (n == 0) return 0; \
-		p = _p? _p : (size_t*)malloc(n * sizeof(size_t)); \
+		p = _p? _p : (size_t*)calloc(n, sizeof(size_t)); \
 		*top++ = 0; \
 		for (i = 1; i < n; i++) { \
 			if (__sort_lt(a[*(top-1)], a[i])) { \

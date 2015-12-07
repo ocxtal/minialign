@@ -329,7 +329,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			for (i = 0; i < p->n_threads; ++i)
 				s->buf[i] = mm_tbuf_init();
 			s->n_reg = (int*)calloc(s->n_seq, sizeof(int));
-			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t**));
+			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t*));
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
