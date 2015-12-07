@@ -6,7 +6,7 @@
 #include <sys/time.h>
 #include "minimap.h"
 
-#define MM_VERSION "r122"
+#define MM_VERSION "0.2-r123"
 
 void liftrlimit()
 {
@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRPST:m:L:D")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRPST:m:L:Dx:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -66,6 +66,13 @@ int main(int argc, char *argv[])
 			else if (*p == 'K' || *p == 'k') x *= 1e3;
 			if (c == 'B') tbatch_size = (uint64_t)(x + .499);
 			else ibatch_size = (uint64_t)(x + .499);
+		} else if (c == 'x') {
+			if (strcmp(optarg, "ava10k") == 0) {
+				opt.flag |= MM_F_AVA | MM_F_NO_SELF;
+				opt.min_match = 100;
+				opt.merge_frac = 0.0;
+				w = 5;
+			}
 		}
 	}
 	if (w < 0) w = (int)(.6666667 * k + .499);
@@ -88,19 +95,20 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -L INT     min matching length [%d]\n", opt.min_match);
 		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", opt.max_gap);
 		fprintf(stderr, "    -T INT     SDUST threshold; 0 to disable SDUST [%d]\n", opt.sdust_thres);
-		fprintf(stderr, "    -O         drop isolated hits before chaining\n");
-		fprintf(stderr, "    -P         filtering potential repeats after mapping (EXPERIMENTAL)\n");
-//		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n"); // deprecated option for backward compatibility
-		fprintf(stderr, "  Input/Output:\n");
-		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
-		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [100M]\n");
-		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
 //		fprintf(stderr, "    -D         skip self mappings but keep dual mappings\n"); // too confusing to expose to end users
 		fprintf(stderr, "    -S         skip self and dual mappings\n");
-		fprintf(stderr, "    -N         use integer as target names\n");
+		fprintf(stderr, "    -O         drop isolated hits before chaining (EXPERIMENTAL)\n");
+		fprintf(stderr, "    -P         filtering potential repeats after mapping (EXPERIMENTAL)\n");
+//		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n"); // deprecated option for backward compatibility
+		fprintf(stderr, "    -x STR     preset (recommended to be applied before other options) []\n");
+		fprintf(stderr, "               ava10k: -Sw5 -L100 -m0 (PacBio/ONT all-vs-all read mapping)\n");
+		fprintf(stderr, "  Input/Output:\n");
+		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
+//		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [100M]\n");
+//		fprintf(stderr, "    -v INT     verbose level [%d]\n", mm_verbose);
+//		fprintf(stderr, "    -N         use integer as target names\n");
 		fprintf(stderr, "    -V         show version number\n");
-		fprintf(stderr, "\nRecommended settings:\n");
-		fprintf(stderr, "  PacBio/ONT read-to-read mapping: -Sw5 -L100 -m0\n");
+		fprintf(stderr, "\nSee minimap.1 for detailed description of the command-line options.\n");
 		return 1;
 	}
 
