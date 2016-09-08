@@ -49,10 +49,9 @@ struct gaba_api_s {
 		gaba_fill_t const *prev_sec,
 		gaba_section_t const *a,
 		gaba_section_t const *b);
-	gaba_fill_t *(*dp_merge)(
+	gaba_pos_pair_t (*dp_search_max)(
 		gaba_dp_t *this,
-		gaba_fill_t const *sec_list,
-		uint64_t sec_list_len);
+		gaba_fill_t const *sec);
 
 	/* trace */
 	gaba_alignment_t *(*dp_trace)(
@@ -226,7 +225,7 @@ struct gaba_api_s const api_table[] __attribute__(( aligned(16) )) = {
 		.clean = gaba_clean_linear,
 		.dp_fill_root = gaba_dp_fill_root_linear,
 		.dp_fill = gaba_dp_fill_linear,
-		.dp_merge = NULL /*gaba_dp_merge_linear*/,
+		.dp_search_max = gaba_dp_search_max_linear,
 		.dp_trace = gaba_dp_trace_linear
 	},
 	[AFFINE] = {
@@ -234,7 +233,7 @@ struct gaba_api_s const api_table[] __attribute__(( aligned(16) )) = {
 		.clean = gaba_clean_affine,
 		.dp_fill_root = gaba_dp_fill_root_affine,
 		.dp_fill = gaba_dp_fill_affine,
-		.dp_merge = NULL /*gaba_dp_merge_affine*/,
+		.dp_search_max = gaba_dp_search_max_affine,
 		.dp_trace = gaba_dp_trace_affine
 	}
 };
@@ -398,7 +397,7 @@ gaba_pos_pair_t gaba_dp_search_max(
 	gaba_dp_t *this,
 	gaba_fill_t const *sec)
 {
-	return(gaba_dp_search_max_linear(this, sec));
+	return(_api(this)->dp_search_max(this, sec));
 }
 
 /**

@@ -2254,9 +2254,22 @@ struct gaba_pos_pair_s suffix(gaba_dp_search_max)(
 {
 	struct gaba_leaf_s leaf;
 	leaf_search(this, _tail(tail), &leaf);
+
+	struct gaba_joint_tail_s const *atail = _tail(tail), *btail = _tail(tail);
+	int32_t alen = atail->alen, blen = btail->blen;
+	int32_t aidx = alen - leaf.aridx, bidx = blen - leaf.bridx;
+
+	while(aidx <= 0) {
+		for(atail = atail->tail; atail->apos != 0; atail = atail->tail) {}
+		aidx += (alen = atail->alen);
+	}
+	while(bidx <= 0) {
+		for(btail = btail->tail; btail->bpos != 0; btail = btail->tail) {}
+		bidx += (blen = btail->blen);
+	}
 	return((struct gaba_pos_pair_s){
-		.apos = _tail(tail)->alen - leaf.aridx,
-		.bpos = _tail(tail)->blen - leaf.bridx
+		.apos = aidx,
+		.bpos = bidx
 	});
 }
 
@@ -3721,7 +3734,7 @@ uint64_t suffix(gaba_dp_dump_cigar_forward)(
 	uint64_t m0 = _a & ((_a>>1) | (0x01ULL<<63)); \
 	uint64_t m1 = _a | (_a<<1); \
 	uint64_t m = m0 | ~m1; \
-	debug("m0(%llx), m1(%llx), m(%llx), lzcnt(%u)", m0, m1, m, lzcnt(m)); \
+	debug("m0(%llx), m1(%llx), m(%llx), lzcnt(%llu)", m0, m1, m, lzcnt(m)); \
 	lzcnt(m); \
 })
 #define _parse_count_gap_reverse(_arr) ({ \
@@ -3803,15 +3816,12 @@ uint64_t suffix(gaba_dp_dump_cigar_reverse)(
 	uint64_t ofs = (int64_t)offset + (((uint64_t)path & sizeof(uint32_t)) ? -32 : -64);
 	uint64_t idx = len;
 
-	debug("path(%p), lim(%lld), ridx(%lld)", p, lim, ridx);
-
 	while(1) {
 		uint64_t sidx = idx;
 		while(1) {
 			uint64_t a = MIN2(
 				_parse_count_match_reverse(parse_load_uint64(p, idx + ofs)),
 				idx & ~0x01);
-			debug("a(%lld), ridx(%lld), ridx&~0x01(%lld)", a, ridx, ridx & ~0x01);
 			idx -= a;
 			if(a < 64) { break; }
 
