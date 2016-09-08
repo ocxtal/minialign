@@ -16,14 +16,20 @@ all:$(PROG)
 
 extra:all $(PROG_EXTRA)
 
-minimap:main.o libminimap.a
-		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap $(LIBS)
+minimap:main.o libminimap.a libgaba.a
+		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap -lgaba $(LIBS)
 
-minimap-lite:example.o libminimap.a
-		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap $(LIBS)
+minimap-lite:example.o libminimap.a libgaba.a
+		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap -lgaba $(LIBS)
 
 libminimap.a:$(OBJS)
 		$(AR) -csru $@ $(OBJS)
+
+libgaba.a:gaba.c gaba.h gaba_wrap.c
+		$(CC) -Wall -O3 -Wno-unused-function -march=native -std=c99 -DMODEL=LINEAR gaba.c -c -o gaba_linear.o
+		$(CC) -Wall -O3 -Wno-unused-function -march=native -std=c99 -DMODEL=AFFINE gaba.c -c -o gaba_affine.o
+		$(CC) -Wall -O3 -Wno-unused-function -march=native -std=c99 gaba_wrap.c -c -o gaba_wrap.o
+		$(AR) -csr $@ gaba_linear.o gaba_affine.o gaba_wrap.o
 
 sdust:sdust.c kdq.h kvec.h kseq.h sdust.h
 		$(CC) -D_SDUST_MAIN $(CFLAGS) $< -o $@ -lz

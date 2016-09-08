@@ -5,6 +5,27 @@
 #include "kvec.h"
 #include "minimap.h"
 #include "sdust.h"
+#include "gaba.h"
+
+// ascii to 4bit conversion
+static unsigned char seq_nt4_table_4bit[256] = {
+	1, 2, 4, 8,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 1, 0, 2,  0, 0, 0, 4,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 1, 0, 2,  0, 0, 0, 4,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0
+};
 
 void mm_mapopt_init(mm_mapopt_t *opt)
 {
@@ -15,6 +36,10 @@ void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->sdust_thres = 0;
 	opt->flag = MM_F_WITH_REP;
 	opt->merge_frac = .5;
+	opt->m = 1;
+	opt->x = 1;
+	opt->gi = 1;
+	opt->ge = 1;
 }
 
 /****************************
@@ -34,6 +59,8 @@ struct mm_tbuf_s { // per-thread buffer
 	size_t *b, *p;
 	// final output
 	kvec_t(mm_reg1_t) reg;
+	// alignment work
+	gaba_dp_t *dp;
 };
 
 mm_tbuf_t *mm_tbuf_init()
@@ -133,6 +160,7 @@ static void proc_intv(mm_tbuf_t *b, int which, int k, int min_cnt, int max_gap)
 				r->re = rev? (uint32_t)b->a[b->b[start]] : (uint32_t)b->a[b->b[i-1]];
 				r->rs -= k - 1;
 				r->re += 1;
+				r->cigar = NULL;
 				for (j = start; j < i; ++j) { // count the number of times each minimizer is used
 					int jj = b->a[b->b[j]]>>32;
 					b->mini.a[jj].y += 1ULL<<32;
@@ -276,6 +304,56 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 	return b->reg.a;
 }
 
+void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg1_t *reg, gaba_dp_t *dp)
+{
+	int i;
+	// encode seq to 2bit
+	uint8_t *s = (uint8_t *)calloc(1, 96 + l_seq);
+	for (i = 0; i < l_seq; i++) s[i+32] = seq_nt4_table_4bit[(uint8_t)seq[i]];
+	memset(s+32+l_seq, 0, 32);
+
+	const uint8_t *lim = (const uint8_t*)0x800000000000;
+	struct gaba_section_s qf, qr, rf, rr, t;
+	qf.id = 0; qf.len = l_seq; qf.base = s+32;
+	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev(s+32+l_seq-1, lim);
+	t.id = 4; t.len = 32; t.base = s+32+l_seq;
+	for (i = 0; i < n_regs; i++) {
+		rf.id = 2; rf.len = mi->len[reg[i].rid]; rf.base = mi->seq.a+32+mi->pos[reg[i].rid];
+		rr.id = 3; rr.len = mi->len[reg[i].rid]; rr.base = gaba_rev(mi->seq.a+32+mi->pos[reg[i].rid], lim);
+		// upward extension
+		struct gaba_section_s *q = &qr, *r = &rr;
+		gaba_fill_t *f = gaba_dp_fill_root(dp, q, reg[i].qs, r, reg[i].rs);
+		gaba_fill_t *m = f;
+		uint32_t mask = 0;
+		do {
+			if (f->status & GABA_STATUS_UPDATE_A) mask |= GABA_STATUS_UPDATE_A, q = &t;
+			if (f->status & GABA_STATUS_UPDATE_B) mask |= GABA_STATUS_UPDATE_B, r = &t;
+			f = gaba_dp_fill(dp, f, q, r);
+			m = (f->max > m->max)? f : m;
+		} while(mask & f->status);
+		// find max
+		gaba_pos_pair_t p = gaba_dp_search_max(dp, m);
+		// downward extension from max
+		q = &qf; r = &rf;
+		m = f = gaba_dp_fill_root(dp, q, l_seq - p.apos, r, mi->seq.n - p.bpos);
+		mask = 0;
+		do {
+			if (f->status & GABA_STATUS_UPDATE_A) mask |= GABA_STATUS_UPDATE_A, q = &t;
+			if (f->status & GABA_STATUS_UPDATE_B) mask |= GABA_STATUS_UPDATE_B, r = &t;
+			f = gaba_dp_fill(dp, f, q, r);
+			m = (f->max > m->max)? f : m;
+		} while(mask & f->status);
+		// convert alignment to cigar
+		gaba_alignment_t *a = gaba_dp_trace(dp, m, NULL, NULL);
+		reg->cigar = (char *)calloc(2*a->path->len+6, 1);
+		strcpy(reg->cigar, "\tcs:z:");
+		gaba_dp_dump_cigar_reverse(reg->cigar+6, 2*a->path->len, a->path->array, 0, a->path->len);
+		gaba_dp_flush(dp, lim, lim);
+	}
+	free(s);
+}
+
+
 /**************************
  * Multi-threaded mapping *
  **************************/
@@ -288,6 +366,7 @@ typedef struct {
 	const mm_mapopt_t *opt;
 	bseq_file_t *fp;
 	const mm_idx_t *mi;
+	gaba_t *gaba;
 } pipeline_t;
 
 typedef struct {
@@ -297,6 +376,7 @@ typedef struct {
 	int *n_reg;
 	mm_reg1_t **reg;
 	mm_tbuf_t **buf;
+	gaba_dp_t **dp;
 } step_t;
 
 static void worker_for(void *_data, long i, int tid) // kt_for() callback
@@ -307,6 +387,9 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 
 	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, step->buf[tid], step->p->opt, step->seq[i].name);
 	step->n_reg[i] = n_regs;
+	if (step->p->mi->seq.a) {	// has reference sequence
+		mm_align(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, step->n_reg[i], (mm_reg1_t*)regs, step->dp[tid]);
+	}
 	if (n_regs > 0) {
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
 		memcpy(step->reg[i], regs, n_regs * sizeof(mm_reg1_t));
@@ -330,6 +413,10 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				s->buf[i] = mm_tbuf_init();
 			s->n_reg = (int*)calloc(s->n_seq, sizeof(int));
 			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t*));
+			if (p->mi->seq.a) { // has reference seq
+				for (i = 0; i < p->n_threads; ++i)
+					s->dp[i] = gaba_dp_init(p->gaba, (const uint8_t*)0x800000000000, (const uint8_t *)0x800000000000);
+			}
 			return s;
 		} else free(s);
     } else if (step == 1) { // step 1: map
@@ -339,6 +426,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
         step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
 		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
+		for (i = 0; i < p->n_threads; ++i) gaba_dp_clean(s->dp[i]);
 		free(s->buf);
 		for (i = 0; i < s->n_seq; ++i) {
 			bseq1_t *t = &s->seq[i];
@@ -348,8 +436,10 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
 				if (mi->name) fputs(mi->name[r->rid], stdout);
 				else printf("%d", r->rid + 1);
-				printf("\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d\n", mi->len[r->rid], r->rs, r->re, r->len,
+				printf("\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d", mi->len[r->rid], r->rs, r->re, r->len,
 						r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
+				printf("%s\n", r->cigar? r->cigar : "");
+				free(r->cigar);
 			}
 			free(s->reg[i]);
 			free(s->seq[i].seq); free(s->seq[i].name);
@@ -368,7 +458,14 @@ int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int
 	if (pl.fp == 0) return -1;
 	pl.opt = opt, pl.mi = idx;
 	pl.n_threads = n_threads, pl.batch_size = tbatch_size;
+	if (pl.mi->seq.a) {
+		int m = opt->m, x = -opt->x, gi = -opt->gi, ge = -opt->ge;
+		struct gaba_score_s sc = {{{m,x,x,x},{x,m,x,x},{x,x,m,x},{x,x,x,m}},gi,ge,gi,ge};
+		struct gaba_params_s p = {0,0,0,opt->xdrop,&sc};
+		pl.gaba = gaba_init(&p);
+	}
 	kt_pipeline(n_threads == 1? 1 : 2, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);
+	gaba_clean(pl.gaba);
 	return 0;
 }

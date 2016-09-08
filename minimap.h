@@ -21,6 +21,7 @@ typedef struct {
 typedef struct { size_t n, m; mm128_t *a; } mm128_v;
 typedef struct { size_t n, m; uint64_t *a; } uint64_v;
 typedef struct { size_t n, m; uint32_t *a; } uint32_v;
+typedef struct { size_t n, m; uint8_t *a; } uint8_v;
 
 typedef struct {
 	mm128_v a;   // (minimizer, position) array
@@ -37,6 +38,8 @@ typedef struct {
 	float freq_thres;
 	int32_t *len;    // length of each reference sequence
 	char **name; // TODO: if this uses too much RAM, switch one concatenated string
+	int64_t *pos;	// 160907: base position of each reference sequence
+	uint8_v seq;	// 160907: reference sequence array
 } mm_idx_t;
 
 typedef struct {
@@ -44,6 +47,7 @@ typedef struct {
 	uint32_t rid:31, rep:1;
 	uint32_t len;
 	int32_t qs, qe, rs, re;
+	char *cigar;	// 160907: alignment cigar string
 } mm_reg1_t;
 
 typedef struct {
@@ -54,6 +58,7 @@ typedef struct {
 	int sdust_thres;  // score threshold for SDUST; 0 to disable
 	int flag;    // see MM_F_* macros
 	float merge_frac; // merge two chains if merge_frac fraction of minimzers are shared between the chains
+	int m, x, gi, ge, xdrop;
 } mm_mapopt_t;
 
 extern int mm_verbose;
@@ -72,7 +77,7 @@ void mm_sketch(const char *str, int len, int w, int k, uint32_t rid, mm128_v *p)
 // minimizer indexing
 mm_idx_t *mm_idx_init(int w, int k, int b);
 void mm_idx_destroy(mm_idx_t *mi);
-mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, uint64_t ibatch_size, int keep_name);
+mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, uint64_t ibatch_size, int keep_name, int keep_seq);
 void mm_idx_set_max_occ(mm_idx_t *mi, float f);
 const uint64_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, int *n);
 

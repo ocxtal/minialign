@@ -10,6 +10,26 @@
 KHASH_INIT(idx, uint64_t, uint64_t, 1, idx_hash, idx_eq)
 typedef khash_t(idx) idxhash_t;
 
+// ascii to 4bit conversion
+static unsigned char seq_nt4_table_4bit[256] = {
+	1, 2, 4, 8,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 1, 0, 2,  0, 0, 0, 4,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 1, 0, 2,  0, 0, 0, 4,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
+	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0
+};
+
 void kt_for(int n_threads, void (*func)(void*,long,int), void *data, long n);
 
 mm_idx_t *mm_idx_init(int w, int k, int b)
@@ -161,6 +181,7 @@ void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_d
 
 typedef struct {
 	int tbatch_size, n_processed, keep_name;
+	int keep_seq;		/* 160907: keep 2-bit encoded sequence to generate alignment */
 	bseq_file_t *fp;
 	uint64_t ibatch_size, n_read;
 	mm_idx_t *mi;
@@ -183,7 +204,7 @@ static void mm_idx_add(mm_idx_t *mi, int n, const mm128_t *a)
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
-	int i;
+	int i, j;
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
         step_t *s;
@@ -198,12 +219,20 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			if (old_m != m) {
 				if (p->keep_name)
 					p->mi->name = (char**)realloc(p->mi->name, m * sizeof(char*));
+				if (p->keep_seq)
+					p->mi->pos = (int64_t**)realloc(p->mi->pos, m * sizeof(int64_t*));
 				p->mi->len = (int*)realloc(p->mi->len, m * sizeof(int));
 			}
 			for (i = 0; i < s->n_seq; ++i) {
 				if (p->keep_name) {
 					assert(strlen(s->seq[i].name) <= 254);
 					p->mi->name[p->mi->n] = strdup(s->seq[i].name);
+				}
+				if (p->keep_seq) {
+					for (j = 0; j < s->seq[i].l_seq; j++) {
+						kv_push(uint8_t, p->mi->seq, seq_nt4_table_4bit[(uint8_t)s->seq->seq[j]]);
+					}
+					p->mi->pos[p->mi->n] = p->mi->pos[p->mi->n-1] + s->seq[i].l_seq;
 				}
 				p->mi->len[p->mi->n++] = s->seq[i].l_seq;
 				s->seq[i].rid = p->n_processed++;
@@ -228,16 +257,22 @@ static void *worker_pipeline(void *shared, int step, void *in)
     return 0;
 }
 
-mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, uint64_t ibatch_size, int keep_name)
+mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int n_threads, uint64_t ibatch_size, int keep_name, int keep_seq)
 {
+	int i;
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.tbatch_size = tbatch_size;
 	pl.keep_name = keep_name;
+	pl.keep_seq = keep_seq;
 	pl.ibatch_size = ibatch_size;
 	pl.fp = fp;
 	if (pl.fp == 0) return 0;
 	pl.mi = mm_idx_init(w, k, b);
+
+	if (pl.keep_seq) {
+		for (i = 0; i < 32; i++) kv_push(uint8_t, pl.mi->seq, 0);	// head margin
+	}
 
 	kt_pipeline(n_threads < 3? n_threads : 3, worker_pipeline, &pl, 3);
 	if (mm_verbose >= 3)
@@ -247,6 +282,9 @@ mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int 
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
+	if (pl.keep_seq) {
+		for (i = 0; i < 32; i++) kv_push(uint8_t, pl.mi->seq, 0);	// tail margin
+	}
 	return pl.mi;
 }
 
@@ -256,7 +294,7 @@ mm_idx_t *mm_idx_build(const char *fn, int w, int k, int n_threads) // a simpler
 	mm_idx_t *mi;
 	fp = bseq_open(fn);
 	if (fp == 0) return 0;
-	mi = mm_idx_gen(fp, w, k, MM_IDX_DEF_B, 1<<18, n_threads, UINT64_MAX, 1);
+	mi = mm_idx_gen(fp, w, k, MM_IDX_DEF_B, 1<<18, n_threads, UINT64_MAX, 1, 0);
 	mm_idx_set_max_occ(mi, 0.001);
 	bseq_close(fp);
 	return mi;
@@ -300,6 +338,11 @@ void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 			x[0] = kh_key(h, k), x[1] = kh_val(h, k);
 			fwrite(x, 8, 2, fp);
 		}
+	}
+	if (mi->len) {		// has 2bit encoded reference sequences
+		fwrite(&mi->seq.n, 8, 1, fp);
+		fwrite(mi->pos, 8, mi->n, fp);
+		fwrite(mi->seq.a, 1, mi->seq.n, fp);
 	}
 }
 
@@ -348,5 +391,12 @@ mm_idx_t *mm_idx_load(FILE *fp)
 			kh_val(h, k) = x[1];
 		}
 	}
+	if (fread(&mi->seq.n, 8, 1, fp) == 8) { // has reference sequences
+		mi->pos = (int64_t**)calloc(mi->n, sizeof(int64_t*));
+		mi->seq.a = (uint8_t*)calloc(mi->seq.n, sizeof(uint8_t));
+		fread(mi->pos, 8, mi->n, fp);
+		fread(mi->seq.a, 1, mi->seq.n, fp);
+		mi->seq.m = mi->seq.n;
+	} else mi->seq.n = 0;
 	return mi;
 }
