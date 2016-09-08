@@ -220,7 +220,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				if (p->keep_name)
 					p->mi->name = (char**)realloc(p->mi->name, m * sizeof(char*));
 				if (p->keep_seq)
-					p->mi->pos = (int64_t**)realloc(p->mi->pos, m * sizeof(int64_t*));
+					p->mi->pos = (int64_t*)realloc(p->mi->pos, m * sizeof(int64_t*));
 				p->mi->len = (int*)realloc(p->mi->len, m * sizeof(int));
 			}
 			for (i = 0; i < s->n_seq; ++i) {
@@ -232,7 +232,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 					for (j = 0; j < s->seq[i].l_seq; j++) {
 						kv_push(uint8_t, p->mi->seq, seq_nt4_table_4bit[(uint8_t)s->seq->seq[j]]);
 					}
-					p->mi->pos[p->mi->n] = p->mi->pos[p->mi->n-1] + s->seq[i].l_seq;
+					p->mi->pos[p->mi->n] = (p->mi->n==0)? 0 : p->mi->pos[p->mi->n-1] + s->seq[i].l_seq;
 				}
 				p->mi->len[p->mi->n++] = s->seq[i].l_seq;
 				s->seq[i].rid = p->n_processed++;
@@ -392,7 +392,7 @@ mm_idx_t *mm_idx_load(FILE *fp)
 		}
 	}
 	if (fread(&mi->seq.n, 8, 1, fp) == 8) { // has reference sequences
-		mi->pos = (int64_t**)calloc(mi->n, sizeof(int64_t*));
+		mi->pos = (int64_t*)calloc(mi->n, sizeof(int64_t*));
 		mi->seq.a = (uint8_t*)calloc(mi->seq.n, sizeof(uint8_t));
 		fread(mi->pos, 8, mi->n, fp);
 		fread(mi->seq.a, 1, mi->seq.n, fp);
