@@ -349,7 +349,7 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 		gaba_alignment_t *a = gaba_dp_trace(dp, NULL, m, NULL);
 		if (!a->path->len) continue;
 		reg[i].cigar = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
-		strcpy(reg[i].cigar, "\tcs:z:");
+		strcpy(reg[i].cigar, "\tcs:Z:");
 		gaba_dp_dump_cigar_reverse(reg[i].cigar+6, 2*a->path->len, a->path->array, 0, a->path->len);
 		gaba_dp_flush(dp, lim, lim);
 	}
