@@ -1,5 +1,5 @@
 CC=			gcc
-CFLAGS=		-g -Wall -O2 -Wc++-compat -Wno-unused-function
+CFLAGS=		-g -O3 -Wall -Wc++-compat -Wno-unused-function
 CPPFLAGS=
 INCLUDES=	-I.
 OBJS=		kthread.o misc.o bseq.o sketch.o sdust.o index.o map.o
@@ -26,9 +26,9 @@ libminimap.a:$(OBJS)
 		$(AR) -csru $@ $(OBJS)
 
 libgaba.a:gaba.c gaba.h gaba_wrap.c
-		$(CC) -Wall -O3 -Wno-unused-function -march=native -std=c99 -DMODEL=LINEAR gaba.c -c -o gaba_linear.o
-		$(CC) -Wall -O3 -Wno-unused-function -march=native -std=c99 -DMODEL=AFFINE gaba.c -c -o gaba_affine.o
-		$(CC) -Wall -O3 -Wno-unused-function -march=native -std=c99 gaba_wrap.c -c -o gaba_wrap.o
+		$(CC) -g -O3 -Wall -Wno-unused-function -march=native -std=c99 -DMODEL=LINEAR gaba.c -c -o gaba_linear.o
+		$(CC) -g -O3 -Wall -Wno-unused-function -march=native -std=c99 -DMODEL=AFFINE gaba.c -c -o gaba_affine.o
+		$(CC) -g -O3 -Wall -Wno-unused-function -march=native -std=c99 gaba_wrap.c -c -o gaba_wrap.o
 		$(AR) -csr $@ gaba_linear.o gaba_affine.o gaba_wrap.o
 
 sdust:sdust.c kdq.h kvec.h kseq.h sdust.h
