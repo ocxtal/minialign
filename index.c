@@ -56,7 +56,7 @@ void mm_idx_destroy(mm_idx_t *mi)
 	free(mi->B);
 	if (mi->name)
 		for (i = 0; i < mi->n; ++i) free(mi->name[i]);
-	free(mi->len); free(mi->name);
+	free(mi->len); free(mi->name); free(mi->pos); free(mi->seq.a);
 	free(mi);
 }
 
