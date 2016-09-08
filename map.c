@@ -310,7 +310,8 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 	// encode seq to 2bit
 	uint8_t *s = (uint8_t *)calloc(1, 96 + l_seq);
 	for (i = 0; i < l_seq; i++) s[i+32] = seq_nt4_table_4bit[(uint8_t)seq[i]];
-	memset(s+32+l_seq, 0, 32);
+	memset(s, 0, 32);
+	memset(s+32+l_seq, 0, 64);
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
 	struct gaba_section_s qf, qr, rf, rr, t;
 	qf.id = 0; qf.len = l_seq; qf.base = s+32;
@@ -346,9 +347,10 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 		} while(!(mask & f->status));
 		// convert alignment to cigar
 		gaba_alignment_t *a = gaba_dp_trace(dp, NULL, m, NULL);
-		reg->cigar = (char *)calloc(2*a->path->len+6, 1);
-		strcpy(reg->cigar, "\tcs:z:");
-		gaba_dp_dump_cigar_reverse(reg->cigar+6, 2*a->path->len, a->path->array, 0, a->path->len);
+		if (!a->path->len) continue;
+		reg[i].cigar = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
+		strcpy(reg[i].cigar, "\tcs:z:");
+		gaba_dp_dump_cigar_reverse(reg[i].cigar+6, 2*a->path->len, a->path->array, 0, a->path->len);
 		gaba_dp_flush(dp, lim, lim);
 	}
 	free(s);
@@ -387,10 +389,10 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	int n_regs;
 
 	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, step->buf[tid], step->p->opt, step->seq[i].name);
-	step->n_reg[i] = n_regs;
 	if (step->p->mi->seq.a) {	// has reference sequence
-		mm_align(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, step->n_reg[i], (mm_reg1_t*)regs, step->dp[tid]);
+		mm_align(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, n_regs, (mm_reg1_t*)regs, step->dp[tid]);
 	}
+	step->n_reg[i] = n_regs;
 	if (n_regs > 0) {
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));
 		memcpy(step->reg[i], regs, n_regs * sizeof(mm_reg1_t));
@@ -435,7 +437,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			bseq1_t *t = &s->seq[i];
 			for (j = 0; j < s->n_reg[i]; ++j) {
 				mm_reg1_t *r = &s->reg[i][j];
-				if (r->len < p->opt->min_match) continue;
+				if (r->len < p->opt->min_match) { free(r->cigar); continue; }
 				printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
 				if (mi->name) fputs(mi->name[r->rid], stdout);
 				else printf("%d", r->rid + 1);
