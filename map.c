@@ -311,7 +311,6 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 	uint8_t *s = (uint8_t *)calloc(1, 96 + l_seq);
 	for (i = 0; i < l_seq; i++) s[i+32] = seq_nt4_table_4bit[(uint8_t)seq[i]];
 	memset(s+32+l_seq, 0, 32);
-
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
 	struct gaba_section_s qf, qr, rf, rr, t;
 	qf.id = 0; qf.len = l_seq; qf.base = s+32;
@@ -319,32 +318,34 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 	t.id = 4; t.len = 32; t.base = s+32+l_seq;
 	for (i = 0; i < n_regs; i++) {
 		rf.id = 2; rf.len = mi->len[reg[i].rid]; rf.base = mi->seq.a+32+mi->pos[reg[i].rid];
-		rr.id = 3; rr.len = mi->len[reg[i].rid]; rr.base = gaba_rev(mi->seq.a+32+mi->pos[reg[i].rid], lim);
+		rr.id = 3; rr.len = mi->len[reg[i].rid]; rr.base = gaba_rev(mi->seq.a+32+mi->pos[reg[i].rid]+mi->len[reg[i].rid]-1, lim);
+		uint32_t qs = reg[i].qs, rs = reg[i].rev? rf.len-reg[i].re : reg[i].rs;
+
 		// upward extension
-		struct gaba_section_s *q = &qr, *r = &rr;
-		gaba_fill_t *f = gaba_dp_fill_root(dp, q, reg[i].qs, r, reg[i].rs);
+		struct gaba_section_s *q = &qr, *r = reg[i].rev? &rf : &rr;
+		gaba_fill_t *f = gaba_dp_fill_root(dp, q, q->len-qs, r, r->len-rs);
 		gaba_fill_t *m = f;
-		uint32_t mask = 0;
+		uint32_t mask = GABA_STATUS_TERM;
 		do {
 			if (f->status & GABA_STATUS_UPDATE_A) mask |= GABA_STATUS_UPDATE_A, q = &t;
 			if (f->status & GABA_STATUS_UPDATE_B) mask |= GABA_STATUS_UPDATE_B, r = &t;
 			f = gaba_dp_fill(dp, f, q, r);
 			m = (f->max > m->max)? f : m;
-		} while(mask & f->status);
+		} while(!(mask & f->status));
 		// find max
 		gaba_pos_pair_t p = gaba_dp_search_max(dp, m);
 		// downward extension from max
-		q = &qf; r = &rf;
-		m = f = gaba_dp_fill_root(dp, q, l_seq - p.apos, r, mi->seq.n - p.bpos);
-		mask = 0;
+		q = &qf; r = reg[i].rev? &rr : &rf;
+		m = f = gaba_dp_fill_root(dp, q, q->len-p.apos, r, r->len-p.bpos);
+		mask = GABA_STATUS_TERM;
 		do {
 			if (f->status & GABA_STATUS_UPDATE_A) mask |= GABA_STATUS_UPDATE_A, q = &t;
 			if (f->status & GABA_STATUS_UPDATE_B) mask |= GABA_STATUS_UPDATE_B, r = &t;
 			f = gaba_dp_fill(dp, f, q, r);
 			m = (f->max > m->max)? f : m;
-		} while(mask & f->status);
+		} while(!(mask & f->status));
 		// convert alignment to cigar
-		gaba_alignment_t *a = gaba_dp_trace(dp, m, NULL, NULL);
+		gaba_alignment_t *a = gaba_dp_trace(dp, NULL, m, NULL);
 		reg->cigar = (char *)calloc(2*a->path->len+6, 1);
 		strcpy(reg->cigar, "\tcs:z:");
 		gaba_dp_dump_cigar_reverse(reg->cigar+6, 2*a->path->len, a->path->array, 0, a->path->len);
@@ -413,6 +414,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				s->buf[i] = mm_tbuf_init();
 			s->n_reg = (int*)calloc(s->n_seq, sizeof(int));
 			s->reg = (mm_reg1_t**)calloc(s->n_seq, sizeof(mm_reg1_t*));
+			s->dp = (gaba_dp_t**)calloc(p->n_threads, sizeof(gaba_dp_t*));
 			if (p->mi->seq.a) { // has reference seq
 				for (i = 0; i < p->n_threads; ++i)
 					s->dp[i] = gaba_dp_init(p->gaba, (const uint8_t*)0x800000000000, (const uint8_t *)0x800000000000);
@@ -426,8 +428,9 @@ static void *worker_pipeline(void *shared, int step, void *in)
         step_t *s = (step_t*)in;
 		const mm_idx_t *mi = p->mi;
 		for (i = 0; i < p->n_threads; ++i) mm_tbuf_destroy(s->buf[i]);
-		for (i = 0; i < p->n_threads; ++i) gaba_dp_clean(s->dp[i]);
 		free(s->buf);
+		for (i = 0; i < p->n_threads; ++i) gaba_dp_clean(s->dp[i]);
+		free(s->dp);
 		for (i = 0; i < s->n_seq; ++i) {
 			bseq1_t *t = &s->seq[i];
 			for (j = 0; j < s->n_reg[i]; ++j) {
@@ -459,7 +462,7 @@ int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int
 	pl.opt = opt, pl.mi = idx;
 	pl.n_threads = n_threads, pl.batch_size = tbatch_size;
 	if (pl.mi->seq.a) {
-		int m = opt->m, x = -opt->x, gi = -opt->gi, ge = -opt->ge;
+		int m = opt->m, x = -opt->x, gi = opt->gi, ge = opt->ge;
 		struct gaba_score_s sc = {{{m,x,x,x},{x,m,x,x},{x,x,m,x},{x,x,x,m}},gi,ge,gi,ge};
 		struct gaba_params_s p = {0,0,0,opt->xdrop,&sc};
 		pl.gaba = gaba_init(&p);
