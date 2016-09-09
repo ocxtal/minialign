@@ -318,6 +318,7 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev(s+32+l_seq-1, lim);
 	t.id = 4; t.len = 32; t.base = s+32+l_seq;
 	for (i = 0; i < n_regs; i++) {
+		char *cig;
 		rf.id = 2; rf.len = mi->len[reg[i].rid]; rf.base = mi->seq.a+32+mi->pos[reg[i].rid];
 		rr.id = 3; rr.len = mi->len[reg[i].rid]; rr.base = gaba_rev(mi->seq.a+32+mi->pos[reg[i].rid]+mi->len[reg[i].rid]-1, lim);
 		uint32_t qs = reg[i].qs, rs = reg[i].rev? rf.len-reg[i].re : reg[i].rs;
@@ -347,10 +348,18 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 		} while(!(mask & f->status));
 		// convert alignment to cigar
 		gaba_alignment_t *a = gaba_dp_trace(dp, NULL, m, NULL);
+		fprintf(stderr, "qs(%d), qe(%d), rs(%d), re(%d)\n", reg[i].qs, reg[i].qe, reg[i].rs, reg[i].re);
+		reg[i].qs = a->sec->apos;
+		reg[i].qe = a->sec->apos+a->sec->alen;
+		reg[i].rs = reg[i].rev? rf.len-a->sec->bpos-a->sec->blen : a->sec->bpos;
+		reg[i].re = reg[i].rev? rf.len-a->sec->bpos : a->sec->bpos+a->sec->blen;
+		fprintf(stderr, "qs(%d), qe(%d), rs(%d), re(%d)\n", reg[i].qs, reg[i].qe, reg[i].rs, reg[i].re);
 		if (!a->path->len) continue;
-		reg[i].cigar = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
-		strcpy(reg[i].cigar, "\tcs:Z:");
-		gaba_dp_dump_cigar_reverse(reg[i].cigar+6, 2*a->path->len, a->path->array, 0, a->path->len);
+		reg[i].cigar = cig = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
+		// strcpy(reg[i].cigar, "\tcs:Z:");
+		if (reg[i].qs) cig += sprintf(cig, "%d%c", reg[i].qs, 'S');
+		cig += gaba_dp_dump_cigar_reverse(cig, 2*a->path->len, a->path->array, 0, a->path->len);
+		if (reg[i].qe != qf.len) cig += sprintf(cig, "%d%c", qf.len-reg[i].qe, 'S');
 		gaba_dp_flush(dp, lim, lim);
 	}
 	free(s);
@@ -401,7 +410,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 
 static void *worker_pipeline(void *shared, int step, void *in)
 {
-	int i, j;
+	int i, j, k;
     pipeline_t *p = (pipeline_t*)shared;
     if (step == 0) { // step 0: read sequences
         step_t *s;
@@ -435,17 +444,30 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		free(s->dp);
 		for (i = 0; i < s->n_seq; ++i) {
 			bseq1_t *t = &s->seq[i];
-			for (j = 0; j < s->n_reg[i]; ++j) {
-				mm_reg1_t *r = &s->reg[i][j];
-				if (r->len < p->opt->min_match) { free(r->cigar); continue; }
-				printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
-				if (mi->name) fputs(mi->name[r->rid], stdout);
-				else printf("%d", r->rid + 1);
-				printf("\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d", mi->len[r->rid], r->rs, r->re, r->len,
-						r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
-				printf("%s\n", r->cigar? r->cigar : "");
-				free(r->cigar);
-			}
+			if (s->n_reg[i]) {
+				for (j = 0; j < s->n_reg[i]; ++j) {
+					int qs, qe;
+					mm_reg1_t *r = &s->reg[i][j];
+					if (r->len < p->opt->min_match) { free(r->cigar); continue; }
+					// print sam
+					printf("%s\t%d\t%s\t%d\t255\t%s\t*\t0\t0\t",
+						t->name, (r->rev? 0x10 : 0)|(i==0? 0 : 0x100), mi->name[r->rid], r->rs+1, r->cigar?r->cigar:"*");
+					qs = (j==0)? 0 : r->qs; qe = (j==0)? t->l_seq : r->qe;
+					if (r->rev)  for (k = qe-1; k >= qs; k--) putchar("T G A C "[0x06&t->seq[k]]);
+					else for (k = qs; k < qe; k++) putchar(t->seq[k]);
+					printf("\t*\tRG:Z:1\n");
+
+					/*
+					printf("%s\t%d\t%d\t%d\t%c\t", t->name, t->l_seq, r->qs, r->qe, "+-"[r->rev]);
+					if (mi->name) fputs(mi->name[r->rid], stdout);
+					else printf("%d", r->rid + 1);
+					printf("\t%d\t%d\t%d\t%d\t%d\t255\tcm:i:%d", mi->len[r->rid], r->rs, r->re, r->len,
+							r->re - r->rs > r->qe - r->qs? r->re - r->rs : r->qe - r->qs, r->cnt);
+					printf("%s\n", r->cigar? r->cigar : "");
+					*/
+					free(r->cigar);
+				}
+			} else printf("%s\t4\t*\t0\t0\t*\t*\t0\t0\t%s\t*\n", t->name, t->seq);	// unmapped
 			free(s->reg[i]);
 			free(s->seq[i].seq); free(s->seq[i].name);
 		}
@@ -457,6 +479,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 
 int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int n_threads, int tbatch_size)
 {
+	int i;
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.fp = bseq_open(fn);
@@ -469,6 +492,11 @@ int mm_map_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, int
 		struct gaba_params_s p = {0,0,0,opt->xdrop,&sc};
 		pl.gaba = gaba_init(&p);
 	}
+	// print sam header
+	printf("@HD\tVN:1.0\tSO:unsorted\n");
+	for (i = 0; i < idx->n; i++) printf("@SQ\t%s\t%d\n", idx->name[i], idx->len[i]);
+	printf("@RG\tID:1\n");
+	printf("@PG\tID:6\tPN:minimap\n");
 	kt_pipeline(n_threads == 1? 1 : 2, worker_pipeline, &pl, 3);
 	bseq_close(pl.fp);
 	gaba_clean(pl.gaba);
