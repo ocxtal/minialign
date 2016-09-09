@@ -88,6 +88,9 @@
 #define MEM_MARGIN_SIZE				( 2048 )
 #define PSUM_BASE					( 1 )
 
+_static_assert(V2I32_MASK_01 == GABA_STATUS_UPDATE_A);
+_static_assert(V2I32_MASK_10 == GABA_STATUS_UPDATE_B);
+
 
 /**
  * @macro _likely, _unlikely
@@ -2260,11 +2263,11 @@ struct gaba_pos_pair_s suffix(gaba_dp_search_max)(
 	int32_t aidx = alen - leaf.aridx, bidx = blen - leaf.bridx;
 
 	while(aidx <= 0) {
-		for(atail = atail->tail; atail->apos != 0; atail = atail->tail) {}
+		for(atail = atail->tail; (atail->stat & GABA_STATUS_UPDATE_A) == 0; atail = atail->tail) {}
 		aidx += (alen = atail->alen);
 	}
 	while(bidx <= 0) {
-		for(btail = btail->tail; btail->bpos != 0; btail = btail->tail) {}
+		for(btail = btail->tail; (btail->stat & GABA_STATUS_UPDATE_B) == 0; btail = btail->tail) {}
 		bidx += (blen = btail->blen);
 	}
 	return((struct gaba_pos_pair_s){
@@ -2290,7 +2293,7 @@ void trace_load_section_a(
 
 	debug("adjust len(%d), idx(%d)", len, idx);
 	while(idx <= 0) {
-		for(tail = tail->tail; tail->apos != 0; tail = tail->tail) {}
+		for(tail = tail->tail; (tail->stat & GABA_STATUS_UPDATE_A) == 0; tail = tail->tail) {}
 		idx += (len = tail->alen);
 		debug("adjust again len(%d), idx(%d)", len, idx);
 	}
@@ -2317,7 +2320,7 @@ void trace_load_section_b(
 
 	debug("adjust len(%d), idx(%d)", len, idx);
 	while(idx <= 0) {
-		for(tail = tail->tail; tail->bpos != 0; tail = tail->tail) {}
+		for(tail = tail->tail; (tail->stat & GABA_STATUS_UPDATE_B) == 0; tail = tail->tail) {}
 		idx += (len = tail->blen);
 		debug("adjust again len(%d), idx(%d)", len, idx);
 	}
