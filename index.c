@@ -180,8 +180,7 @@ static void mm_idx_post(mm_idx_t *mi, int n_threads)
 void kt_pipeline(int n_threads, void *(*func)(void*, int, void*), void *shared_data, int n_steps);
 
 typedef struct {
-	int tbatch_size, n_processed, keep_name;
-	int keep_seq;		/* 160907: keep 2-bit encoded sequence to generate alignment */
+	int tbatch_size, n_processed;
 	bseq_file_t *fp;
 	uint64_t ibatch_size, n_read;
 	mm_idx_t *mi;
@@ -217,23 +216,17 @@ static void *worker_pipeline(void *shared, int step, void *in)
 			m = n = p->mi->n + s->n_seq;
 			kroundup32(m); kroundup32(old_m);
 			if (old_m != m) {
-				if (p->keep_name)
-					p->mi->name = (char**)realloc(p->mi->name, m * sizeof(char*));
-				if (p->keep_seq)
-					p->mi->pos = (int64_t*)realloc(p->mi->pos, m * sizeof(int64_t*));
+				p->mi->name = (char**)realloc(p->mi->name, m * sizeof(char*));
+				p->mi->pos = (int64_t*)realloc(p->mi->pos, m * sizeof(int64_t*));
 				p->mi->len = (int*)realloc(p->mi->len, m * sizeof(int));
 			}
 			for (i = 0; i < s->n_seq; ++i) {
-				if (p->keep_name) {
-					assert(strlen(s->seq[i].name) <= 254);
-					p->mi->name[p->mi->n] = strdup(s->seq[i].name);
+				assert(strlen(s->seq[i].name) <= 254);
+				p->mi->name[p->mi->n] = strdup(s->seq[i].name);
+				for (j = 0; j < s->seq[i].l_seq; ++j) {
+					kv_push(uint8_t, p->mi->seq, seq_nt4_table_4bit[(uint8_t)s->seq->seq[j]]);
 				}
-				if (p->keep_seq) {
-					for (j = 0; j < s->seq[i].l_seq; j++) {
-						kv_push(uint8_t, p->mi->seq, seq_nt4_table_4bit[(uint8_t)s->seq->seq[j]]);
-					}
-					p->mi->pos[p->mi->n] = (p->mi->n==0)? 0 : p->mi->pos[p->mi->n-1] + s->seq[i].l_seq;
-				}
+				p->mi->pos[p->mi->n] = (p->mi->n==0)? 0 : p->mi->pos[p->mi->n-1] + s->seq[i].l_seq;
 				p->mi->len[p->mi->n++] = s->seq[i].l_seq;
 				s->seq[i].rid = p->n_processed++;
 				p->n_read += s->seq[i].l_seq;
@@ -263,16 +256,12 @@ mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int 
 	pipeline_t pl;
 	memset(&pl, 0, sizeof(pipeline_t));
 	pl.tbatch_size = tbatch_size;
-	pl.keep_name = keep_name;
-	pl.keep_seq = keep_seq;
 	pl.ibatch_size = ibatch_size;
 	pl.fp = fp;
 	if (pl.fp == 0) return 0;
 	pl.mi = mm_idx_init(w, k, b);
 
-	if (pl.keep_seq) {
-		for (i = 0; i < 32; i++) kv_push(uint8_t, pl.mi->seq, 0);	// head margin
-	}
+	for (i = 0; i < 32; ++i) kv_push(uint8_t, pl.mi->seq, 0);	// head margin
 
 	kt_pipeline(n_threads < 3? n_threads : 3, worker_pipeline, &pl, 3);
 	if (mm_verbose >= 3)
@@ -282,9 +271,7 @@ mm_idx_t *mm_idx_gen(bseq_file_t *fp, int w, int k, int b, int tbatch_size, int 
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
-	if (pl.keep_seq) {
-		for (i = 0; i < 32; i++) kv_push(uint8_t, pl.mi->seq, 0);	// tail margin
-	}
+	for (i = 0; i < 32; ++i) kv_push(uint8_t, pl.mi->seq, 0);	// tail margin
 	return pl.mi;
 }
 
