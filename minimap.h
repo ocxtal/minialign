@@ -58,7 +58,7 @@ typedef struct {
 	int sdust_thres;  // score threshold for SDUST; 0 to disable
 	int flag;    // see MM_F_* macros
 	float merge_frac; // merge two chains if merge_frac fraction of minimzers are shared between the chains
-	int m, x, gi, ge, xdrop;
+	int m, x, gi, ge, xdrop, min;
 } mm_mapopt_t;
 
 extern int mm_verbose;
