@@ -3,8 +3,8 @@ CFLAGS=		-g -O3 -Wall -Wc++-compat -Wno-unused-function
 CPPFLAGS=
 INCLUDES=	-I.
 OBJS=		kthread.o misc.o bseq.o sketch.o sdust.o index.o map.o
-PROG=		minimap
-PROG_EXTRA=	sdust minimap-lite
+PROG=		minialign
+PROG_EXTRA=	sdust minialign-lite
 LIBS=		-lm -lz -lpthread
 
 .SUFFIXES:.c .o
@@ -16,10 +16,10 @@ all:$(PROG)
 
 extra:all $(PROG_EXTRA)
 
-minimap:main.o libminimap.a libgaba.a
+minialign:main.o libminimap.a libgaba.a
 		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap -lgaba $(LIBS)
 
-minimap-lite:example.o libminimap.a libgaba.a
+minialign-lite:example.o libminimap.a libgaba.a
 		$(CC) $(CFLAGS) $< -o $@ -L. -lminimap -lgaba $(LIBS)
 
 libminimap.a:$(OBJS)
