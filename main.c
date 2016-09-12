@@ -21,7 +21,7 @@ void liftrlimit()
 int main(int argc, char *argv[])
 {
 	mm_mapopt_t opt;
-	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, n_threads = 3, keep_name = 1, keep_seq = 0, is_idx = 0;
+	int i, c, k = 15, w = -1, b = MM_IDX_DEF_B, n_threads = 3, is_idx = 0;
 	int tbatch_size = 100000000;
 	uint64_t ibatch_size = 4000000000ULL;
 	float f = 0.001;
@@ -33,7 +33,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRPST:m:L:Dx:C")) >= 0) {
+	while ((c = getopt(argc, argv, "w:k:B:b:t:r:c:f:Vv:NOg:I:d:lRPST:m:L:Dx:r:s:p:q:y:u:")) >= 0) {
 		if (c == 'w') w = atoi(optarg);
 		else if (c == 'k') k = atoi(optarg);
 		else if (c == 'b') b = atoi(optarg);
@@ -44,8 +44,6 @@ int main(int argc, char *argv[])
 		else if (c == 't') n_threads = atoi(optarg);
 		else if (c == 'v') mm_verbose = atoi(optarg);
 		else if (c == 'g') opt.max_gap = atoi(optarg);
-		else if (c == 'N') keep_name = 0;
-		else if (c == 'C') keep_seq = 1;
 		else if (c == 'd') fnw = optarg;
 		else if (c == 'l') is_idx = 1;
 		else if (c == 'R') opt.flag |= MM_F_WITH_REP;
@@ -55,6 +53,12 @@ int main(int argc, char *argv[])
 		else if (c == 'S') opt.flag |= MM_F_AVA | MM_F_NO_SELF;
 		else if (c == 'T') opt.sdust_thres = atoi(optarg);
 		else if (c == 'L') opt.min_match = atoi(optarg);
+		else if (c == 'r') opt.m = atoi(optarg);
+		else if (c == 's') opt.x = atoi(optarg);
+		else if (c == 'p') opt.gi = atoi(optarg);
+		else if (c == 'q') opt.ge = atoi(optarg);
+		else if (c == 'y') opt.xdrop = atoi(optarg);
+		else if (c == 'u') opt.min = atoi(optarg);
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
@@ -101,8 +105,14 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -O         drop isolated hits before chaining (EXPERIMENTAL)\n");
 		fprintf(stderr, "    -P         filtering potential repeats after mapping (EXPERIMENTAL)\n");
 //		fprintf(stderr, "    -R         skip post-mapping repeat filtering\n"); // deprecated option for backward compatibility
+		fprintf(stderr, "    -r INT     match award [%d]\n", opt.m);
+		fprintf(stderr, "    -s INT     mismatch penalty [%d]\n", opt.x);
+		fprintf(stderr, "    -p INT     gap open penalty [%d]\n", opt.gi);
+		fprintf(stderr, "    -q INT     gap extension penalty [%d]\n", opt.ge);
+		fprintf(stderr, "    -y INT     X-dropoff test threshold [%d]\n", opt.xdrop);
+		fprintf(stderr, "    -u INT     minimum score to report [%d]\n", opt.min);
 		fprintf(stderr, "    -x STR     preset (recommended to be applied before other options) []\n");
-		fprintf(stderr, "               ava10k: -Sw5 -L100 -m0 (PacBio/ONT all-vs-all read mapping)\n");
+		fprintf(stderr, "               ava10k: -Sw5 -L100 -m0 -r1 -s1 -p1 -q1 (PacBio/ONT all-vs-all read mapping)\n");
 		fprintf(stderr, "  Input/Output:\n");
 		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
 //		fprintf(stderr, "    -B NUM     process ~NUM bp in each batch [100M]\n");
@@ -120,7 +130,7 @@ int main(int argc, char *argv[])
 		mm_idx_t *mi = 0;
 		if (fpr) mi = mm_idx_load(fpr);
 		else if (!bseq_eof(fp))
-			mi = mm_idx_gen(fp, w, k, b, tbatch_size, n_threads, ibatch_size, keep_name, keep_seq);
+			mi = mm_idx_gen(fp, w, k, b, tbatch_size, n_threads, ibatch_size, 1, 1);
 		if (mi == 0) break;
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built the index for %d target sequence(s)\n",
