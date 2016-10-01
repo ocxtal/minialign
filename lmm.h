@@ -81,13 +81,14 @@ lmm_t *lmm_init(
  * @fn lmm_clean
  */
 static inline
-void lmm_clean(
+void *lmm_clean(
 	lmm_t *lmm)
 {
 	if(lmm != NULL && lmm->need_free == 1) {
 		free(lmm);
+		return(NULL);
 	}
-	return;
+	return((void *)lmm);
 }
 
 /**

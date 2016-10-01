@@ -266,6 +266,7 @@ void *gaba_set_api(
 	void *ctx,
 	struct gaba_api_s const *api)
 {
+	if(ctx == NULL) { return(NULL); }
 	struct gaba_api_s *dst = (struct gaba_api_s *)ctx;
 	*dst = *api;
 	return((void *)dst);

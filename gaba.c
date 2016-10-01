@@ -363,17 +363,19 @@ struct gaba_writer_work_s {
 	/** save */
 	int32_t alen, blen;					/** (8) section lengths */
 	uint32_t aid, bid;					/** (8) */
+	int32_t asum, bsum;					/** (8) sum length from current tail to base of each section */
 	int32_t asidx, bsidx;				/** (8) base indices of the current trace */
-	int64_t psum;						/** (8) */
-	int64_t pspos;						/** (8) */
-
+	uint64_t _pad1;						/** (8) */
 	/** 64, 128 */
 
 	/** 64byte aligned */
+	/** save (contd) */
+	int64_t psum;						/** (8) */
+	int64_t pspos;						/** (8) */
 
 	/* section info */
 	struct gaba_sec_arr_s sec;			/** (16) */
-	uint64_t _pad[6];					/** (48) */
+	uint64_t _pad[4];					/** (32) */
 
 	/** 64, 192 */
 };
@@ -2289,19 +2291,20 @@ void trace_load_section_a(
 	/* load tail pointer (must be inited with leaf tail) */
 	struct gaba_joint_tail_s const *tail = this->w.l.atail;
 	int32_t len = tail->alen;
+	int32_t sum = len;
 	int32_t idx = this->w.l.aidx + len;
 
-	debug("adjust len(%d), idx(%d)", len, idx);
 	while(idx <= 0) {
 		for(tail = tail->tail; (tail->stat & GABA_STATUS_UPDATE_A) == 0; tail = tail->tail) {}
-		idx += (len = tail->alen);
-		debug("adjust again len(%d), idx(%d)", len, idx);
+		len = tail->alen; sum += len; idx += len;
 	}
 
 	/* reload finished, store section info */
-	this->w.l.atail = tail;
+	// this->w.l.atail = tail->tail;
+	this->w.l.atail = tail;		/* fixme: is this correct?? */
 	this->w.l.alen = len;
 	this->w.l.aid = tail->aid;
+	this->w.l.asum = sum;
 
 	this->w.l.aidx = idx;
 	this->w.l.asidx = idx;
@@ -2313,22 +2316,23 @@ void trace_load_section_b(
 {
 	debug("load section b, idx(%d), len(%d)", this->w.l.bidx, this->w.l.btail->blen);
 
-	/* reload needed, load tail pointer (must be inited with leaf tail) */
+	/* load tail pointer (must be inited with leaf tail) */
 	struct gaba_joint_tail_s const *tail = this->w.l.btail;
 	int32_t len = tail->blen;
+	int32_t sum = len;
 	int32_t idx = this->w.l.bidx + len;
 
-	debug("adjust len(%d), idx(%d)", len, idx);
 	while(idx <= 0) {
 		for(tail = tail->tail; (tail->stat & GABA_STATUS_UPDATE_B) == 0; tail = tail->tail) {}
-		idx += (len = tail->blen);
-		debug("adjust again len(%d), idx(%d)", len, idx);
+		len = tail->blen; sum += len; idx += len;
 	}
 
 	/* reload finished, store section info */
-	this->w.l.btail = tail;
+	// this->w.l.btail = tail->tail;
+	this->w.l.btail = tail;		/* fixme: is this correct?? */
 	this->w.l.blen = len;
 	this->w.l.bid = tail->bid;
+	this->w.l.bsum = sum;
 
 	this->w.l.bidx = idx;
 	this->w.l.bsidx = idx;
@@ -2410,11 +2414,21 @@ void trace_load_section_b(
 		(t)->w.l.tail->tail->psum, (t)->w.l.tail->tail->ssum); \
 	/* update psum */ \
 	(t)->w.l.psum -= (t)->w.l.p; \
-	/* load tail */ \
-	struct gaba_joint_tail_s const *tail = (t)->w.l.tail = (t)->w.l.tail->tail; \
+	/* load section lengths */ \
+	struct gaba_joint_tail_s const *tail = (t)->w.l.tail; \
+	v2i32_t len = _load_v2i32(&tail->alen); \
+	/* reload tail */ \
+	tail = (t)->w.l.tail = tail->tail; \
 	blk = _last_block(tail) + 1; \
 	p = ((t)->w.l.p = tail->p) - 1; \
 	debug("updated psum(%lld), w.l.p(%d), p(%lld)", (t)->w.l.psum, (t)->w.l.p, p); \
+	/* adjust sum lengths */ \
+	v2i32_t const mask = _seta_v2i32(GABA_STATUS_UPDATE_B, GABA_STATUS_UPDATE_A); \
+	v2i32_t stat = _set_v2i32(tail->stat); \
+	v2i32_t sum = _load_v2i32(&(t)->w.l.asum); \
+	sum = _sub_v2i32(sum, _and_v2i32(_eq_v2i32(_and_v2i32(stat, mask), mask), len)); \
+	_store_v2i32(&(t)->w.l.asum, sum); \
+	debug("adjusted sum(%u, %u), len(%u, %u), stat(%u)", _hi32(sum), _lo32(sum), _hi32(len), _lo32(len), tail->stat); \
 	/* reload dir and mask pointer */ \
 	_trace_reload_ptr(p & (BLK - 1)); \
 	_trace_load_mask(); \
@@ -2466,22 +2480,22 @@ void trace_load_section_b(
 	_print_v2i32(idx); \
 	/* calc idx of the head of the block from ridx */ \
 	v2i32_t ridx = _load_v2i32(&blk->aridx); \
-	v2i32_t len = _load_v2i32(&(t)->w.l.alen); \
-	idx = _sub_v2i32(_sub_v2i32(len, ridx), _seta_v2i32((BW - 1) - q, q)); \
+	v2i32_t sum = _load_v2i32(&(t)->w.l.asum); \
+	idx = _sub_v2i32(_sub_v2i32(sum, ridx), _seta_v2i32((BW - 1) - q, q)); \
 	debug("calc_index p(%lld), q(%lld)", p, q); \
 	_print_v2i32(ridx); \
-	_print_v2i32(len); \
+	_print_v2i32(sum); \
 	_print_v2i32(idx); \
 }
 #define _trace_reverse_calc_index(t) { \
 	_print_v2i32(idx); \
 	/* calc idx of the head of the block from ridx */ \
 	v2i32_t ridx = _load_v2i32(&blk->aridx); \
-	v2i32_t len = _load_v2i32(&(t)->w.l.alen); \
-	idx = _sub_v2i32(_sub_v2i32(len, ridx), _seta_v2i32((BW - 1) - q, q)); \
+	v2i32_t sum = _load_v2i32(&(t)->w.l.asum); \
+	idx = _sub_v2i32(_sub_v2i32(sum, ridx), _seta_v2i32((BW - 1) - q, q)); \
 	debug("calc_index p(%lld), q(%lld)", p, q); \
 	_print_v2i32(ridx); \
-	_print_v2i32(len); \
+	_print_v2i32(sum); \
 	_print_v2i32(idx); \
 }
 
@@ -2744,7 +2758,7 @@ void trace_forward_body(
 
 	/* v loop */
 	_trace_forward_loop_v_head: {
-		if(p < 2 * BLK) {
+		if(p < 3 * BLK) {
 			goto _trace_forward_tail_v_head;
 		}
 		_trace_forward_gap_loop(this, head, bulk, v);
@@ -2754,14 +2768,14 @@ void trace_forward_body(
 
 	/* d dispatchers */
 	_trace_forward_loop_d_mid: {
-		if(p < 2 * BLK) {
+		if(p < 3 * BLK) {
 			goto _trace_forward_tail_d_mid;
 		} else {
 			goto _trace_forward_head_d_mid;
 		}
 	}
 	_trace_forward_loop_d_tail: {
-		if(p < 2 * BLK) {
+		if(p < 3 * BLK) {
 			goto _trace_forward_tail_d_tail;
 		} else {
 			goto _trace_forward_head_d_tail;
@@ -2775,7 +2789,7 @@ void trace_forward_body(
 
 	/* h loop */
 	_trace_forward_loop_h_head: {
-		if(p < 2 * BLK) {
+		if(p < 3 * BLK) {
 			goto _trace_forward_tail_h_head;
 		}
 		_trace_forward_gap_loop(this, head, bulk, h);
@@ -2842,7 +2856,7 @@ void trace_reverse_body(
 
 	/* h loop */
 	_trace_reverse_loop_h_head: {
-		if(p < 2 * BLK) {
+		if(p < 3 * BLK) {
 			goto _trace_reverse_tail_h_head;
 		}
 		_trace_reverse_gap_loop(this, head, bulk, h);
@@ -2852,14 +2866,14 @@ void trace_reverse_body(
 
 	/* d dispatchers */
 	_trace_reverse_loop_d_mid: {
-		if(p < 2 * BLK) {
+		if(p < 3 * BLK) {
 			goto _trace_reverse_tail_d_mid;
 		} else {
 			goto _trace_reverse_head_d_mid;
 		}
 	}
 	_trace_reverse_loop_d_tail: {
-		if(p < 2 * BLK) {
+		if(p < 3 * BLK) {
 			goto _trace_reverse_tail_d_tail;
 		} else {
 			goto _trace_reverse_head_d_tail;
@@ -2873,7 +2887,7 @@ void trace_reverse_body(
 
 	/* v loop */
 	_trace_reverse_loop_v_head: {
-		if(p < 2 * BLK) {
+		if(p < 3 * BLK) {
 			goto _trace_reverse_tail_v_head;
 		}
 		_trace_reverse_gap_loop(this, head, bulk, v);
@@ -2929,7 +2943,7 @@ void trace_forward_push(
 	// this->w.l.sec.head->plen = plen;
 	this->w.l.sec.head->ppos = 0;
 
-	debug("push current section info a(%u, %u, %u), b(%u, %u, %u), len(%u)",
+	debug("push current section forward a(%u, %u, %u), b(%u, %u, %u), len(%u)",
 		this->w.l.sec.head->aid,
 		this->w.l.sec.head->apos,
 		this->w.l.sec.head->alen,
@@ -2971,7 +2985,7 @@ void trace_reverse_push(
 	// this->w.l.sec.tail->plen = plen;
 	this->w.l.sec.tail->ppos = ppos;
 
-	debug("push current section info a(%u, %u, %u), b(%u, %u, %u), pos(%lld), len(%u)",
+	debug("push current section reverse a(%u, %u, %u), b(%u, %u, %u), pos(%lld), len(%u)",
 		this->w.l.sec.tail->aid,
 		this->w.l.sec.tail->apos,
 		this->w.l.sec.tail->alen,
@@ -3250,6 +3264,13 @@ struct trace_boundary_s trace_cat_section(
 	};
 	debug("init, ptr(%p), ppos(%lld)", b.ptr, b.ppos);
 
+	/*
+	 * fixme: apos != 0 and bpos != 0 suppose sections are
+	 * aligned from their heads.
+	 * (sh->aid == dt->aid && sh->apos == dt->apos + dt->alen)
+	 * && ...
+	 * might work well...
+	 */
 	if(dh != dt && sh != st && sh->apos != 0 && sh->bpos != 0) {
 		// merged = 1;
 		b.ptr--;
@@ -3267,7 +3288,9 @@ struct trace_boundary_s trace_cat_section(
 
 	/* copy sections */
 	while(sh < st) {
-		debug("dt(%p), sh(%p), dt->plen(%u), sh->plen(%u), ppos(%llu)", dt, sh, _plen(dt), _plen(sh), ppos);
+		debug("dt(%p), sh(%p), dt->plen(%u), sh->plen(%u), a(%u, %u, %u), b(%u, %u, %u), ppos(%llu)",
+			dt, sh, _plen(dt), _plen(sh),
+			sh->aid, sh->apos, sh->alen, sh->bid, sh->bpos, sh->blen, ppos);
 		*dt = *sh;
 		dt++->ppos = ppos;
 		ppos += _plen(sh); sh++;
@@ -3607,12 +3630,7 @@ int64_t parse_dump_gap_string(
  * @macro _parse_count_match_forward, _parse_count_gap_forward
  */
 #define _parse_count_match_forward(_arr) ({ \
-	uint64_t _a = (_arr); \
-	uint64_t m0 = _a & (_a>>1); \
-	uint64_t m1 = _a | (_a<<1); \
-	uint64_t m = m0 | ~m1; \
-	debug("m0(%llx), m1(%llx), m(%llx), tzcnt(%llu, %llu)", m0, m1, m, tzcnt(m), popcnt(~m & (m - 1))); \
-	tzcnt(m); \
+	tzcnt((_arr) ^ 0x5555555555555555); \
 })
 #define _parse_count_gap_forward(_arr) ({ \
 	uint64_t _a = (_arr); \
@@ -3645,9 +3663,8 @@ uint64_t suffix(gaba_dp_print_cigar_forward)(
 	while(1) {
 		uint64_t rsidx = ridx;
 		while(1) {
-			uint64_t a = MIN2(
-				_parse_count_match_forward(parse_load_uint64(p, lim - ridx)),
-				ridx & ~0x01);
+			uint64_t m = _parse_count_match_forward(parse_load_uint64(p, lim - ridx));
+			uint64_t a = MIN2(m, ridx) & ~0x01;
 			ridx -= a;
 			volatile uint64_t c = a;
 			if(c < 64) { break; }
@@ -3659,7 +3676,7 @@ uint64_t suffix(gaba_dp_print_cigar_forward)(
 			clen += _fprintf(fp, "%" PRId64 "M", m);
 			debug("match m(%lld)", m);
 		}
-		if(ridx <= 0) { break; }
+		if(ridx == 0) { break; }
 
 		uint64_t arr;
 		uint64_t g = MIN2(
@@ -3698,9 +3715,8 @@ uint64_t suffix(gaba_dp_dump_cigar_forward)(
 	while(1) {
 		uint64_t rsidx = ridx;
 		while(1) {
-			uint64_t a = MIN2(
-				_parse_count_match_forward(parse_load_uint64(p, lim - ridx)),
-				ridx & ~0x01);
+			uint64_t m = _parse_count_match_forward(parse_load_uint64(p, lim - ridx));
+			uint64_t a = MIN2(m, ridx) & ~0x01;
 			debug("a(%lld), ridx(%lld), ridx&~0x01(%lld)", a, ridx, ridx & ~0x01);
 			ridx -= a;
 			volatile uint64_t c = a;
@@ -3713,7 +3729,7 @@ uint64_t suffix(gaba_dp_dump_cigar_forward)(
 			b += parse_dump_match_string(b, m);
 			debug("match m(%lld)", m);
 		}
-		if(ridx <= 0 || b > blim) { break; }
+		if(ridx == 0 || b > blim) { break; }
 
 		uint64_t arr;
 		uint64_t g = MIN2(
@@ -3733,12 +3749,7 @@ uint64_t suffix(gaba_dp_dump_cigar_forward)(
  * @macro _parse_count_match_reverse, _parse_count_gap_reverse
  */
 #define _parse_count_match_reverse(_arr) ({ \
-	uint64_t _a = (_arr); \
-	uint64_t m0 = _a & ((_a>>1) | (0x01ULL<<63)); \
-	uint64_t m1 = _a | (_a<<1); \
-	uint64_t m = m0 | ~m1; \
-	debug("m0(%llx), m1(%llx), m(%llx), lzcnt(%llu)", m0, m1, m, lzcnt(m)); \
-	lzcnt(m); \
+	lzcnt((_arr) ^ 0x5555555555555555); \
 })
 #define _parse_count_gap_reverse(_arr) ({ \
 	uint64_t _a = (_arr); \
@@ -3772,9 +3783,8 @@ uint64_t suffix(gaba_dp_print_cigar_reverse)(
 	while(1) {
 		uint64_t sidx = idx;
 		while(1) {
-			uint64_t a = MIN2(
-				_parse_count_match_reverse(parse_load_uint64(p, idx + ofs)),
-				idx & ~0x01);
+			uint64_t m = _parse_count_match_reverse(parse_load_uint64(p, idx + ofs));
+			uint64_t a = MIN2(m, idx) & ~0x01;
 			idx -= a;
 			if(a < 64) { break; }
 
@@ -3785,7 +3795,7 @@ uint64_t suffix(gaba_dp_print_cigar_reverse)(
 			clen += _fprintf(fp, "%" PRId64 "M", m);
 			debug("match m(%lld)", m);
 		}
-		if(idx <= 0) { break; }
+		if(idx == 0) { break; }
 
 		uint64_t arr;
 		uint64_t g = MIN2(
@@ -3822,9 +3832,8 @@ uint64_t suffix(gaba_dp_dump_cigar_reverse)(
 	while(1) {
 		uint64_t sidx = idx;
 		while(1) {
-			uint64_t a = MIN2(
-				_parse_count_match_reverse(parse_load_uint64(p, idx + ofs)),
-				idx & ~0x01);
+			uint64_t m = _parse_count_match_reverse(parse_load_uint64(p, idx + ofs));
+			uint64_t a = MIN2(m, idx) & ~0x01;
 			idx -= a;
 			if(a < 64) { break; }
 
@@ -3835,7 +3844,7 @@ uint64_t suffix(gaba_dp_dump_cigar_reverse)(
 			b += parse_dump_match_string(b, m);
 			debug("match m(%lld)", m);
 		}
-		if(idx <= 0 || b > blim) { break; }
+		if(idx == 0 || b > blim) { break; }
 
 		uint64_t arr;
 		uint64_t g = MIN2(
@@ -3897,6 +3906,36 @@ void gaba_init_restore_default_params(
 }
 
 /**
+ * @fn gaba_init_check_score
+ * @brief return non-zero if the score is not applicable
+ */
+static _force_inline
+int gaba_init_check_score(
+	struct gaba_score_s const *score_matrix)
+{
+	int32_t max = extract_max(score_matrix->score_sub);
+	int32_t geh = -score_matrix->score_ge_a;
+	int32_t gev = -score_matrix->score_ge_b;
+	int32_t gih = -score_matrix->score_gi_a;
+	int32_t giv = -score_matrix->score_gi_b;
+
+	#if MODEL == LINEAR
+		if(max - 2 * (geh + gih) > 255) { return(-1); }
+		if(max - 2 * (gev + giv) > 255) { return(-1); }
+		if((geh + gih) > 0) { return(-1); }
+		if((gev + giv) > 0) { return(-1); }
+	#else
+		if(max - 2 * (geh + gih) > 31) { return(-1); }
+		if(max - 2 * (gev + giv) > 31) { return(-1); }
+		if(geh < gih) { return(-1); }
+		if(gev < giv) { return(-1); }
+		if((geh + gih) < -7) { return(-1); }
+		if((gev + giv) < -7) { return(-1); }
+	#endif
+	return(0);
+}
+
+/**
  * @fn gaba_init_create_score_vector
  */
 static _force_inline
@@ -3910,7 +3949,7 @@ struct gaba_score_vec_s gaba_init_create_score_vector(
 	int8_t giv = -score_matrix->score_gi_b;
 	
 	int8_t sb[16] __attribute__(( aligned(16) ));
-	struct gaba_score_vec_s sc;
+	struct gaba_score_vec_s sc __attribute__(( aligned(BW) ));
 	#if BIT == 2
 		for(int i = 0; i < 16; i++) {
 			sb[i] = v[i] - (geh + gih + gev + giv);
@@ -4059,10 +4098,10 @@ struct gaba_diff_vec_s gaba_init_create_diff_vectors(
 	int8_t drop = 0;
 	int8_t raise = max - (geh + gih + gev + giv);
 
-	int8_t dh[BW] __attribute__(( aligned(16) ));
-	int8_t dv[BW] __attribute__(( aligned(16) ));
+	int8_t dh[BW] __attribute__(( aligned(BW) ));
+	int8_t dv[BW] __attribute__(( aligned(BW) ));
 
-	struct gaba_diff_vec_s diff __attribute__(( aligned(16) ));
+	struct gaba_diff_vec_s diff __attribute__(( aligned(BW) ));
 	/**
 	 * dh: dH[i, j] - gh
 	 * dv: dV[i, j] - gv
@@ -4106,12 +4145,12 @@ struct gaba_diff_vec_s gaba_init_create_diff_vectors(
 	int8_t drop_df = giv + ofs_df;
 	int8_t raise_df = ofs_df;
 
-	int8_t dh[BW] __attribute__(( aligned(16) ));
-	int8_t dv[BW] __attribute__(( aligned(16) ));
-	int8_t de[BW] __attribute__(( aligned(16) ));
-	int8_t df[BW] __attribute__(( aligned(16) ));
+	int8_t dh[BW] __attribute__(( aligned(BW) ));
+	int8_t dv[BW] __attribute__(( aligned(BW) ));
+	int8_t de[BW] __attribute__(( aligned(BW) ));
+	int8_t df[BW] __attribute__(( aligned(BW) ));
 
-	struct gaba_diff_vec_s diff __attribute__(( aligned(16) ));
+	struct gaba_diff_vec_s diff __attribute__(( aligned(BW) ));
 	/**
 	 * dh: dH[i, j] - geh
 	 * dv: dV[i, j] - gev
@@ -4190,6 +4229,11 @@ gaba_t *suffix(gaba_init)(
 
 	/* restore defaults */
 	gaba_init_restore_default_params(&params_intl);
+
+	/* check the scores are applicable */
+	if(gaba_init_check_score(params_intl.score_matrix) != 0) {
+		return(NULL);
+	}
 
 	/* malloc gaba_context_s */
 	struct gaba_context_s *ctx = (struct gaba_context_s *)gaba_aligned_malloc(
@@ -4333,7 +4377,8 @@ int32_t gaba_dp_add_stack(
 		/* add new block */
 		uint64_t next_size = this->curr_mem->size * 2;
 		struct gaba_mem_block_s *mem = this->curr_mem->next =
-			(struct gaba_mem_block_s *)malloc(next_size);
+			(struct gaba_mem_block_s *)gaba_aligned_malloc(
+				next_size, MEM_ALIGN_SIZE);
 		if(mem == NULL) { return(GABA_ERROR_OUT_OF_MEM); }
 
 		mem->next = NULL;
@@ -4830,7 +4875,7 @@ unittest(with_seq_pair("A", "A"))
 	assert(s->alen == 21, "%llu", s->alen);
 	assert(s->blen == 21, "%llu", s->blen);
 
-	/* check fowrard sections */
+	/* check forward sections */
 	assert(s->afsec.id == 0, "%d", s->afsec.id);
 	assert((uintptr_t)s->afsec.base == (uintptr_t)s->a + 0, "%p", s->afsec.base);
 	assert(s->afsec.len == 1, "%u", s->afsec.len);
@@ -6181,12 +6226,11 @@ char *unittest_generate_mutated_sequence(
 	double d,
 	int bw)
 {
+	if(seq == NULL) { return NULL; }
+
 	int64_t wave = 0;			/** wave is q-coordinate of the alignment path */
 	int64_t len = strlen(seq);
-	char *mutated_seq;
-
-	if(seq == NULL) { return NULL; }
-	mutated_seq = (char *)malloc(sizeof(char) * (len + UNITTEST_SEQ_MARGIN));
+	char *mutated_seq = (char *)malloc(sizeof(char) * (len + UNITTEST_SEQ_MARGIN));
 	if(mutated_seq == NULL) { return NULL; }
 	for(int64_t i = 0, j = 0; i < len; i++) {
 		if(((double)rand() / (double)RAND_MAX) < x) {
