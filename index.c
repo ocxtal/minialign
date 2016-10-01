@@ -224,7 +224,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				assert(strlen(s->seq[i].name) <= 254);
 				p->mi->name[p->mi->n] = strdup(s->seq[i].name);
 				for (j = 0; j < s->seq[i].l_seq; ++j) {
-					kv_push(uint8_t, p->mi->seq, seq_nt4_table_4bit[(uint8_t)s->seq->seq[j]]);
+					kv_push(uint8_t, p->mi->seq, seq_nt4_table_4bit[(uint8_t)s->seq[i].seq[j]]);
 				}
 				p->mi->pos[p->mi->n] = (p->mi->n==0)? 0 : p->mi->pos[p->mi->n-1] + s->seq[i].l_seq;
 				p->mi->len[p->mi->n++] = s->seq[i].l_seq;
