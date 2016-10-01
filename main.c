@@ -76,6 +76,7 @@ int main(int argc, char *argv[])
 				opt.flag |= MM_F_AVA | MM_F_NO_SELF;
 				opt.min_match = 100;
 				opt.merge_frac = 0.0;
+				opt.m = 1; opt.x = 1; opt.gi = 1; opt.ge = 1;
 				w = 5;
 			}
 		}

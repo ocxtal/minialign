@@ -1,6 +1,6 @@
 # minialign
 
-Minialign is a fork of the [minimap](https://github.com/lh3/minimap) long-read overlapper, with Smith-Waterman alignment calculation and sam output. It carries out the BWA-MEM-style long-read alignment (upon the reference genome) with around 50% overhead of the original minimap program in typical cases.
+Minialign is a fork of the [minimap](https://github.com/lh3/minimap) long-read overlapper, with Smith-Waterman alignment calculation and sam output.
 
 ## Algorithm
 
