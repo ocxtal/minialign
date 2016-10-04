@@ -163,7 +163,7 @@ static void worker_post(void *g, long i, int tid)
 	free(b->a.a);
 	b->a.n = b->a.m = 0, b->a.a = 0;
 }
- 
+
 static void mm_idx_post(mm_idx_t *mi, int n_threads)
 {
 	kt_for(n_threads, worker_post, mi, 1<<mi->b);

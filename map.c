@@ -440,6 +440,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 		for (i = 0; i < p->n_threads; ++i) gaba_dp_clean(s->dp[i]);
 		free(s->dp);
 		for (i = 0; i < s->n_seq; ++i) {
+			int dumped = 0;
 			bseq1_t *t = &s->seq[i];
 			if (s->n_reg[i]) {
 				for (j = 0; j < s->n_reg[i]; ++j) {
@@ -447,6 +448,7 @@ static void *worker_pipeline(void *shared, int step, void *in)
 					mm_reg1_t *r = &s->reg[i][j];
 					if (r->len < p->opt->min_match) { free(r->cigar); continue; }
 					// print sam
+					dumped = 1;
 					printf("%s\t%d\t%s\t%d\t255\t%s\t*\t0\t0\t",
 						t->name, (r->rev? 0x10 : 0)|(j==0? 0 : 0x100), mi->name[r->rid], r->rs+1, r->cigar?r->cigar:"*");
 					qs = (j==0)? 0 : r->qs; qe = (j==0)? t->l_seq : r->qe;
@@ -455,7 +457,8 @@ static void *worker_pipeline(void *shared, int step, void *in)
 					printf("\t*\tRG:Z:1\n");
 					free(r->cigar);
 				}
-			} else printf("%s\t4\t*\t0\t0\t*\t*\t0\t0\t%s\t*\n", t->name, t->seq);	// unmapped
+			}
+			if (!dumped) printf("%s\t4\t*\t0\t0\t*\t*\t0\t0\t%s\t*\n", t->name, t->seq);	// dump unmapped
 			free(s->reg[i]);
 			free(s->seq[i].seq); free(s->seq[i].name);
 		}
