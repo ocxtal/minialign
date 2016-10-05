@@ -291,7 +291,7 @@ mm_idx_t *mm_idx_build(const char *fn, int w, int k, int n_threads) // a simpler
  * index I/O *
  *************/
 
-#define MM_IDX_MAGIC "MMI\1"
+#define MM_IDX_MAGIC "MAI\1"		/* minialign index, differs from minimap index signature */
 
 void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 {
@@ -326,11 +326,10 @@ void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 			fwrite(x, 8, 2, fp);
 		}
 	}
-	if (mi->len) {		// has 2bit encoded reference sequences
-		fwrite(&mi->seq.n, 8, 1, fp);
-		fwrite(mi->pos, 8, mi->n, fp);
-		fwrite(mi->seq.a, 1, mi->seq.n, fp);
-	}
+	// always dump 2bit encoded reference sequences
+	fwrite(&mi->seq.n, 8, 1, fp);
+	fwrite(mi->pos, 8, mi->n, fp);
+	fwrite(mi->seq.a, 1, mi->seq.n, fp);
 }
 
 mm_idx_t *mm_idx_load(FILE *fp)
@@ -378,12 +377,12 @@ mm_idx_t *mm_idx_load(FILE *fp)
 			kh_val(h, k) = x[1];
 		}
 	}
-	if (fread(&mi->seq.n, 8, 1, fp) == 8) { // has reference sequences
+	if (fread(&mi->seq.n, 8, 1, fp) == 1) { // has reference sequences
 		mi->pos = (int64_t*)calloc(mi->n, sizeof(int64_t*));
 		mi->seq.a = (uint8_t*)calloc(mi->seq.n, sizeof(uint8_t));
 		fread(mi->pos, 8, mi->n, fp);
 		fread(mi->seq.a, 1, mi->seq.n, fp);
 		mi->seq.m = mi->seq.n;
-	} else mi->seq.n = 0;
+	} else mm_idx_destroy(mi), mi = 0;
 	return mi;
 }
