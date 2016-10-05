@@ -308,7 +308,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 
 void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg1_t *reg, gaba_dp_t *dp, int min)
 {
-	int i;
+	int i, prim = 1;
 	uint32_t rs, qs;
 	// encode seq to 2bit
 	uint8_t *s = (uint8_t *)calloc(1, 96 + l_seq);
@@ -353,15 +353,13 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 		// convert alignment to cigar
 		gaba_alignment_t *a = gaba_dp_trace(dp, NULL, m, NULL);
 		if (a->score < min) { reg[i].len = 0; continue; }
-		// fprintf(stderr, "prev, qlen(%d), rlen(%d), qs(%d), qe(%d), rs(%d), re(%d), ql(%d), rl(%d)\n", qf.len, rf.len, reg[i].qs, reg[i].qe, reg[i].rs, reg[i].re, reg[i].qe - reg[i].qs, reg[i].re - reg[i].rs);
 		reg[i].rs = rf.len-a->sec->apos-a->sec->alen; reg[i].re = rf.len-a->sec->apos;
 		reg[i].qs = qf.len-a->sec->bpos-a->sec->blen; reg[i].qe = qf.len-a->sec->bpos;
-		// fprintf(stderr, "ref, qlen(%d), rlen(%d), qs(%d), qe(%d), rs(%d), re(%d), ql(%d), rl(%d)\n", qf.len, rf.len, reg[i].qs, reg[i].qe, reg[i].rs, reg[i].re, reg[i].qe - reg[i].qs, reg[i].re - reg[i].rs);
 		reg[i].cigar = cig = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
-		// strcpy(reg[i].cigar, "\tcs:Z:");
-		if (reg[i].qs) cig += sprintf(cig, "%d%c", reg[i].qs, (i==0)? 'S' : 'H');
+		if (reg[i].qs) cig += sprintf(cig, "%d%c", reg[i].qs, (prim==1)? 'S' : 'H');
 		cig += gaba_dp_dump_cigar_reverse(cig, 2*a->path->len, a->path->array, 0, a->path->len);
-		if (qf.len-reg[i].qe) cig += sprintf(cig, "%d%c", qf.len-reg[i].qe, (i==0)? 'S' : 'H');
+		if (qf.len-reg[i].qe) cig += sprintf(cig, "%d%c", qf.len-reg[i].qe, (prim==1)? 'S' : 'H');
+		prim = 0;
 	}
 	free(s);
 }
