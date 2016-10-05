@@ -266,7 +266,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 		int k, n;
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->mini.a[j].y>>1, strand = b->mini.a[j].y&1;
-		b->mini.a[j].y = b->mini.a[j].y<<32>>32; // clear the rid field
+		b->mini.a[j].y &= 0xffffffffULL; // clear the rid field
 		if (dreg && n_dreg) { // test complexity
 			int s = qpos - (mi->k - 1), e = s + mi->k;
 			while (u < n_dreg && (uint32_t)dreg[u] <= s) ++u;
@@ -291,10 +291,10 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 				continue;
 			kv_pushp(mm128_t, b->coef, &p);
 			if ((r[k]&1) == strand) { // forward strand
-				p->x = (uint64_t)r[k] >> 32 << 32 | (0x80000000U + rpos - qpos);
+				p->x = ((uint64_t)r[k] & 0xffffffff00000000) | (0x80000000U + rpos - qpos);
 				p->y = (uint64_t)j << 32 | rpos;
 			} else { // reverse strand
-				p->x = (uint64_t)r[k] >> 32 << 32 | (rpos + qpos) | 1ULL<<63;
+				p->x = ((uint64_t)r[k] & 0xffffffff00000000) | (rpos + qpos) | 1ULL<<63;
 				p->y = (uint64_t)j << 32 | rpos;
 			}
 		}
