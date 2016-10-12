@@ -267,7 +267,7 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 		const uint64_t *r;
 		int32_t qpos = (uint32_t)b->mini.a[j].y>>1, strand = b->mini.a[j].y&1;
 		b->mini.a[j].y &= 0xffffffffULL; // clear the rid field
-		if (dreg && n_dreg) { // test complexity
+		if (dreg && n_dreg) { // test complexity, sdust masking is skipped by default
 			int s = qpos - (mi->k - 1), e = s + mi->k;
 			while (u < n_dreg && (uint32_t)dreg[u] <= s) ++u;
 			if (u < n_dreg && dreg[u]>>32 < e) {
@@ -280,9 +280,9 @@ const mm_reg1_t *mm_map(const mm_idx_t *mi, int l_seq, const char *seq, int *n_r
 				if (l > mi->k>>1) continue;
 			}
 		}
-		r = mm_idx_get(mi, b->mini.a[j].x, &n);
-		if (n > mi->max_occ) continue;
-		for (k = 0; k < n; ++k) {
+		r = mm_idx_get(mi, b->mini.a[j].x, &n);	// get minimizer at current pos
+		if (n > mi->max_occ) continue;	// skip if exceeds repetitive threshold
+		for (k = 0; k < n; ++k) {	// iterate over all the collected minimizers
 			int32_t rpos = (uint32_t)r[k] >> 1;
 			mm128_t *p;
 			if (name && (opt->flag&MM_F_NO_SELF) && mi->name && strcmp(name, mi->name[r[k]>>32]) == 0 && rpos == qpos)
@@ -359,7 +359,7 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 		if (reg[i].qs) cig += sprintf(cig, "%d%c", reg[i].qs, (prim==1)? 'S' : 'H');
 		cig += gaba_dp_dump_cigar_reverse(cig, 2*a->path->len, a->path->array, 0, a->path->len);
 		if (qf.len-reg[i].qe) cig += sprintf(cig, "%d%c", qf.len-reg[i].qe, (prim==1)? 'S' : 'H');
-		prim = 0;
+		reg[i].prim = prim; prim = 0;	// mark as primary
 	}
 	free(s);
 }
@@ -444,12 +444,12 @@ static void *worker_pipeline(void *shared, int step, void *in)
 				for (j = 0; j < s->n_reg[i]; ++j) {
 					int qs, qe;
 					mm_reg1_t *r = &s->reg[i][j];
-					if (r->len < p->opt->min_match) { free(r->cigar); continue; }
 					// print sam
+					if(r->len == 0) continue;
 					dumped = 1;
 					printf("%s\t%d\t%s\t%d\t255\t%s\t*\t0\t0\t",
 						t->name, (r->rev? 0x10 : 0)|(j==0? 0 : 0x100), mi->name[r->rid], r->rs+1, r->cigar?r->cigar:"*");
-					qs = (j==0)? 0 : r->qs; qe = (j==0)? t->l_seq : r->qe;
+					qs = (r->prim==1)? 0 : r->qs; qe = (r->prim==1)? t->l_seq : r->qe;
 					if (r->rev)  for (k = qe-1; k >= qs; k--) putchar("T G A C "[0x06&t->seq[k]]);
 					else for (k = qs; k < qe; k++) putchar(t->seq[k]);
 					printf("\t*\tRG:Z:1\n");

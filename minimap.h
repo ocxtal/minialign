@@ -46,6 +46,7 @@ typedef struct {
 	uint32_t cnt:31, rev:1;
 	uint32_t rid:31, rep:1;
 	uint32_t len;
+	uint32_t prim;	// primary alignment
 	int32_t qs, qe, rs, re;
 	char *cigar;	// 160907: alignment cigar string
 } mm_reg1_t;
