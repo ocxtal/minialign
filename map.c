@@ -32,7 +32,6 @@ void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->radius = 100;
 	opt->max_gap = 10000;
 	opt->min_cnt = 4;
-	opt->min_match = 40;
 	opt->sdust_thres = 0;
 	opt->flag = MM_F_WITH_REP;
 	opt->merge_frac = .5;
@@ -41,7 +40,7 @@ void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->gi = 2;
 	opt->ge = 1;
 	opt->xdrop = 100;
-	opt->min = 100;
+	opt->min_score = 100;
 }
 
 /****************************
@@ -352,7 +351,7 @@ void mm_align(const mm_idx_t *mi, int l_seq, const char *seq, int n_regs, mm_reg
 		} while(!(mask & f->status));
 		// convert alignment to cigar
 		gaba_alignment_t *a = gaba_dp_trace(dp, NULL, m, NULL);
-		if (a->score < min) { reg[i].len = 0; continue; }
+		if (a->score < min) { reg[i].len = 0; continue; }	// mark as unmapped
 		reg[i].rs = rf.len-a->sec->apos-a->sec->alen; reg[i].re = rf.len-a->sec->apos;
 		reg[i].qs = qf.len-a->sec->bpos-a->sec->blen; reg[i].qe = qf.len-a->sec->bpos;
 		reg[i].cigar = cig = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
@@ -397,7 +396,7 @@ static void worker_for(void *_data, long i, int tid) // kt_for() callback
 	int n_regs;
 
 	regs = mm_map(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, &n_regs, step->buf[tid], step->p->opt, step->seq[i].name);
-	mm_align(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, n_regs, (mm_reg1_t*)regs, step->dp[tid], step->p->opt->min);
+	mm_align(step->p->mi, step->seq[i].l_seq, step->seq[i].seq, n_regs, (mm_reg1_t*)regs, step->dp[tid], step->p->opt->min_score);
 	step->n_reg[i] = n_regs;
 	if (n_regs > 0) {
 		step->reg[i] = (mm_reg1_t*)malloc(n_regs * sizeof(mm_reg1_t));

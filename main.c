@@ -52,13 +52,12 @@ int main(int argc, char *argv[])
 		else if (c == 'O') opt.flag |= MM_F_NO_ISO;
 		else if (c == 'S') opt.flag |= MM_F_AVA | MM_F_NO_SELF;
 		else if (c == 'T') opt.sdust_thres = atoi(optarg);
-		else if (c == 'L') opt.min_match = atoi(optarg);
 		else if (c == 'r') opt.m = atoi(optarg);
 		else if (c == 's') opt.x = atoi(optarg);
 		else if (c == 'p') opt.gi = atoi(optarg);
 		else if (c == 'q') opt.ge = atoi(optarg);
 		else if (c == 'y') opt.xdrop = atoi(optarg);
-		else if (c == 'u') opt.min = atoi(optarg);
+		else if (c == 'u') opt.min_score = atoi(optarg);
 		else if (c == 'V') {
 			puts(MM_VERSION);
 			return 0;
@@ -74,7 +73,7 @@ int main(int argc, char *argv[])
 		} else if (c == 'x') {
 			if (strcmp(optarg, "ava10k") == 0) {
 				opt.flag |= MM_F_AVA | MM_F_NO_SELF;
-				opt.min_match = 100;
+				opt.min_score = 100;
 				opt.merge_frac = 0.0;
 				opt.m = 1; opt.x = 1; opt.gi = 1; opt.ge = 1;
 				w = 5;
@@ -98,7 +97,6 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -r INT     bandwidth [%d]\n", opt.radius);
 		fprintf(stderr, "    -m FLOAT   merge two chains if FLOAT fraction of minimizers are shared [%.2f]\n", opt.merge_frac);
 		fprintf(stderr, "    -c INT     retain a mapping if it consists of >=INT minimizers [%d]\n", opt.min_cnt);
-		fprintf(stderr, "    -L INT     min matching length [%d]\n", opt.min_match);
 		fprintf(stderr, "    -g INT     split a mapping if there is a gap longer than INT [%d]\n", opt.max_gap);
 		fprintf(stderr, "    -T INT     SDUST threshold; 0 to disable SDUST [%d]\n", opt.sdust_thres);
 //		fprintf(stderr, "    -D         skip self mappings but keep dual mappings\n"); // too confusing to expose to end users
@@ -111,7 +109,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -p INT     gap open penalty [%d]\n", opt.gi);
 		fprintf(stderr, "    -q INT     gap extension penalty [%d]\n", opt.ge);
 		fprintf(stderr, "    -y INT     X-dropoff test threshold [%d]\n", opt.xdrop);
-		fprintf(stderr, "    -u INT     minimum score to report [%d]\n", opt.min);
+		fprintf(stderr, "    -u INT     minimum score to report [%d]\n", opt.min_score);
 		fprintf(stderr, "    -x STR     preset (recommended to be applied before other options) []\n");
 		fprintf(stderr, "               ava10k: -Sw5 -L100 -m0 -r1 -s1 -p1 -q1 (PacBio/ONT all-vs-all read mapping)\n");
 		fprintf(stderr, "  Input/Output:\n");
