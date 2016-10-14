@@ -72,6 +72,9 @@
 /* mask */
 #define _mask 		vector_alias_join(_mask_, vector_prefix)
 
+/* horizontal max */
+#define _hmax 		vector_alias_join(_hmax_, vector_prefix)
+
 /* broadcast */
 #define _from_v16i8	vector_alias_join(_from_v16i8_, vector_prefix)
 #define _from_v32i8	vector_alias_join(_from_v32i8_, vector_prefix)

@@ -165,7 +165,7 @@
  */
 #ifndef dump
 
-#if DEBUG
+#ifdef DEBUG
 	/* compatible with dump in unittest.h */
 	#define ut_dump(ptr, len) ({ \
 		uint64_t size = (((len) + 15) / 16 + 1) * \
