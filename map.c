@@ -29,7 +29,7 @@ static unsigned char seq_nt4_table_4bit[256] = {
 
 void mm_mapopt_init(mm_mapopt_t *opt)
 {
-	opt->radius = 100;
+	opt->radius = 500;
 	opt->max_gap = 10000;
 	opt->min_cnt = 4;
 	opt->sdust_thres = 0;
