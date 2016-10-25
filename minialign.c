@@ -596,17 +596,17 @@ mm_idx_t *mm_idx_load(FILE *fp)
 		uint32_t j, hsize;
 		khint_t k;
 		idxhash_t *h;
-		fread(&b->n, 4, 1, fp);
+		if (fread(&b->n, 4, 1, fp) != 1) goto _mm_idx_load_fail;
 		b->p = (uint64_t*)malloc(b->n * 8);
-		fread(b->p, 8, b->n, fp);
-		fread(&hsize, 4, 1, fp);
+		if (fread(b->p, 8, b->n, fp) != b->n) goto _mm_idx_load_fail;
+		if (fread(&hsize, 4, 1, fp) != 1) goto _mm_idx_load_fail;
 		if (hsize == 0) continue;
 		b->h = h = kh_init(idx);
 		kh_resize(idx, h, hsize);
 		for (j = 0; j < hsize; ++j) {
 			uint64_t x[2];
 			int absent;
-			fread(x, 8, 2, fp);
+			if (fread(x, 8, 2, fp) != 2) goto _mm_idx_load_fail;
 			k = kh_put(idx, h, x[0], &absent);
 			assert(absent);
 			kh_val(h, k) = x[1];
@@ -618,12 +618,15 @@ mm_idx_t *mm_idx_load(FILE *fp)
 	mi->size.a = malloc(sizeof(uint64_t) * mi->size.n);
 	mi->base.a[0] = malloc(sizeof(char) * bsize);
 	mi->size.a[0] = bsize;
-	fread(mi->base.a[0], sizeof(char), mi->size.a[0], fp);
+	if (fread(mi->base.a[0], sizeof(char), mi->size.a[0], fp) != mi->size.a[0]) goto _mm_idx_load_fail;
 	mi->s.a = malloc(sizeof(bseq_t) * mi->s.n);
-	fread(mi->s.a, sizeof(bseq_t), mi->s.n, fp);
+	if (fread(mi->s.a, sizeof(bseq_t), mi->s.n, fp) != mi->s.n) goto _mm_idx_load_fail;
 	for (i = 0; i < mi->s.n; ++i)
 		mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
 	return mi;
+_mm_idx_load_fail:
+	mm_idx_destroy(mi);
+	return 0;
 }
 
 /* end of index.c */
