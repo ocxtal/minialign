@@ -1,3 +1,12 @@
 .*.swp
 *.o
 *.a
+minialign*
+*.txt
+*.fa
+*.sam
+*.bam
+*.bai
+stuff
+.DS_Store
+.gdb_history

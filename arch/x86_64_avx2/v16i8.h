@@ -73,6 +73,11 @@ typedef struct v16i8_s {
 /* broadcast */
 #define _set_v16i8(...)		_a_v16i8(set1, _e_i, __VA_ARGS__)
 #define _zero_v16i8()		_a_v16i8x(setzero, _e_x, _unused)
+#define _seta_v16i8(...) ( \
+	(v16i8_t) { \
+		_mm_set_epi8(__VA_ARGS__) \
+	} \
+)
 
 /* swap (reverse) */
 #define _swap_idx_v16i8() ( \
@@ -105,7 +110,7 @@ typedef struct v16i8_s {
 #define _shuf_v16i8(...)	_a_v16i8(shuffle, _e_vv, __VA_ARGS__)
 
 /* blend */
-// #define _sel_v16i8(...)		_a_v16i8(blendv, _e_vvv, __VA_ARGS__)
+#define _sel_v16i8(...)		_a_v16i8(blendv, _e_vvv, __VA_ARGS__)
 
 /* compare */
 #define _eq_v16i8(...)		_a_v16i8(cmpeq, _e_vv, __VA_ARGS__)
@@ -158,6 +163,19 @@ typedef struct v16i8_s {
 		.m1 = _i_v16i8(movemask)((a).v1) \
 	} \
 )
+
+/* horizontal max */
+#define _hmax_v16i8(a) ({ \
+	__m128i _vmax = _mm_max_epi16((a).v1, \
+		_mm_srli_si128((a).v1, 8)); \
+	_vmax = _mm_max_epi16(_vmax, \
+		_mm_srli_si128(_vmax, 4)); \
+	_vmax = _mm_max_epi16(_vmax, \
+		_mm_srli_si128(_vmax, 2)); \
+	_vmax = _mm_max_epi16(_vmax, \
+		_mm_srli_si128(_vmax, 1)); \
+	(int8_t)_mm_extract_epi16(_vmax, 0); \
+})
 
 /* debug print */
 #ifdef _LOG_H_INCLUDED

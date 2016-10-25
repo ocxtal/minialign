@@ -50,7 +50,10 @@ int main() {
 
 #include <stdlib.h>
 
-#define kv_roundup32(x) (--(x), (x)|=(x)>>1, (x)|=(x)>>2, (x)|=(x)>>4, (x)|=(x)>>8, (x)|=(x)>>16, ++(x))
+#define kv_roundup(x, base)			( (((x) + (base) - 1) / (base)) * (base) )
+#define kv_roundup32(x)				kv_roundup(x, 32)
+#define kv_max2(a, b)				( ((a) < (b)) ? (b) : (a) )
+#define kv_min2(a, b)				( ((a) < (b)) ? (a) : (b) )
 
 #define kvec_t(type) struct { size_t n, m; type *a; }
 #define kv_init(v) ((v).n = (v).m = 0, (v).a = 0)
@@ -67,6 +70,9 @@ int main() {
 			(v).a = (type*)realloc((v).a, sizeof(type) * (v).m); \
 		} \
 	} while (0)
+
+#define kv_reserve(type, v, s) ( \
+	(v).m > (s) ? 0 : ((v).m = (s), (v).a = realloc((v).a, sizeof(type) * (v).m), 0) )
 
 #define kv_copy(type, v1, v0) do {							\
 		if ((v1).m < (v0).n) kv_resize(type, v1, (v0).n);	\
@@ -89,6 +95,17 @@ int main() {
 		} \
 		*(p) = &(v).a[(v).n++]; \
 	} while (0)
+
+#define kv_pushm(type, v, arr, size) do { \
+		if(((v).m - (v).n) < (uint64_t)(size)) { \
+			(v).m = kv_max2((v).m * 2, (v).n + (size));		\
+			(v).a = (type*)realloc((v).a, sizeof(*(v).a) * (v).m);	\
+		} \
+		for(uint64_t _i = 0; _i < (uint64_t)(size); _i++) { \
+			(v).a[(v).n + _i] = (arr)[_i]; \
+		} \
+		(v).n += (uint64_t)(size); \
+	} while(0)
 
 #define kv_a(type, v, i) ((v).m <= (size_t)(i)?						\
 						  ((v).m = (v).n = (i) + 1, kv_roundup32((v).m), \
