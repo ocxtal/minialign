@@ -12,7 +12,6 @@
 
 #include "kvec.h"
 #include "ptask.h"
-#include "psort.h"
 #include "gaba.h"
 
 #define MM_VERSION "0.2-unstable"
@@ -382,10 +381,15 @@ static void *mm_idx_source(void *arg)
 {
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)calloc(1, sizeof(mm_idx_step_t));
-	uint64_t base_n_seq = q->mi->n;
-	s->seq = bseq_read(q->fp, q->batch_size, &q->mi->n, &s->base, &s->size);
+	uint64_t base_n_seq = q->mi->n, size;
+	void *base;
+	s->seq = bseq_read(q->fp, q->batch_size, &q->mi->n, &base, &size);
 	s->n_seq = q->mi->n - base_n_seq;
-	if (s->seq == 0) free(s), s = 0;
+	if (s->seq == 0) { free(s), s = 0; return 0; }
+
+	kv_push(void*, q->mi->base, base);
+	kv_push(uint64_t, q->mi->size, size);
+	// kv_pushm(bseq_t, q->mi->s, seq, n_seq);
 	return s;
 }
 
@@ -403,12 +407,13 @@ static void mm_idx_drain(void *arg, void *item)
 {
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
-	kv_push(void*, q->mi->base, s->base);
-	kv_push(uint64_t, q->mi->size, s->size);
-	kv_pushm(bseq_t, q->mi->s, s->seq, s->n_seq);
+	uint64_t i, mask = (1<<q->mi->b) - 1;
+	q->mi->s.n = MAX2(q->mi->s.n, s->seq[s->n_seq-1].rid+1);
+	kv_reserve(bseq_t, q->mi->s, q->mi->s.n);
+	for (i = 0; i < s->n_seq; ++i)
+		q->mi->s.a[s->seq[i].rid] = s->seq[i];
 	// kv_pushm(mm128_t, q->mi->a, s->a.a, s->a.n);
 
-	uint64_t i, mask = (1<<q->mi->b) - 1;
 	for (i = 0; i < s->a.n; ++i) {
 		mm128_v *p = &q->mi->B[s->a.a[i].u64[0]&mask].a;
 		kv_push(mm128_t, *p, s->a.a[i]);
@@ -734,6 +739,7 @@ reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *se
 
 	// chain (modified lis algorithm)
 	for (b->intv.n = i = 0; i < b->coef.n; i = MIN2(j, k)) {
+		uint32_t rid = b->coef.a[i].u32[1];
 		int32_t rs = b->coef.a[i].u32[2], qs = b->coef.a[i].u32[3], re, qe;
 		int32_t lub = b->coef.a[i].u32[0] + opt->ofs_llim, hub = ((rs>>31)^(rs - (qs<<1))) + ofs, hlb = hub - opt->ofs_hlim;
 		uint32_t cnt = 0, len = 0;
@@ -741,7 +747,7 @@ reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *se
 			if ((int64_t)b->coef.a[j].u64[0] < 0) continue;
 			re = b->coef.a[j].u32[2], qe = b->coef.a[j].u32[3];
 			int32_t h = ofs + ((re>>31)^(re - (qe<<1)));
-			if (h > hub && h < hlb) { k = MIN2(j, k); continue; }	// out of range, skip
+			if (rid != b->coef.a[j].u32[1] || (h > hub && h < hlb)) { k = MIN2(j, k); continue; }	// out of range, skip
 			lub = b->coef.a[j].u32[0] + opt->ofs_llim; hlb = h - opt->ofs_hlim;
 			b->coef.a[j].u64[0] |= chained; l = j; cnt++;
 		}
@@ -770,7 +776,7 @@ reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *se
 	for (i = 0; i < b->intv.n && b->intv.a[i].x[0] < ofs - opt->min_len; ++i) {
 		char *cig;
 		int64_t rev = 0;
-		uint32_t rid = b->coef.a[b->intv.a[i].x[1]].u32[1] & 0x7fffffff; 
+		uint32_t rid = b->coef.a[b->intv.a[i].x[1]].u32[1] & 0x7fffffff;
 		bseq_t *ref = &mi->s.a[rid];
 		rf.id = 2; rf.len = ref->l_seq; rf.base = (const uint8_t*)ref->seq;
 		rr.id = 3; rr.len = ref->l_seq; rr.base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim);
