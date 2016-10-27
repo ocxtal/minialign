@@ -30,7 +30,7 @@ $ minialign -t10	# minialign is now 10x faster!!!
 
 ## Benchmarks
 
-All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) with 32GB (DDR4, 2133MHz) memory.
+All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) with 32GB (DDR4, 2133MHz) RAM.
 
 ### Speed
 
@@ -42,12 +42,12 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 | D.melanogaster x20 simulated read to ref.    |        654s |           - |      31924s |
 | Human (hg39) x20 simulated read to ref.      |           - |           - |           - |
 
-Notes: PBSIM (PacBio long-read simulator) was used to generate read sets. Parameter sets (len-mean, len-SD, acc-mean, acc-SD) were set to (20k, 2k, 0.88, 0.07) in both samples. Minialign was run with default parameters except `-t4`, and BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`. Index construction time (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from results.
+Notes: PBSIM (PacBio long-read simulator) was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the species. Minialign and DALIGNER were run with default parameters except `-t4` and `-T4` respectively, and BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements.
 
 ### Read-lendth vs. sensitivity trend
 
 
-Notes: Sensitivity is defined as: number of reads whose original location is correctly detected / total reads. Reads are generated from hg39 using PBSIM with the same parameters as the speed benchmarks. ALT/random contigs were excluded from reference sequences in read generation and included in mapping.
+Notes: Sensitivity is defined as: number of reads whose original location is correctly detected over total number of reads. Reads are generated from hg39 using PBSIM with the same parameters as the speed benchmark. ALT/random contigs were excluded from reference sequences in read generation and included in mapping.
 
 ### Speed vs. sensitivity trend
 
@@ -66,13 +66,14 @@ Collected seeds (minimizers) were first sorted by its (rpos - 2*qpos) value, res
 
 ### Smith-Waterman-Gotoh extension
 
-The head seed of each chain is extended upward on the reference side then downward from the maximum score position found. If the resulted path is shorter than the seed span, similar extension is repeatedly performed on the next one (three times at the maximum). Each extension is carried out by the GABA library, which implements adaptive-banded semi-global Smith-Waterman-Gotoh algorithm with difference recurrence.
+The head seed of each chain is extended upward on the reference side then downward from the maximum score position found. If the resulted path is shorter than the seed span, similar extension is repeatedly performed on the next one (three times at the maximum). Each extension is carried out by the [GABA library](https://github.com/ocxtal/libgaba), which implements adaptive-banded semi-global Smith-Waterman-Gotoh algorithm with difference recurrence.
 
 ## Notes, issues and limitations
 
 * SDUST masking is removed from the original minimap implementation.
-* Repetitive seed hit detection is also removed.
-* Large gap open penalty (> 5) is disallowed due to the limitation of the GABA library.
+* Repetitive seed-hit region detection is also removed.
+* Large gap open penalty (> 5) and large X-drop penalty (> 64) are disallowed due to the limitation of the GABA library.
+* Index file format is incompatible with of the minimap.
 
 ## Gallery
 
@@ -80,6 +81,6 @@ The head seed of each chain is extended upward on the reference side then downwa
 
 * Fast and accurate
 
-## License
+## Copyright and license
 
-MIT (following the original license)
+The original source codes of the minimap program are developed by Heng Li and licensed under MIT, modified by Hajime Suzuki. The other codes, libgaba and ptask, is added by Hajime Suzuki. The whole repository, except for the pictures in the gallery section, is licensed under MIT, following the original one.
