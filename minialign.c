@@ -889,12 +889,6 @@ static void mm_align_drain(void *arg, void *item)
 			for (k = 0; k < strlen(c1); k++) _put(p, c1[k]);
 			for (k = 0; k < t->l_seq; k++) _put(p, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]);
 			for (k = 0; k < strlen(c2); k++) _put(p, c2[k]);
-
-			/*
-			printf("%s\t4\t*\t0\t0\t*\t*\t0\t0\t", t->name);
-			for (k = 0; k < t->l_seq; k++) b->p += "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]];
-			printf("\t*\n");
-			*/
 			continue;
 		}
 		for (j = 0; j < s->reg.a[i].u64[1]; ++j) {
@@ -910,12 +904,6 @@ static void mm_align_drain(void *arg, void *item)
 			if (r[j].flag&0x10) { for (k = qe-1; k >= qs; k--) _put(p, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k]]); }
 			else { for (k = qs; k < qe; k++) _put(p, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
 			for (k = 0; k < strlen(c3); k++) _put(p, c3[k]);
-			/*
-			printf("%s\t%d\t%s\t%d\t255\t%s\t*\t0\t0\t", t->name, r[j].flag, p->mi->s.a[r[j].rid].name, r[j].rs+1, r[j].cigar?r[j].cigar:"*");
-			if (r[j].flag&0x10) for (k = qe-1; k >= qs; k--) putchar("NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k]]);
-			else for (k = qs; k < qe; k++) putchar("NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]);
-			printf("\t*\tRG:Z:1\n");
-			*/
 			free(r[j].cigar);
 		}
 		free(r);
