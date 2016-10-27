@@ -25,7 +25,7 @@ install:
 uninstall:
 	rm $(PREFIX)/bin/minialign
 
-minialign.c: kvec.h ptask.h psort.h gaba.h
+minialign.c: kvec.h ptask.h gaba.h
 ptask.c: ptask.h queue.h unittest.h sassert.h
 queue.c: queue.h queue_internal.h
 gaba_wrap.c: gaba.h unittest.h sassert.h
