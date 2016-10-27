@@ -39,7 +39,7 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 | E.coli (MG1655) x100 simulated read to ref.  |       18.3s |       39.5s |       6272s |
 | E.coli (MG1655) x2000 simulated read to ref. |        477s |           - |         10h |
 | C.serevisiae x100 simulated read to ref.     |       84.2s |           - |      10869s |
-| D.melanogaster x20 simulated read to ref.    |           - |           - |    (29700s) |
+| D.melanogaster x20 simulated read to ref.    |        654s |           - |      31924s |
 | Human (hg39) x20 simulated read to ref.      |           - |           - |           - |
 
 Notes: PBSIM (PacBio long-read simulator) was used to generate read sets. Parameter sets (len-mean, len-SD, acc-mean, acc-SD) were set to (20k, 2k, 0.88, 0.07) in both samples. Minialign was run with default parameters except `-t4`, and BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`. Index construction time (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from results.
