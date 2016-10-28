@@ -14,7 +14,7 @@
 #include "ptask.h"
 #include "gaba.h"
 
-#define MM_VERSION "0.2-unstable"
+#define MM_VERSION "0.3-unstable"
 
 #include "arch/arch.h"
 #define _VECTOR_ALIAS_PREFIX		v16i8
@@ -66,10 +66,10 @@ typedef struct {
 
 typedef struct {
 	uint32_t w, k, b;
-	float f;
 	uint32_t n;  // number of reference sequences
 	mm_idx_bucket_t *B;
-	uint64_t max_occ;
+	uint64_t *occ;
+	uint32_t n_occ;
 	bseq_v s;
 
 	// work
@@ -106,14 +106,14 @@ typedef khash_t(idx) idxhash_t;
 int mm_verbose = 3;
 double mm_realtime0;
 
-double cputime()
+static double cputime()
 {
 	struct rusage r;
 	getrusage(RUSAGE_SELF, &r);
 	return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
 }
 
-double realtime()
+static double realtime()
 {
 	struct timeval tp;
 	gettimeofday(&tp, NULL);
@@ -125,26 +125,12 @@ double realtime()
 /* bseq.c */
 
 // ascii to 4bit conversion
-static uint8_t seq_nt4_table_4bit[256] = {
-	0, 1, 2, 0,  4, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 1, 0, 2,  0, 0, 0, 4,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 1, 0, 2,  0, 0, 0, 4,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0, 
-	0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0
+static unsigned char seq_nt4_table_4bit[32] = {
+	0, 1, 0, 2,  0, 0, 0, 4,  0, 0, 0, 0,  0, 0, 0, 0,
+	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
 };
 
-bseq_file_t *bseq_open(const char *fn)
+static bseq_file_t *bseq_open(const char *fn)
 {
 	bseq_file_t *fp;
 	gzFile f;
@@ -156,14 +142,14 @@ bseq_file_t *bseq_open(const char *fn)
 	return fp;
 }
 
-void bseq_close(bseq_file_t *fp)
+static void bseq_close(bseq_file_t *fp)
 {
 	kseq_destroy(fp->ks);
 	gzclose(fp->fp);
 	free(fp);
 }
 
-bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n_, void **base, uint64_t *size)
+static bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n_, void **base, uint64_t *size)
 {
 	uint32_t i, n = *n_;
 	kseq_t *ks = fp->ks;
@@ -184,7 +170,7 @@ bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n_, void **bas
 		kv_push(uint8_t, buf, '\0');
 		s->seq = (uint8_t *)buf.n;
 		for (i = 0; i < ks->seq.l; ++i)
-			kv_push(uint8_t, buf, seq_nt4_table_4bit[(uint8_t)ks->seq.s[i]]);
+			kv_push(uint8_t, buf, seq_nt4_table_4bit[0x1f&ks->seq.s[i]]);
 		kv_push(uint8_t, buf, '\0');
 		if (buf.n >= chunk_size) break;
 	}
@@ -201,7 +187,7 @@ bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n_, void **bas
 	return seq.a;
 }
 
-int bseq_eof(bseq_file_t *fp)
+static int bseq_eof(bseq_file_t *fp)
 {
 	return fp->is_eof;
 }
@@ -236,7 +222,7 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
  *               and strand indicates whether the minimizer comes from the top or the bottom strand.
  *               Callers may want to set "p->n = 0"; otherwise results are appended to p
  */
-void mm_sketch(const uint8_t *seq4, uint32_t len, uint32_t w, uint32_t k, uint32_t rid, mm128_v *p)
+static void mm_sketch(const uint8_t *seq4, uint32_t len, uint32_t w, uint32_t k, uint32_t rid, mm128_v *p)
 {
 	uint64_t shift1 = 2 * (k - 1), mask = (1ULL<<2*k) - 1, k0 = 0, k1 = 0;
 	uint32_t i, j, l, buf_pos, min_pos;
@@ -291,17 +277,15 @@ void mm_sketch(const uint8_t *seq4, uint32_t len, uint32_t w, uint32_t k, uint32
 
 /* index.c */
 
-mm_idx_t *mm_idx_init(uint32_t w, uint32_t k, uint32_t b, float f)
+static mm_idx_t *mm_idx_init(uint32_t w, uint32_t k, uint32_t b)
 {
 	mm_idx_t *mi = (mm_idx_t*)calloc(1, sizeof(mm_idx_t));
 	mi->w = w<1? 1 : w, mi->k = k; mi->b = MIN2(k*2, b);
-	mi->f = f<0.0? 0.0 : f;
-	mi->max_occ = UINT32_MAX;
 	mi->B = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t));
 	return mi;
 }
 
-void mm_idx_destroy(mm_idx_t *mi)
+static void mm_idx_destroy(mm_idx_t *mi)
 {
 	uint32_t i;
 	if (mi == 0) return;
@@ -316,7 +300,7 @@ void mm_idx_destroy(mm_idx_t *mi)
 	free(mi->s.a); free(mi->a.a); free(mi);
 }
 
-const v2u32_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, uint64_t *n)
+static const v2u32_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, uint64_t *n)
 {
 	uint64_t mask = (1<<mi->b) - 1;
 	khint_t k;
@@ -335,10 +319,9 @@ const v2u32_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, uint64_t *n)
 	}
 }
 
-uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
+static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
 {
-	int i;
-	size_t n = 0;
+	uint64_t i, n = 0;
 	uint32_t thres;
 	khint_t *a, k;
 	if (f <= 0.) return UINT32_MAX;
@@ -485,7 +468,7 @@ static void *mm_idx_post(void *arg, void *item)
 	return 0;
 }
 
-mm_idx_t *mm_idx_gen(bseq_file_t *fp, uint32_t w, uint32_t k, uint32_t b, float f, uint64_t batch_size, uint32_t n_threads)
+static mm_idx_t *mm_idx_gen(bseq_file_t *fp, uint32_t w, uint32_t k, uint32_t b, float *frq, uint32_t n_frq, uint64_t batch_size, uint32_t n_threads)
 {
 	uint64_t i;
 	mm_idx_pipeline_t pl = {0}, **p;
@@ -493,7 +476,7 @@ mm_idx_t *mm_idx_gen(bseq_file_t *fp, uint32_t w, uint32_t k, uint32_t b, float 
 	pl.batch_size = batch_size;
 	pl.fp = fp;
 	if (pl.fp == 0) return 0;
-	pl.mi = mm_idx_init(w, k, b, f);
+	pl.mi = mm_idx_init(w, k, b);
 
 	p = (mm_idx_pipeline_t**)calloc(n_threads, sizeof(mm_idx_pipeline_t*));
 	for (i = 0; i < n_threads; ++i) p[i] = &pl;
@@ -521,17 +504,20 @@ mm_idx_t *mm_idx_gen(bseq_file_t *fp, uint32_t w, uint32_t k, uint32_t b, float 
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
-	pl.mi->max_occ = mm_idx_cal_max_occ(pl.mi, pl.mi->f);
+	pl.mi->occ = calloc(pl.mi->n_occ = n_frq, sizeof(float));
+	for (i = 0; i < n_frq; ++i) {
+		pl.mi->occ[i] = mm_idx_cal_max_occ(pl.mi, frq[i]);
+	}
 	return pl.mi;
 }
 
-mm_idx_t *mm_idx_build(const char *fn, uint32_t w, uint32_t k, uint32_t b, float f, uint32_t n_threads) // a simpler interface
+static mm_idx_t *mm_idx_build(const char *fn, uint32_t w, uint32_t k, uint32_t b, float *frq, uint32_t n_frq, uint32_t n_threads) // a simpler interface
 {
 	bseq_file_t *fp;
 	mm_idx_t *mi;
 	fp = bseq_open(fn);
 	if (fp == 0) return 0;
-	mi = mm_idx_gen(fp, w, k, b, f, 1<<18, n_threads);
+	mi = mm_idx_gen(fp, w, k, b, frq, n_frq, 1<<18, n_threads);
 	bseq_close(fp);
 	return mi;
 }
@@ -540,18 +526,19 @@ mm_idx_t *mm_idx_build(const char *fn, uint32_t w, uint32_t k, uint32_t b, float
  * index I/O *
  *************/
 
-#define MM_IDX_MAGIC "MAI\2"		/* minialign index version 2, differs from minimap index signature */
+#define MM_IDX_MAGIC "MAI\3"		/* minialign index version 3, differs from minimap index signature */
 
-void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
+static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 {
-	union { uint32_t i; float f; } x[6];
+	union { uint32_t i; float f; } x[4];
 	uint64_t i, j, size = 0, y[2];
 	for (i = 0; i < mi->size.n; ++i) size += mi->size.a[i];
-	x[0].i = mi->w, x[1].i = mi->k, x[2].i = mi->b, x[3].f = mi->f, x[4].i = mi->n, x[5].i = mi->max_occ;
+	x[0].i = mi->w, x[1].i = mi->k, x[2].i = mi->b, x[3].i = mi->n_occ;
 	y[0] = mi->s.n, y[1] = size;
 	fwrite(MM_IDX_MAGIC, 1, 4, fp);
-	fwrite(x, 4, 6, fp);
+	fwrite(x, 4, 4, fp);
 	fwrite(y, 8, 2, fp);
+	fwrite(mi->occ, 8, mi->n_occ, fp);
 	for (i = 0; i < 1<<mi->b; ++i) {
 		mm_idx_bucket_t *b = &mi->B[i];
 		khint_t k;
@@ -581,20 +568,21 @@ void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 	fwrite(mi->s.a, sizeof(bseq_t), mi->s.n, fp);
 }
 
-mm_idx_t *mm_idx_load(FILE *fp)
+static mm_idx_t *mm_idx_load(FILE *fp)
 {
 	char magic[4];
-	union { uint32_t i; float f; } x[6];
+	union { uint32_t i; float f; } x[4];
 	uint64_t i, bsize, y[2];
 
 	mm_idx_t *mi;
 	if (fread(magic, 1, 4, fp) != 4) return 0;
 	if (strncmp(magic, MM_IDX_MAGIC, 4) != 0) return 0;
-	if (fread(x, 4, 6, fp) != 6) return 0;
+	if (fread(x, 4, 4, fp) != 4) return 0;
 	if (fread(y, 8, 2, fp) != 2) return 0;
-	mi = mm_idx_init(x[0].i, x[1].i, x[2].i, x[3].f);
-	mi->n = x[4].i, mi->max_occ = x[5].i;
-	mi->s.n = y[0]; bsize = y[1];
+	mi = mm_idx_init(x[0].i, x[1].i, x[2].i);
+	mi->n = mi->s.n = y[0]; bsize = y[1];
+	mi->occ = calloc(mi->n_occ = x[3].i, sizeof(uint64_t));
+	if (fread(mi->occ, 8, mi->n_occ, fp) != mi->n_occ) goto _mm_idx_load_fail;
 
 	for (i = 0; i < 1<<mi->b; ++i) {
 		mm_idx_bucket_t *b = &mi->B[i];
@@ -625,7 +613,7 @@ mm_idx_t *mm_idx_load(FILE *fp)
 	mi->size.a[0] = bsize;
 	if (fread(mi->base.a[0], sizeof(char), mi->size.a[0], fp) != mi->size.a[0]) goto _mm_idx_load_fail;
 	mi->s.a = malloc(sizeof(bseq_t) * mi->s.n);
-	if (fread(mi->s.a, sizeof(bseq_t), mi->s.n, fp) != mi->s.n) goto _mm_idx_load_fail;
+	if ((i = fread(mi->s.a, sizeof(bseq_t), mi->s.n, fp)) != mi->s.n) goto _mm_idx_load_fail;
 	for (i = 0; i < mi->s.n; ++i)
 		mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
 	return mi;
@@ -638,7 +626,7 @@ _mm_idx_load_fail:
 
 /* map.c */
 
-void mm_mapopt_init(mm_mapopt_t *opt)
+static void mm_mapopt_init(mm_mapopt_t *opt)
 {
 	opt->ofs_hlim = 1500;
 	opt->ofs_llim = 1500;
@@ -687,12 +675,13 @@ typedef struct {
 typedef struct { // per-thread buffer
 	const mm_align_pipeline_t *p;
 	mm128_v mini; // query minimizers
+	mm128_v resc;
 	mm128_v coef; // Hough transform coefficient
 	v2u32_v intv; // intervals on sorted coef
 	gaba_dp_t *dp;	// alignment work
 } tbuf_t;
 
-tbuf_t *mm_tbuf_init(const mm_align_pipeline_t *pl)
+static tbuf_t *mm_tbuf_init(const mm_align_pipeline_t *pl)
 {
 	tbuf_t *b = (tbuf_t*)calloc(1, sizeof(tbuf_t));
 	const uint8_t *lim = (const uint8_t *)0x800000000000;
@@ -700,7 +689,7 @@ tbuf_t *mm_tbuf_init(const mm_align_pipeline_t *pl)
 	return b;
 }
 
-void mm_tbuf_destroy(tbuf_t *b)
+static void mm_tbuf_destroy(tbuf_t *b)
 {
 	if (b == 0) return;
 	free(b->mini.a); free(b->coef.a); free(b->intv.a);
@@ -708,131 +697,179 @@ void mm_tbuf_destroy(tbuf_t *b)
 	free(b);
 }
 
-reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, const mm_mapopt_t *opt, uint64_t *n_reg)
+#define _s(x)	( (x)<0?-1:1)
+#define _m(x)	( (((int32_t)(x))>>31)^(x) )
+static void mm_expand(const v2u32_t *r, uint32_t n, int32_t qs, mm128_v *coef)
 {
-	uint64_t i, j, k, l, n;
-	uint64_t const chained = 0x8000000000000000;
-	int32_t min_score;
-	int32_t const ofs = 0x40000000;
-	reg_v reg = {0};
-	#define _s(x)	( (x)<0?-1:1)
-	#define _m(x)	( (((int32_t)(x))>>31)^(x) )
-
-	// collect minimizers
-	b->mini.n = b->coef.n = 0;
-	mm_sketch(seq, l_seq, mi->w, mi->k, 0, &b->mini);
-	for (j = 0; j < b->mini.n; ++j) {
-		const v2u32_t *r;
-		int32_t qs = (int32_t)b->mini.a[j].u32[2];
-		r = mm_idx_get(mi, b->mini.a[j].u64[0], &n);	// get minimizer at current pos
-		if (n > mi->max_occ) continue;	// skip if exceeds repetitive threshold
-		for (k = 0; k < n; ++k) {	// iterate over all the collected minimizers
-			int32_t rs = (int32_t)r[k].x[0];
-			mm128_t *p;
-			kv_pushp(mm128_t, b->coef, &p);
-			p->u32[0] = ofs + ((rs>>31)^(rs - (qs>>1))); p->u32[1] = r[k].x[1];
-			p->u32[2] = rs; p->u32[3] = qs;
-		}
+	uint64_t i;
+	const int32_t ofs = 0x40000000;
+	for (i = 0; i < n; ++i) {	// iterate over all the collected minimizers
+		int32_t rs = (int32_t)r[i].x[0], _qs = (rs>>31) ^ qs, _rs = (rs>>31) ^ rs;
+		mm128_t *p;
+		kv_pushp(mm128_t, *coef, &p);
+		p->u32[0] = ofs + _rs - (_qs>>1); p->u32[1] = r[i].x[1];
+		p->u32[2] = _rs; p->u32[3] = _qs;
 	}
-	if (b->coef.n == 0) return 0;
-	radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
+	return;
+}
 
-	// chain (modified lis algorithm)
-	for (b->intv.n = i = 0; i < b->coef.n; i = MIN2(j, k)) {
-		uint32_t rid = b->coef.a[i].u32[1];
-		int32_t rs = b->coef.a[i].u32[2], qs = b->coef.a[i].u32[3], re, qe;
-		int32_t lub = b->coef.a[i].u32[0] + opt->ofs_llim, hub = ((rs>>31)^(rs - (qs<<1))) + ofs, hlb = hub - opt->ofs_hlim;
-		uint32_t cnt = 0, len = 0;
-		for (j = i+1, k = UINT64_MAX, l = i; j < b->coef.n && (int32_t)b->coef.a[j].u32[0] < lub; j++) {
-			if ((int64_t)b->coef.a[j].u64[0] < 0) continue;
-			re = b->coef.a[j].u32[2], qe = b->coef.a[j].u32[3];
-			int32_t h = ofs + ((re>>31)^(re - (qe<<1)));
-			if (rid != b->coef.a[j].u32[1] || (h > hub && h < hlb)) { k = MIN2(j, k); continue; }	// out of range, skip
-			lub = b->coef.a[j].u32[0] + opt->ofs_llim; hlb = h - opt->ofs_hlim;
-			b->coef.a[j].u64[0] |= chained; l = j; cnt++;
+static uint64_t mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t w, uint32_t k, uint32_t max_occ, uint32_t resc_occ, mm128_v *mini, mm128_v *coef, mm128_v *resc)
+{
+	uint64_t i, n, cnt = 0;
+	mini->n = coef->n = 0;
+	mm_sketch(seq, l_seq, w, k, 0, mini);
+
+	for (i = 0; i < mini->n; ++i) {
+		const v2u32_t *r;
+		int32_t qs = (int32_t)mini->a[i].u32[2];
+		r = mm_idx_get(mi, mini->a[i].u64[0], &n);	// get minimizer at current pos
+		if (n > max_occ) continue;	// skip if exceeds repetitive threshold
+		cnt += n;
+		if (n > resc_occ) {
+			mm128_t *q;
+			kv_pushp(mm128_t, *resc, &q);
+			q->u32[0] = qs; q->u32[1] = n; q->u64[1] = (uint64_t)r;
+			continue;
 		}
-		re = b->coef.a[l].u32[2], qe = b->coef.a[l].u32[3];
-		rs = _m(rs); re = _m(re); qs = _m(qs); qe = _m(qe);
+		mm_expand(r, n, qs, coef);
+	}
+	return(cnt);
+}
+
+static uint64_t mm_chain(mm128_v *coef, uint32_t ofs_llim, uint32_t ofs_hlim, uint32_t min_len, v2u32_v *intv)
+{
+	uint64_t i, j, k, l, cnt = 0;
+	const int32_t ofs = 0x40000000;
+	const uint32_t chained = 0x80000000, mask = 0x7fffffff;
+	for (intv->n = i = 0; i < coef->n; i = MIN2(j, k)) {
+		uint32_t rid = coef->a[i].u32[1];
+		int32_t rs = coef->a[i].u32[2], qs = coef->a[i].u32[3], re, qe;
+		int32_t lub = coef->a[i].u32[0] + ofs_llim, hub = rs - (qs<<1) + ofs, hlb = hub - ofs_hlim;
+		uint32_t cnt = 0, len = 0;
+		for (j = i+1, k = UINT64_MAX, l = i; j < coef->n && (int32_t)coef->a[j].u32[0] < lub; j++) {
+			// if ((int32_t)coef->a[j].u32[2] < 0) continue;
+			re = coef->a[j].u32[2] & mask, qe = coef->a[j].u32[3];
+			int32_t h = ofs + re - (qe<<1);
+			if (rid != coef->a[j].u32[1] || (h > hub && h < hlb)) { k = MIN2(j, k); continue; }	// out of range, skip
+			lub = coef->a[j].u32[0] + ofs_llim; hlb = h - ofs_hlim;
+			coef->a[j].u32[2] |= chained; l = j; cnt++;
+		}
+		re = coef->a[l].u32[2] & mask; qe = coef->a[l].u32[3]; qs = _m(qs); qe = _m(qe);
 		len = _s(re-rs)*(re-rs)+_s(qe-qs)*(qe-qs);
-		if (len < opt->min_len) continue;
+		if (len < min_len) continue;
+		cnt++;
 		v2u32_t *p;
-		kv_pushp(v2u32_t, b->intv, &p);
+		kv_pushp(v2u32_t, *intv, &p);
 		p->x[0] = (uint32_t)ofs - len; p->x[1] = i;
 	}
-	if (b->intv.n == 0) return 0;
-	radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
+	return(cnt);
+}
 
+static gaba_alignment_t *mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint32_t k, uint32_t min_score, uint32_t min_len, gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t)
+{
+	uint64_t i, j;
+	const uint32_t mask = 0x7fffffff;
+	const uint8_t *lim = (const uint8_t*)0x800000000000;
+	gaba_section_t rf, rr, *qu, *qd, *r, *q;
+	rf.id = 2; rf.len = ref->l_seq; rf.base = (const uint8_t*)ref->seq;
+	rr.id = 3; rr.len = ref->l_seq; rr.base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim);
+
+	gaba_dp_flush(dp, lim, lim);
+	gaba_alignment_t *a[3] = {0};
+	for (i = 0, j = 0; i < 3 && i < n; ++i) {
+		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) continue;	// skip head
+		int32_t rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
+		uint64_t rev = qs<0; qu = rev? qf : qr; qd = rev? qr : qf;
+		qs = _m(qs); qs = rev? qf->len-qs+k-1 : qs;
+		// upward extension
+		gaba_fill_t *f = gaba_dp_fill_root(dp, r = &rr, ref->l_seq-rs-1, q = qu, qu->len-qs-1), *m = f;
+		uint32_t mask = GABA_STATUS_TERM;
+		do {
+			if (f->status & GABA_STATUS_UPDATE_A) mask |= GABA_STATUS_UPDATE_A, r = t;
+			if (f->status & GABA_STATUS_UPDATE_B) mask |= GABA_STATUS_UPDATE_B, q = t;
+			f = gaba_dp_fill(dp, f, r, q);
+			m = (f->max > m->max)? f : m;
+		} while(!(mask & f->status));
+		// find max
+		gaba_pos_pair_t p = gaba_dp_search_max(dp, m);
+		// downward extension from max
+		m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1);
+		mask = GABA_STATUS_TERM;
+		do {
+			if (f->status & GABA_STATUS_UPDATE_A) mask |= GABA_STATUS_UPDATE_A, r = t;
+			if (f->status & GABA_STATUS_UPDATE_B) mask |= GABA_STATUS_UPDATE_B, q = t;
+			f = gaba_dp_fill(dp, f, r, q);
+			m = (f->max > m->max)? f : m;
+		} while(!(mask & f->status));
+		// convert alignment to cigar
+		a[j++] = gaba_dp_trace(dp, NULL, m, NULL);
+		if (a[j-1]->score < min_score || gaba_plen(a[j-1]->sec) < min_len) continue;
+		break;
+	}
+	if (j == 0) return 0;
+	// collect longest
+	for (i = 1; i < j; ++i) if (a[0]->score < a[i]->score) a[0] = a[i];
+	return(a[0]);
+}
+
+static void mm_record(bseq_t *ref, uint32_t l_seq, gaba_alignment_t *a, reg_v *reg)
+{
+	char *cig;
+	reg_t *r;
+	kv_pushp(reg_t, *reg, &r);
+	r->rid = ref->rid; r->flag = ((a->sec->bid&0x01)? 0 : 0x10) | (reg->n==1? 0 : 0x100);
+	r->rs = ref->l_seq-a->sec->apos-a->sec->alen; r->re = ref->l_seq-a->sec->apos;
+	r->qs = l_seq-a->sec->bpos-a->sec->blen; r->qe = l_seq-a->sec->bpos;
+	r->cigar = cig = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
+	if (r->qs) cig += sprintf(cig, "%d%c", r->qs, (reg->n==1)? 'S' : 'H');
+	cig += gaba_dp_dump_cigar_reverse(cig, 2*a->path->len, a->path->array, 0, a->path->len);
+	if (l_seq-r->qe) cig += sprintf(cig, "%d%c", l_seq-r->qe, (reg->n==1)? 'S' : 'H');
+	return;
+}
+
+static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, const mm_mapopt_t *opt, uint64_t *n_reg)
+{
+	uint64_t i, j, k;
+	int32_t min_score = opt->min_score;
+	const int32_t ofs = 0x40000000;
+	const uint32_t mask = 0x7fffffff;
+	reg_v reg = {0};
 	// prepare section info for alignment
 	uint8_t tail[96];
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
-	gaba_section_t qf, qr, rf, rr, t, *qu, *qd, *r, *q;
+	gaba_section_t qf, qr, t;
 	memset(tail, 0, 96);
 	qf.id = 0; qf.len = l_seq; qf.base = (const uint8_t*)seq;
 	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev((const uint8_t*)seq+l_seq-1, lim);
 	t.id = 4; t.len = 32; t.base = tail+32;
-
-	// extend
-	min_score = opt->min_score;
-	for (i = 0; i < b->intv.n && b->intv.a[i].x[0] < ofs - opt->min_len; ++i) {
-		char *cig;
-		int64_t rev = 0;
-		uint32_t rid = b->coef.a[b->intv.a[i].x[1]].u32[1] & 0x7fffffff;
-		bseq_t *ref = &mi->s.a[rid];
-		rf.id = 2; rf.len = ref->l_seq; rf.base = (const uint8_t*)ref->seq;
-		rr.id = 3; rr.len = ref->l_seq; rr.base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim);
-
-		gaba_dp_flush(b->dp, lim, lim);
-		gaba_alignment_t *a[3] = {0};
-		for (j = b->intv.a[i].x[1], k = l = 0; k < 3 && j+k < b->coef.n; ++k) {
-			if (k != 0 && (int64_t)b->coef.a[j+k].u64[0] >= 0) continue;	// skip head
-			int32_t rs = b->coef.a[j+k].u32[2], qs = b->coef.a[j+k].u32[3];
-			rev = (qs^rs)<0; qu = rev? &qf : &qr; qd = rev? &qr : &qf;
-			rs = _m(rs); qs = _m(qs); qs = rev? l_seq-qs+mi->k : qs;
-			// upward extension
-			gaba_fill_t *f = gaba_dp_fill_root(b->dp, r = &rr, rf.len-rs, q = qu, qf.len-qs), *m = f;
-			uint32_t mask = GABA_STATUS_TERM;
-			do {
-				if (f->status & GABA_STATUS_UPDATE_A) mask |= GABA_STATUS_UPDATE_A, r = &t;
-				if (f->status & GABA_STATUS_UPDATE_B) mask |= GABA_STATUS_UPDATE_B, q = &t;
-				f = gaba_dp_fill(b->dp, f, r, q);
-				m = (f->max > m->max)? f : m;
-			} while(!(mask & f->status));
-			// find max
-			gaba_pos_pair_t p = gaba_dp_search_max(b->dp, m);
-			// downward extension from max
-			m = f = gaba_dp_fill_root(b->dp, r = &rf, rf.len-p.apos, q = qd, qf.len-p.bpos);
-			mask = GABA_STATUS_TERM;
-			do {
-				if (f->status & GABA_STATUS_UPDATE_A) mask |= GABA_STATUS_UPDATE_A, r = &t;
-				if (f->status & GABA_STATUS_UPDATE_B) mask |= GABA_STATUS_UPDATE_B, q = &t;
-				f = gaba_dp_fill(b->dp, f, r, q);
-				m = (f->max > m->max)? f : m;
-			} while(!(mask & f->status));
-			// convert alignment to cigar
-			a[l++] = gaba_dp_trace(b->dp, NULL, m, NULL);
-			if (a[l-1]->score < min_score || gaba_plen(a[l-1]->sec) < ofs - b->intv.a[i].x[0]) continue;
-			break;
+	b->mini.n = b->coef.n = b->resc.n = b->intv.n = 0;
+	for (i = j = 0; reg.n == 0 && i < mi->n_occ; ++i) {
+		if (i == 0) {
+			mm_collect(mi, l_seq, seq, mi->w, mi->k, mi->occ[mi->n_occ-1], mi->occ[0], &b->mini, &b->coef, &b->resc);
+		} else {
+			if (i == 1) radix_sort_128x(b->resc.a, b->resc.a + b->resc.n);
+			for (k = 0; k < b->coef.n; ++k) b->coef.a[k].u32[2] &= mask;
+			for (; j < b->resc.n && b->resc.a[j].u32[1] <= mi->occ[i]; ++j)
+				mm_expand((const v2u32_t*)b->resc.a[j].u64[1], b->resc.a[j].u32[1], b->resc.a[j].u32[0], &b->coef);
 		}
-		if (l == 0) continue;
-		// collect longest
-		for (j = 1; j < l; ++j) if (a[0]->score < a[j]->score) a[0] = a[j];
-		if (a[0]->score < min_score) continue;
-		min_score = MAX2(min_score, opt->min_ratio*a[0]->score);
-
-		reg_t *r;
-		kv_pushp(reg_t, reg, &r);
-		r->rid = rid; r->flag = (rev? 0x10 : 0) | (reg.n==1? 0 : 0x100);
-		r->rs = rf.len-a[0]->sec->apos-a[0]->sec->alen; r->re = rf.len-a[0]->sec->apos;
-		r->qs = qf.len-a[0]->sec->bpos-a[0]->sec->blen; r->qe = qf.len-a[0]->sec->bpos;
-		if(r->qs < 0) printf("%c\n", *((char*)0));
-		r->cigar = cig = (char *)calloc(a[0]->path->len < 512 ? 1024 : 2*a[0]->path->len, 1);
-		if (r->qs) cig += sprintf(cig, "%d%c", r->qs, (reg.n==1)? 'S' : 'H');
-		cig += gaba_dp_dump_cigar_reverse(cig, 2*a[0]->path->len, a[0]->path->array, 0, a[0]->path->len);
-		if (qf.len-r->qe) cig += sprintf(cig, "%d%c", qf.len-r->qe, (reg.n==1)? 'S' : 'H');
+		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
+		mm_chain(&b->coef, opt->ofs_llim, opt->ofs_hlim, opt->min_len, &b->intv);
+		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
+		if (b->intv.a == 0 || b->intv.a[0].x[0] > ofs - opt->min_len) continue;
+		for (k = 0; k < b->intv.n && b->intv.a[k].x[0] < ofs - opt->min_len; ++k) {
+			mm128_t *c = &b->coef.a[b->intv.a[k].x[1]];
+			bseq_t *ref = &mi->s.a[c->u32[1]];
+			gaba_alignment_t *a = mm_extend(ref, c, b->coef.n-b->intv.a[k].x[1], mi->k, opt->min_score, opt->min_len, b->dp, &qf, &qr, &t);
+			if (a == 0 || a->score < min_score) continue;
+			min_score = MAX2(min_score, opt->min_ratio*a->score);
+			mm_record(ref, l_seq, a, &reg);
+		}
 	}
 	*n_reg = reg.n;
 	return reg.a;
 }
+#undef _s
+#undef _m
 
 static void *mm_align_source(void *arg)
 {
@@ -912,7 +949,7 @@ static void mm_align_drain(void *arg, void *item)
 	return;
 }
 
-int mm_align_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, uint32_t n_threads, uint32_t tbatch_size)
+static int mm_align_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, uint32_t n_threads, uint32_t tbatch_size)
 {
 	uint32_t i;
 	mm_align_pipeline_t pl = {0};
@@ -940,8 +977,8 @@ int mm_align_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, u
 
 	t = (tbuf_t**)calloc(n_threads, sizeof(tbuf_t*));
 	for (i = 0; i < n_threads; ++i) t[i] = mm_tbuf_init(&pl);
-	ptask_t *pt = ptask_init(mm_align_worker, (void**)t, n_threads, 256);
-	ptask_stream(pt, mm_align_source, &pl, mm_align_drain, &pl, 256/n_threads);
+	ptask_t *pt = ptask_init(mm_align_worker, (void**)t, n_threads, 1024);
+	ptask_stream(pt, mm_align_source, &pl, mm_align_drain, &pl, 1024/n_threads);
 	ptask_clean(pt);
 	for (i = 0; i < n_threads; ++i) mm_tbuf_destroy(t[i]);
 	free(t);
@@ -958,7 +995,7 @@ int mm_align_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, u
 
 /* main.c */
 
-void liftrlimit()
+static void liftrlimit()
 {
 #ifdef __linux__
 	struct rlimit r;
@@ -972,9 +1009,9 @@ void liftrlimit()
 int main(int argc, char *argv[])
 {
 	mm_mapopt_t opt;
-	int i, ch, k = 15, w = -1, b = 14, n_threads = 3, is_idx = 0;
+	int i, ch, k = 15, w = -1, b = 14, n_frq = 3, n_threads = 1, is_idx = 0;
 	int tbatch_size = 10000000;
-	float f = 0.001;
+	float frq[32] = {0.05, 0.01, 0.001, 0};
 	bseq_file_t *fp = 0;
 	char *fnw = 0;
 	FILE *fpr = 0, *fpw = 0;
@@ -983,13 +1020,21 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((ch = getopt(argc, argv, "k:w:f:B:t:v:d:lM:m:a:b:p:q:L:H:X:Vx:")) >= 0) {
+	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:lM:m:a:b:p:q:L:H:X:v")) >= 0) {
 		if (ch == 'k') k = atoi(optarg);
 		else if (ch == 'w') w = atoi(optarg);
-		else if (ch == 'f') f = atof(optarg);
+		else if (ch == 'f') {
+			const char *p = optarg; n_frq = 0;
+			while (*p) {
+				frq[n_frq++] = atof(p);
+				while (*p && *p != ',') p++;
+				if (!*p) break;
+				p++;
+			}
+		}
 		else if (ch == 'B') b = atoi(optarg);
 		else if (ch == 't') n_threads = atoi(optarg);
-		else if (ch == 'v') mm_verbose = atoi(optarg);
+		else if (ch == 'V') mm_verbose = atoi(optarg);
 		else if (ch == 'd') fnw = optarg;
 		else if (ch == 'l') is_idx = 1;
 		else if (ch == 'M') opt.min_len = atoi(optarg);
@@ -1001,16 +1046,7 @@ int main(int argc, char *argv[])
 		else if (ch == 'L') opt.ofs_llim = atoi(optarg);
 		else if (ch == 'H') opt.ofs_hlim = atoi(optarg);
 		else if (ch == 'X') opt.xdrop = atoi(optarg);
-		else if (ch == 'V') {
-			puts(MM_VERSION);
-			return 0;
-		} else if (ch == 'x') {
-			if (strcmp(optarg, "ava10k") == 0) {
-				opt.min_len = 100;
-				opt.m = 1; opt.x = 1; opt.gi = 1; opt.ge = 1;
-				w = 5;
-			}
-		}
+		else if (ch == 'v') { puts(MM_VERSION); return 0; }
 	}
 	if (w < 0) w = (int)(.6666667 * k + .499);
 
@@ -1034,10 +1070,10 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  Indexing:\n");
 		fprintf(stderr, "    -k INT     k-mer size [%d]\n", k);
 		fprintf(stderr, "    -w INT     minimizer window size [{-k}*2/3]\n");
-		fprintf(stderr, "    -f FLOAT   filter out top FLOAT fraction of repetitive minimizers [%.3f]\n", f);
 		fprintf(stderr, "    -d FILE    dump index to FILE []\n");
 		fprintf(stderr, "    -l FILE    load index from FILE [] (overriding -k, -w, and -f)\n");
 		fprintf(stderr, "  Mapping:\n");
+		fprintf(stderr, "    -f FLOAT   occurrence thresholds [%.3f]\n", 0.001);
 		fprintf(stderr, "    -a INT     match award [%d]\n", opt.m);
 		fprintf(stderr, "    -b INT     mismatch penalty [%d]\n", opt.x);
 		fprintf(stderr, "    -p INT     gap open penalty [%d]\n", opt.gi);
@@ -1057,13 +1093,16 @@ int main(int argc, char *argv[])
 		mm_idx_t *mi = 0;
 		if (fpr) mi = mm_idx_load(fpr);
 		else if (!bseq_eof(fp))
-			mi = mm_idx_gen(fp, w, k, b, f, tbatch_size, n_threads);
+			mi = mm_idx_gen(fp, w, k, b, frq, n_frq, tbatch_size, n_threads);
 		if (mi == 0) break;
 		if (mm_verbose >= 3)
-			fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built the index for %d target sequence(s)\n",
+			fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %d target sequence(s)\n",
 					__func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->n);
 		if (mm_verbose >= 3)
-			fprintf(stderr, "[M::%s] max occurrences of a minimizer to consider: %lu\n", __func__, mi->max_occ);
+			fprintf(stderr, "[M::%s] occurrence thresholds:", __func__);
+			for (i = 0; i < mi->n_occ; ++i)
+				fprintf(stderr, " %lu", mi->occ[i]);
+			fprintf(stderr, "\n");
 		if (fpw) mm_idx_dump(fpw, mi);
 		for (i = optind + 1; i < argc; ++i)
 			mm_align_file(mi, argv[i], &opt, n_threads, tbatch_size);
