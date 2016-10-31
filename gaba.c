@@ -2273,8 +2273,8 @@ struct gaba_pos_pair_s suffix(gaba_dp_search_max)(
 		bidx += (blen = btail->blen);
 	}
 	return((struct gaba_pos_pair_s){
-		.apos = aidx,
-		.bpos = bidx
+		.apos = aidx - 1,
+		.bpos = bidx - 1
 	});
 }
 
