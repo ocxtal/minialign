@@ -34,12 +34,12 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 
 ### Speed
 
-|                 Time (sec.)                  |  minialign  |   DALIGNER  |   BWA-MEM   |
-|:--------------------------------------------:|:-----------:|:-----------:|:-----------:|
-| E.coli (MG1655) x100 simulated read to ref.  |       18.3s |       39.5s |       6272s |
-| C.serevisiae x100 sim. to ref.               |       84.2s |           - |      10869s |
-| D.melanogaster (dm6) x20 sim. to ref.        |        654s |           - |      31924s |
-| Human (hg38) x20 sim. to ref.                |           - |           - |           - |
+|                      Time (sec.)                     |  minialign  |   DALIGNER  |   BWA-MEM   |
+|:----------------------------------------------------:|:-----------:|:-----------:|:-----------:|
+| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |       18.3s |       39.5s |       6272s |
+| C.serevisiae x100 sim. (1.2Gb) to ref.               |       45.3s |           - |      10869s |
+| D.melanogaster (dm6) x20 sim. (2.4Gb) to ref.        |        145s |           - |      31924s |
+| Human (hg38) x20 sim. (30.1Gb) to ref.               |           - |           - |           - |
 
 Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim), not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters modified based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements.
 
