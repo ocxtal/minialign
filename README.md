@@ -36,18 +36,18 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 
 |                      Time (sec.)                     |  minialign  |   DALIGNER  |   BWA-MEM   |
 |:----------------------------------------------------:|:-----------:|:-----------:|:-----------:|
-| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |       18.3s |       39.5s |       6272s |
-| C.serevisiae x100 sim. (1.2Gb) to ref.               |       45.3s |           - |      10869s |
-| D.melanogaster (dm6) x20 sim. (2.4Gb) to ref.        |        145s |           - |      31924s |
+| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        18.3 |        39.5 |        6272 |
+| S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        47.1 |           - |       10869 |
+| D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |         162 |           - |       31924 |
 | Human (hg38) x20 sim. (30.1Gb) to ref.               |           - |           - |           - |
 
-Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim), not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters modified based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements. Peak RAM usage was around 12GB in human read-to-ref mapping.
+Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters modified based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements. Peak RAM usage was around 12GB in human read-to-ref mapping with four threads.
 
 ### Read-lendth vs. sensitivity trend
 
 ![length-sensitivity plot](https://github.com/ocxtal/minialig/blob/master/pic/len_sens.png)
 
-Notes: Sensitivity is defined as: the number of reads whose originating location is correctly identified over the total number of reads. Reads are generated from hg38 using PBSIM with the same parameters as the speed benchmark. ALT/random contigs were excluded from reference sequences in read generation and included in mapping. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-m`, set to the half of the mean read length.
+Notes: Sensitivity is defined as: the number of reads whose originating location is correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-m`, set to the half of the mean read length.
 
 ### Speed vs. sensitivity trend
 
@@ -75,6 +75,12 @@ The second head seed of each chain is extended upward (3' on the reference side)
 * Repetitive seed-hit region detection is also removed.
 * Large gap open penalty (> 5) and large X-drop penalty (> 64) are disallowed due to the limitation of the GABA library.
 * Index file format is incompatible with of the minimap.
+
+## Updates
+
+* 2016/11/2 (0.3.0) First release of 0.3 series, with a better chaining algorithm.
+* 2016/10/5 (0.2.1) Last tagged commit of the version 0.2 series.
+* 2016/9/13 (0.2.0) First tagged commit (unstable).
 
 ## Gallery
 
