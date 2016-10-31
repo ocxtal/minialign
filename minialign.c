@@ -776,7 +776,7 @@ static gaba_alignment_t *mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint3
 
 	gaba_dp_flush(dp, lim, lim);
 	gaba_alignment_t *a[3] = {0};
-	for (i = 0, j = 0; i < 3 && i < n; ++i) {
+	for (i = 1, j = 0; i < 3 && i < n; ++i) {
 		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) continue;	// skip head
 		int32_t rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
 		uint64_t rev = qs<0; qu = rev? qf : qr; qd = rev? qr : qf;
