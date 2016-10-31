@@ -45,13 +45,15 @@ Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](htt
 
 ### Read-lendth vs. sensitivity trend
 
+![length-sensitivity plot](https://github.com/ocxtal/minialig/blob/master/pic/len_sens.png)
 
-Notes: Sensitivity is defined as: number of reads whose originating location is correctly identified over total number of reads. Reads are generated from hg38 using PBSIM with the same parameters as the speed benchmark. ALT/random contigs were excluded from reference sequences in read generation and included in mapping.
+Notes: Sensitivity is defined as: number of reads whose originating location is correctly identified over total number of reads. Reads are generated from hg38 using PBSIM with the same parameters as the speed benchmark. ALT/random contigs were excluded from reference sequences in read generation and included in mapping. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-m`, set to the half of the mean read length.
 
 ### Speed vs. sensitivity trend
 
+![speed-sensitivity plot](https://github.com/ocxtal/minialig/blob/master/pic/spd_sens.png)
 
-Notes:
+Notes: k-mer length and window size parameters were altered in the benchmark. Details of the correspondences between point and parameters were found in scripts directory.
 
 ## Algorithm overview
 
@@ -80,7 +82,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ![hayai](https://github.com/ocxtal/minialig/blob/master/pic/hayai.pdf)
 
-#### Intel nuc
+#### Intel nuc, my main development machine
 
 ![nuc](https://github.com/ocxtal/minialig/blob/master/pic/nuc.jpg)
 
