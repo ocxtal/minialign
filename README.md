@@ -37,17 +37,16 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 |                 Time (sec.)                  |  minialign  |   DALIGNER  |   BWA-MEM   |
 |:--------------------------------------------:|:-----------:|:-----------:|:-----------:|
 | E.coli (MG1655) x100 simulated read to ref.  |       18.3s |       39.5s |       6272s |
-| E.coli (MG1655) x2000 simulated read to ref. |        477s |           - |         10h |
 | C.serevisiae x100 sim. to ref.               |       84.2s |           - |      10869s |
 | D.melanogaster (dm6) x20 sim. to ref.        |        654s |           - |      31924s |
-| Human (hg39) x20 sim. to ref.                |           - |           - |           - |
+| Human (hg38) x20 sim. to ref.                |           - |           - |           - |
 
-Notes: PBSIM (PacBio long-read simulator) was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except `-t4` and `-T4` respectively, and BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements.
+Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim), not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements.
 
 ### Read-lendth vs. sensitivity trend
 
 
-Notes: Sensitivity is defined as: number of reads whose originating location is correctly identified over total number of reads. Reads are generated from hg39 using PBSIM with the same parameters as the speed benchmark. ALT/random contigs were excluded from reference sequences in read generation and included in mapping.
+Notes: Sensitivity is defined as: number of reads whose originating location is correctly identified over total number of reads. Reads are generated from hg38 using PBSIM with the same parameters as the speed benchmark. ALT/random contigs were excluded from reference sequences in read generation and included in mapping.
 
 ### Speed vs. sensitivity trend
 
@@ -58,7 +57,7 @@ Notes:
 
 ### Minimizer-based index structure
 
-Indexing routines: minimizer calculation, hash table construction, and hash table retrieval are roughly diverted from the original minimap program. The modified is that the position of direction flag in hash table is moved from the least significant bit to the sign bit of int32_t in this code. See descriptions in the minimap [repository](https://github.com/lh3/minimap) and [paper]() for the details of the invertible hash function used to generate minimizers.
+Indexing routines: minimizer calculation, hash table construction, and hash table retrieval are roughly diverted from the original minimap program except that the position of direction flag in hash table is moved from the least significant bit to the sign bit. See descriptions in the minimap [repository](https://github.com/lh3/minimap) and [paper]() for the details of the invertible hash function used to generate minimizers.
 
 ### Seed chaining
 
@@ -77,9 +76,13 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Gallery
 
-* Intel nuc
+#### Fast and accurate
 
-* Fast and accurate
+![hayai](https://github.com/ocxtal/minialig/blob/master/pic/hayai.pdf)
+
+#### Intel nuc
+
+![nuc](https://github.com/ocxtal/minialig/blob/master/pic/nuc.jpg)
 
 ## Copyright and license
 
