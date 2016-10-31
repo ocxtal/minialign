@@ -1101,7 +1101,7 @@ int main(int argc, char *argv[])
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s] occurrence thresholds:", __func__);
 			for (i = 0; i < mi->n_occ; ++i)
-				fprintf(stderr, " %lu", mi->occ[i]);
+				fprintf(stderr, " %u", (uint32_t)mi->occ[i]);
 			fprintf(stderr, "\n");
 		if (fpw) mm_idx_dump(fpw, mi);
 		for (i = optind + 1; i < argc; ++i)
