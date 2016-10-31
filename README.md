@@ -41,7 +41,7 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 | D.melanogaster (dm6) x20 sim. to ref.        |        654s |           - |      31924s |
 | Human (hg38) x20 sim. to ref.                |           - |           - |           - |
 
-Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim), not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements.
+Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim), not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters modified based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements.
 
 ### Read-lendth vs. sensitivity trend
 
@@ -57,7 +57,7 @@ Notes:
 
 ### Minimizer-based index structure
 
-Indexing routines: minimizer calculation, hash table construction, and hash table retrieval are roughly diverted from the original minimap program except that the position of direction flag in hash table is moved from the least significant bit to the sign bit. See descriptions in the minimap [repository](https://github.com/lh3/minimap) and [paper]() for the details of the invertible hash function used to generate minimizers.
+Indexing routines: minimizer calculation, hash table construction, and hash table retrieval are roughly diverted from the original minimap program except that the position of sequence direction flag in hash table is moved from the least significant bit to the int32_t sign bit. See descriptions in the minimap [repository](https://github.com/lh3/minimap) and [paper]() for the details of the invertible hash function used to generate minimizers.
 
 ### Seed chaining
 
