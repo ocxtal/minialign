@@ -36,9 +36,9 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 
 |                      Time (sec.)                     |  minialign  |   DALIGNER  |   BWA-MEM   |
 |:----------------------------------------------------:|:-----------:|:-----------:|:-----------:|
-| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        18.3 |        39.5 |        6272 |
-| S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        47.1 |           - |       10869 |
-| D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |         162 |           - |       31924 |
+| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        16.7 |        39.5 |        6272 |
+| S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        43.0 |           - |       10869 |
+| D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |         139 |           - |       31924 |
 | Human (hg38) x20 sim. (30.1Gb) to ref.               |           - |           - |           - |
 
 Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters modified based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements. Peak RAM usage was around 12GB in human read-to-ref mapping with four threads.
