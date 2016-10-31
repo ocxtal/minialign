@@ -41,13 +41,13 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 | D.melanogaster (dm6) x20 sim. (2.4Gb) to ref.        |        145s |           - |      31924s |
 | Human (hg38) x20 sim. (30.1Gb) to ref.               |           - |           - |           - |
 
-Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim), not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters modified based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements.
+Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim), not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters modified based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements. Peak RAM usage was around 12GB in human read-to-ref mapping.
 
 ### Read-lendth vs. sensitivity trend
 
 ![length-sensitivity plot](https://github.com/ocxtal/minialig/blob/master/pic/len_sens.png)
 
-Notes: Sensitivity is defined as: number of reads whose originating location is correctly identified over total number of reads. Reads are generated from hg38 using PBSIM with the same parameters as the speed benchmark. ALT/random contigs were excluded from reference sequences in read generation and included in mapping. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-m`, set to the half of the mean read length.
+Notes: Sensitivity is defined as: the number of reads whose originating location is correctly identified over the total number of reads. Reads are generated from hg38 using PBSIM with the same parameters as the speed benchmark. ALT/random contigs were excluded from reference sequences in read generation and included in mapping. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-m`, set to the half of the mean read length.
 
 ### Speed vs. sensitivity trend
 
@@ -78,7 +78,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Gallery
 
-#### Fast and accurate
+#### Fast and accurate logo
 
 ![hayai](https://github.com/ocxtal/minialig/blob/master/pic/hayai.pdf)
 
