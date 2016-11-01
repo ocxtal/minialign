@@ -1082,7 +1082,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "  Misc:\n");
 		fprintf(stderr, "    -t INT       number of threads [%d]\n", n_threads);
 		fprintf(stderr, "    -V           show version number\n");
-		fprintf(stderr, "\nSee minialign.1 for detailed description of the command-line options.\n");
+		fprintf(stderr, "\n");
 		return 1;
 	}
 
