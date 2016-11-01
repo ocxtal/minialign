@@ -59,7 +59,7 @@ Notes: k-mer length and window size parameters were altered in the benchmark. De
 
 ### Minimizer-based index structure
 
-Indexing routines: minimizer calculation, hash table construction, and hash table retrieval are roughly diverted from the original minimap program except that the position of sequence direction flag in hash table is moved from the least significant bit to the int32_t sign bit. See descriptions in the minimap [repository](https://github.com/lh3/minimap) and [paper]() for the details of the invertible hash function used to generate minimizers.
+Indexing routines: minimizer calculation, hash table construction, and hash table retrieval are roughly diverted from the original minimap program except that the position of sequence direction flag in hash table is moved from the least significant bit to the int32_t sign bit. See descriptions in the minimap [repository](https://github.com/lh3/minimap) and [paper](http://bioinformatics.oxfordjournals.org/content/32/14/2103) for the details of the invertible hash function used to generate minimizers.
 
 ### Seed chaining
 
