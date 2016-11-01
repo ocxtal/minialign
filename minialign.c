@@ -1081,7 +1081,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -m INT       minimum alignment score [%d]\n", opt.min_score);
 		fprintf(stderr, "  Misc:\n");
 		fprintf(stderr, "    -t INT       number of threads [%d]\n", n_threads);
-		fprintf(stderr, "    -V           show version number\n");
+		fprintf(stderr, "    -v           show version number\n");
 		fprintf(stderr, "\n");
 		return 1;
 	}
