@@ -51,7 +51,6 @@
 #include "gaba.h"
 #include "log.h"
 #include "lmm.h"
-#include "bench.h"
 #include "sassert.h"
 
 /* architecture dependent */
