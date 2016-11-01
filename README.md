@@ -72,7 +72,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Updates
 
-* 2016/11/2 (0.3.0) First release of 0.3 series, with a better chaining algorithm.
+* 2016/11/1 (0.3.0) First release of 0.3 series, with a better chaining algorithm.
 * 2016/10/5 (0.2.1) Last tagged commit of the version 0.2 series.
 * 2016/9/13 (0.2.0) First tagged commit (unstable).
 
