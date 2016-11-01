@@ -12,7 +12,7 @@ $ make && make install	# PREFIX=/usr/local by default
 $ minialign <reference.fa> <reads.fq> > out.sam		# read-to-ref alignment
 ```
 
-Reference sequence index can be stored in separate. Using prebuilt index saves around a minute per run for human (~3G) genome.
+Reference sequence index can be stored in separate. Using prebuilt index saves around a minute per run for a human haploid (~3G) genome.
 
 ```
 $ minialign -d index.mai <reference.fa>	# build index
@@ -39,15 +39,15 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 | E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        16.7 |        39.5 |        6272 |
 | S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        43.0 |           - |       10869 |
 | D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |         139 |           - |       31924 |
-| Human (hg38) x3 sim. (9.2Gb) to ref.                 |        1571 |           - |           - |
+| Human (hg38) x3 sim. (9.2Gb) to ref.                 |        1571 |           - |    untested |
 
-Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters adjusted based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements. Peak RAM usage was around 12GB in human read-to-ref mapping with four threads.
+Notes: Program version information: minialign-0.3.0, DALIGNER-ca167d3 (commit on 2016/9/27), and BWA-MEM-0.7.15-r1142-dirty. PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the thread count flags, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters adjusted based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements. Peak RAM usage of minimap was around 12GB in human read-to-ref mapping with four threads.
 
 ### Read-lendth vs. sensitivity trend
 
 ![length-sensitivity plot](https://github.com/ocxtal/minialig/blob/master/pic/len_sens.png)
 
-Notes: Sensitivity is defined as: the number of reads whose originating location is correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-m`, set to the half of the mean read length.
+Notes: Sensitivity is defined as: the number of reads whose originating locations are correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-M` set to the half of the mean read length.
 
 ### Speed vs. sensitivity trend
 
