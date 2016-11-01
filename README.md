@@ -45,7 +45,7 @@ Notes: Execution time was measured with unix `time` command, shown in seconds. D
 
 ### Read-lendth vs. sensitivity trend
 
-![length-sensitivity plot](https://github.com/ocxtal/minialig/blob/master/fig/len_sens.png)
+![length-sensitivity plot](https://github.com/ocxtal/minialign/blob/master/fig/len_sens.png)
 
 Notes: Sensitivity is defined as: the number of reads whose originating locations are correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-M` set to the half of the mean read length.
 
@@ -80,11 +80,11 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 #### *Fast and Accurate* logo
 
-![metcha hayaiyo](https://github.com/ocxtal/minialig/blob/master/pic/hayai.png)
+![metcha hayaiyo](https://github.com/ocxtal/minialign/blob/master/pic/hayai.png)
 
 #### Intel nuc, my main development machine
 
-![he is also powerful](https://github.com/ocxtal/minialig/blob/master/pic/nuc.png)
+![he is also powerful](https://github.com/ocxtal/minialign/blob/master/pic/nuc.png)
 
 ## Copyright and license
 
