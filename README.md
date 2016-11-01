@@ -49,12 +49,6 @@ Notes: Program version information: minialign-0.3.0, DALIGNER-ca167d3 (commit on
 
 Notes: Sensitivity is defined as: the number of reads whose originating locations are correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-M` set to the half of the mean read length.
 
-### Speed vs. sensitivity trend
-
-![speed-sensitivity plot](https://github.com/ocxtal/minialig/blob/master/fig/spd_sens.png)
-
-Notes: k-mer length and window size parameters were altered in the benchmark. Details of the correspondences between point and parameters were found in scripts directory.
-
 ## Algorithm overview
 
 ### Minimizer-based index structure
