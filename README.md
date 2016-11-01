@@ -90,7 +90,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 #### Intel nuc, my main development machine
 
-![he is also powerful](https://github.com/ocxtal/minialig/blob/master/pic/nuc.jpg)
+![he is also powerful](https://github.com/ocxtal/minialig/blob/master/pic/nuc.png)
 
 ## Copyright and license
 
