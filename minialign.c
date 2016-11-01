@@ -1020,7 +1020,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:lM:m:a:b:p:q:L:H:X:v")) >= 0) {
+	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:m:a:b:p:q:L:H:X:v")) >= 0) {
 		if (ch == 'k') k = atoi(optarg);
 		else if (ch == 'w') w = atoi(optarg);
 		else if (ch == 'f') {
@@ -1037,7 +1037,7 @@ int main(int argc, char *argv[])
 		else if (ch == 'V') mm_verbose = atoi(optarg);
 		else if (ch == 'd') fnw = optarg;
 		else if (ch == 'l') is_idx = 1;
-		else if (ch == 'M') opt.min_len = atoi(optarg);
+		else if (ch == 's') opt.min_len = atoi(optarg);
 		else if (ch == 'm') opt.min_score = atoi(optarg);
 		else if (ch == 'a') opt.m = atoi(optarg);
 		else if (ch == 'b') opt.x = atoi(optarg);
@@ -1079,6 +1079,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -p INT       gap open penalty [%d]\n", opt.gi);
 		fprintf(stderr, "    -q INT       gap extension penalty [%d]\n", opt.ge);
 		fprintf(stderr, "    -m INT       minimum alignment score [%d]\n", opt.min_score);
+		fprintf(stderr, "    -s INT       minimum alignment path length [%d]\n", opt.min_len);
 		fprintf(stderr, "  Misc:\n");
 		fprintf(stderr, "    -t INT       number of threads [%d]\n", n_threads);
 		fprintf(stderr, "    -v           show version number\n");

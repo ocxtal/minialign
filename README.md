@@ -24,7 +24,8 @@ Frequently used options are: scoring parameters, minimum length/score cut-offs, 
 ```
 $ minialign -a1 -b2 -p2 -q1		# match, mismatch, gap-open and gap-extend
 $ minialign -m400	# set minimum score threshold to 400
-$ minialign -r0.8	# set report threshold at 0.8 x highest score for every read
+$ minialign -s1000	# set minimum path length threshold to 1000
+$ minialign -r0.8	# set report threshold at 0.8 of the highest score for every read
 $ minialign -t10	# minialign is now 10x faster!!!
 ```
 
@@ -47,7 +48,7 @@ Notes: Execution time was measured with unix `time` command, shown in seconds. D
 
 ![length-sensitivity plot](https://github.com/ocxtal/minialign/blob/master/fig/len_sens.png)
 
-Notes: Sensitivity is defined as: the number of reads whose originating locations are correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-M` set to the half of the mean read length.
+Notes: Sensitivity is defined as: the number of reads whose originating locations are correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-s` set to the half of the mean read length.
 
 ## Algorithm overview
 
