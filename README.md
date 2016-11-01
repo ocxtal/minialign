@@ -48,7 +48,7 @@ Notes: Execution time was measured with unix `time` command, shown in seconds. D
 
 ![length-sensitivity plot](https://github.com/ocxtal/minialign/blob/master/fig/len_sens.png)
 
-Notes: Sensitivity is defined as: the number of reads whose originating locations are correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-s` set to the half of the mean read length. Note that BWA-MEM performed its sensitivity ~97.6% (around 1% behind minialign) on the 20kb read set.
+Notes: Sensitivity is defined as: the number of reads whose originating locations are correctly identified (including secondary mappings) / the total number of reads. Reads are generated from hg38 without ALT / random contigs using PBSIM with the same parameters as the speed benchmark. Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the minimum mapped region length `-s` set to the half of the mean read length. Note that BWA-MEM performed its sensitivity ~97.6%, which is around 1% behind that of minialign, on the 20kb read set (probably due to its slightly longer minimum exact matching length k = 19 for the default).
 
 ## Algorithm overview
 
