@@ -632,8 +632,8 @@ static void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->ofs_llim = 1500;
 	opt->min_len = 2000;
 	opt->m = 1;
-	opt->x = 1;
-	opt->gi = 1;
+	opt->x = 2;
+	opt->gi = 2;
 	opt->ge = 1;
 	opt->xdrop = 50;
 	opt->min_score = 100;
