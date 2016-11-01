@@ -14,7 +14,7 @@
 #include "ptask.h"
 #include "gaba.h"
 
-#define MM_VERSION "0.3-unstable"
+#define MM_VERSION "0.3.0"
 
 #include "arch/arch.h"
 #define _VECTOR_ALIAS_PREFIX		v16i8
@@ -1068,20 +1068,20 @@ int main(int argc, char *argv[])
 						"\n");
 		fprintf(stderr, "Options:\n");
 		fprintf(stderr, "  Indexing:\n");
-		fprintf(stderr, "    -k INT     k-mer size [%d]\n", k);
-		fprintf(stderr, "    -w INT     minimizer window size [{-k}*2/3]\n");
-		fprintf(stderr, "    -d FILE    dump index to FILE []\n");
-		fprintf(stderr, "    -l FILE    load index from FILE [] (overriding -k, -w, and -f)\n");
+		fprintf(stderr, "    -k INT       k-mer size [%d]\n", k);
+		fprintf(stderr, "    -w INT       minimizer window size [{-k}*2/3]\n");
+		fprintf(stderr, "    -d FILE      dump index to FILE []\n");
+		fprintf(stderr, "    -l FILE      load index from FILE [] (overriding -k, -w, and -f)\n");
 		fprintf(stderr, "  Mapping:\n");
-		fprintf(stderr, "    -f FLOAT   occurrence thresholds [%.3f]\n", 0.001);
-		fprintf(stderr, "    -a INT     match award [%d]\n", opt.m);
-		fprintf(stderr, "    -b INT     mismatch penalty [%d]\n", opt.x);
-		fprintf(stderr, "    -p INT     gap open penalty [%d]\n", opt.gi);
-		fprintf(stderr, "    -q INT     gap extension penalty [%d]\n", opt.ge);
-		fprintf(stderr, "    -m INT     minimum alignment score [%d]\n", opt.min_score);
+		fprintf(stderr, "    -f FLOAT,... occurrence thresholds [0.05,0.01,0.001]\n");
+		fprintf(stderr, "    -a INT       match award [%d]\n", opt.m);
+		fprintf(stderr, "    -b INT       mismatch penalty [%d]\n", opt.x);
+		fprintf(stderr, "    -p INT       gap open penalty [%d]\n", opt.gi);
+		fprintf(stderr, "    -q INT       gap extension penalty [%d]\n", opt.ge);
+		fprintf(stderr, "    -m INT       minimum alignment score [%d]\n", opt.min_score);
 		fprintf(stderr, "  Misc:\n");
-		fprintf(stderr, "    -t INT     number of threads [%d]\n", n_threads);
-		fprintf(stderr, "    -V         show version number\n");
+		fprintf(stderr, "    -t INT       number of threads [%d]\n", n_threads);
+		fprintf(stderr, "    -V           show version number\n");
 		fprintf(stderr, "\nSee minialign.1 for detailed description of the command-line options.\n");
 		return 1;
 	}
