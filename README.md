@@ -39,9 +39,9 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 | E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        16.7 |        39.5 |        6272 |
 | S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        43.0 |           - |       10869 |
 | D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |         139 |           - |       31924 |
-| Human (hg38) x20 sim. (30.1Gb) to ref.               |           - |           - |           - |
+| Human (hg38) x3 sim. (9.2Gb) to ref.                 |        1571 |           - |           - |
 
-Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters modified based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements. Peak RAM usage was around 12GB in human read-to-ref mapping with four threads.
+Notes: PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the multithreading options, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters adjusted based on the presets of `-xpacbio`. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from measurements. Peak RAM usage was around 12GB in human read-to-ref mapping with four threads.
 
 ### Read-lendth vs. sensitivity trend
 
@@ -63,7 +63,7 @@ Indexing routines: minimizer calculation, hash table construction, and hash tabl
 
 ### Seed chaining
 
-Collected seeds (minimizers) were first sorted by its (rpos - 2*qpos) value, resulting in lining up along with 15-degree leaned lines from the diagonal. Then (rpos - qpos/2) values are evaluated from head to tail on the sorted elements, and chained when the current seed is inside a 30-degree-angled parallelogram window at the right-bottom direction of the previous one. Chaining is iteratively performed on remaining seed array and terminated when no seed is left in it. Finally, collected chains are sorted by their rough path lengths: (re - rs + qe - qs).
+Collected seeds (minimizers) were first sorted by its (rpos - 2*qpos) value, resulting in lining up along with 15-degree leaned lines from the diagonal. Then (rpos - qpos/2) values are evaluated from head to tail on the sorted elements, and chained when the current seed is inside a 30-degree-angled parallelogram window at the right-bottom direction of the previous one. Chaining is iteratively performed on the remaining seed array and terminated when no seed is left in it. Finally, collected chains are sorted by their rough path lengths: (re - rs + qe - qs).
 
 ### Smith-Waterman-Gotoh extension
 
@@ -84,14 +84,14 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Gallery
 
-#### Fast and accurate logo
+#### *Fast and Accurate* logo
 
-![hayai](https://github.com/ocxtal/minialig/blob/master/pic/hayai.pdf)
+![metcha hayaiyo](https://github.com/ocxtal/minialig/blob/master/pic/hayai.pdf)
 
 #### Intel nuc, my main development machine
 
-![nuc](https://github.com/ocxtal/minialig/blob/master/pic/nuc.jpg)
+![he is also powerful](https://github.com/ocxtal/minialig/blob/master/pic/nuc.jpg)
 
 ## Copyright and license
 
-The original source codes of the minimap program were developed by Heng Li and licensed under MIT, modified by Hajime Suzuki. The other codes, libgaba and ptask, were added by Hajime Suzuki. The whole repository except for the pictures in the gallery section (content of pic directory) is licensed under MIT, following that of the original repository.
+The original source codes of the minimap program were developed by Heng Li and licensed under MIT, modified by Hajime Suzuki. The other codes, libgaba and ptask, were added by Hajime Suzuki. The whole repository except for the pictures in the gallery section (contents of pic directory) is licensed under MIT, following that of the original repository.
