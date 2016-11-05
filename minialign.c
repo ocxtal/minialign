@@ -1129,3 +1129,5 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "\n[M::%s] Real time: %.3f sec; CPU: %.3f sec\n", __func__, realtime() - mm_realtime0, cputime());
 	return 0;
 }
+
+/* end of main.c */
