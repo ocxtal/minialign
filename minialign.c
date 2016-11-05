@@ -14,6 +14,9 @@
 #include "ptask.h"
 #include "gaba.h"
 
+// #define DEBUG
+#include "log.h"
+
 #define MM_VERSION "0.3.0"
 
 #include "arch/arch.h"
@@ -504,7 +507,7 @@ static mm_idx_t *mm_idx_gen(bseq_file_t *fp, uint32_t w, uint32_t k, uint32_t b,
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
-	pl.mi->occ = calloc(pl.mi->n_occ = n_frq, sizeof(float));
+	pl.mi->occ = calloc(pl.mi->n_occ = n_frq, sizeof(uint64_t));
 	for (i = 0; i < n_frq; ++i) {
 		pl.mi->occ[i] = mm_idx_cal_max_occ(pl.mi, frq[i]);
 	}
@@ -738,30 +741,35 @@ static uint64_t mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *se
 
 static uint64_t mm_chain(mm128_v *coef, uint32_t ofs_llim, uint32_t ofs_hlim, uint32_t min_len, v2u32_v *intv)
 {
-	uint64_t i, j, k, l, cnt = 0;
+	uint64_t i, j, k, n, cnt = 0;
 	const int32_t ofs = 0x40000000;
 	const uint32_t chained = 0x80000000, mask = 0x7fffffff;
 	for (intv->n = i = 0; i < coef->n; i = MIN2(j, k)) {
 		uint32_t rid = coef->a[i].u32[1];
-		int32_t rs = coef->a[i].u32[2], qs = coef->a[i].u32[3], re, qe;
+		int32_t rs = coef->a[i].u32[2], qs = coef->a[i].u32[3], re = rs, qe = qs;
 		int32_t lub = coef->a[i].u32[0] + ofs_llim, hub = rs - (qs<<1) + ofs, hlb = hub - ofs_hlim;
 		uint32_t cnt = 0, len = 0;
-		for (j = i+1, k = UINT64_MAX, l = i; j < coef->n && (int32_t)coef->a[j].u32[0] < lub; j++) {
-			// if ((int32_t)coef->a[j].u32[2] < 0) continue;
+		debug("rs(%d), qs(%d), (%d, %d)", rs, qs, rs - (qs>>1), rs - (qs<<1));
+		for (j = i+1, k = UINT64_MAX, n = i; j < coef->n && (int32_t)coef->a[j].u32[0] < lub; j++) {
+			if ((int32_t)coef->a[j].u32[2] < 0) continue;
 			re = coef->a[j].u32[2] & mask, qe = coef->a[j].u32[3];
-			int32_t h = ofs + re - (qe<<1);
-			if (rid != coef->a[j].u32[1] || (h > hub && h < hlb)) { k = MIN2(j, k); continue; }	// out of range, skip
-			lub = coef->a[j].u32[0] + ofs_llim; hlb = h - ofs_hlim;
-			coef->a[j].u32[2] |= chained; l = j; cnt++;
+			debug("re(%d), qe(%d), (%d, %d)", re, qe, re - (qe>>1), re - (qe<<1));
+			int32_t l = coef->a[j].u32[0], h = ofs + re - (qe<<1);
+			if (rid != coef->a[j].u32[1] || l > lub || h < hlb) { k = MIN2(j, k); continue; }	// out of range, skip
+			lub = l + ofs_llim; hlb = h - ofs_hlim;
+			coef->a[j].u32[2] |= chained; n = j; cnt++;
 		}
-		re = coef->a[l].u32[2] & mask; qe = coef->a[l].u32[3]; qs = _m(qs); qe = _m(qe);
+		debug("r(%d, %d), q(%d, %d), (%d, %d)", rs, re, qs, qe, rs - (qs>>1), rs - (qs<<1));
+		re = coef->a[n].u32[2] & mask; qe = coef->a[n].u32[3]; qs = _m(qs); qe = _m(qe);
 		len = _s(re-rs)*(re-rs)+_s(qe-qs)*(qe-qs);
 		if (len < min_len) continue;
 		cnt++;
 		v2u32_t *p;
 		kv_pushp(v2u32_t, *intv, &p);
 		p->x[0] = (uint32_t)ofs - len; p->x[1] = i;
+		debug("r(%d, %d), q(%d, %d), len(%u)", rs, re, qs, qe, len);
 	}
+	debug("cnt(%lu)", cnt);
 	return(cnt);
 }
 
@@ -1090,7 +1098,7 @@ int main(int argc, char *argv[])
 	if (is_idx) fpr = fopen(argv[optind], "rb");
 	else fp = bseq_open(argv[optind]);
 	if (fnw) fpw = fopen(fnw, "wb");
-	for (;;) {
+	while (fp) {
 		mm_idx_t *mi = 0;
 		if (fpr) mi = mm_idx_load(fpr);
 		else if (!bseq_eof(fp))
