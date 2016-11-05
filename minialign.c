@@ -1098,7 +1098,7 @@ int main(int argc, char *argv[])
 	if (is_idx) fpr = fopen(argv[optind], "rb");
 	else fp = bseq_open(argv[optind]);
 	if (fnw) fpw = fopen(fnw, "wb");
-	while (fp) {
+	while (fpr || fp) {
 		mm_idx_t *mi = 0;
 		if (fpr) mi = mm_idx_load(fpr);
 		else if (!bseq_eof(fp))
@@ -1107,11 +1107,12 @@ int main(int argc, char *argv[])
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %d target sequence(s)\n",
 					__func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->n);
-		if (mm_verbose >= 3)
+		if (mm_verbose >= 3) {
 			fprintf(stderr, "[M::%s] occurrence thresholds:", __func__);
 			for (i = 0; i < mi->n_occ; ++i)
 				fprintf(stderr, " %u", (uint32_t)mi->occ[i]);
 			fprintf(stderr, "\n");
+		}
 		if (fpw) mm_idx_dump(fpw, mi);
 		for (i = optind + 1; i < argc; ++i)
 			mm_align_file(mi, argv[i], &opt, n_threads, tbatch_size);
