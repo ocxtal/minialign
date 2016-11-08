@@ -1,5 +1,6 @@
 #include <unistd.h>
 #include <zlib.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,10 +15,7 @@
 #include "ptask.h"
 #include "gaba.h"
 
-// #define DEBUG
-#include "log.h"
-
-#define MM_VERSION "0.3.0"
+#define MM_VERSION "0.4.0"
 
 #include "arch/arch.h"
 #define _VECTOR_ALIAS_PREFIX		v16i8
@@ -71,8 +69,6 @@ typedef struct {
 	uint32_t w, k, b;
 	uint32_t n;  // number of reference sequences
 	mm_idx_bucket_t *B;
-	uint64_t *occ;
-	uint32_t n_occ;
 	bseq_v s;
 
 	// work
@@ -82,9 +78,12 @@ typedef struct {
 } mm_idx_t;
 
 typedef struct {
-	uint32_t min_len;
-	int32_t m, x, gi, ge, xdrop, min_score, ofs_llim, ofs_hlim;
+	uint64_t batch_size;
+	uint32_t sidx, eidx, n_threads, min, k, w, b;
 	double min_ratio;
+	int32_t m, x, gi, ge, xdrop, ofs_llim, ofs_hlim;
+	uint32_t n_frq;
+	float frq[16];
 } mm_mapopt_t;
 
 /* end of minimap.h */
@@ -103,6 +102,10 @@ KSORT_INIT_GENERIC(uint32_t)
 #define idx_eq(a, b) ((a)>>1 == (b)>>1)
 KHASH_INIT(idx, uint64_t, uint64_t, 1, idx_hash, idx_eq)
 typedef khash_t(idx) idxhash_t;
+#define pos_hash(a)	(a)
+#define pos_eq(a, b)	((a)==(b))
+KHASH_INIT(pos, uint64_t, uint64_t, 1, pos_hash, pos_eq)
+typedef khash_t(pos) poshash_t;
 
 /* misc.c */
 
@@ -141,6 +144,7 @@ static bseq_file_t *bseq_open(const char *fn)
 	if (f == 0) return 0;
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
 	fp->fp = f;
+	gzbuffer(fp->fp, 64*1024);
 	fp->ks = kseq_init(fp->fp);
 	return fp;
 }
@@ -155,38 +159,38 @@ static void bseq_close(bseq_file_t *fp)
 static bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n_, void **base, uint64_t *size)
 {
 	uint32_t i, n = *n_;
-	kseq_t *ks = fp->ks;
-	kvec_t(uint8_t) buf = {0};
+	kvec_t(uint8_t) mem = {0};
 	kvec_t(bseq_t) seq = {0};
 	static const uint8_t margin[64] = {0};
 
-	kv_pushm(uint8_t, buf, margin, 64);
+	kv_pushm(uint8_t, mem, margin, 64);
+	kseq_t *ks = fp->ks;
 	while (kseq_read(ks) >= 0) {
 		bseq_t *s;
 		kv_pushp(bseq_t, seq, &s);
 
-		kv_reserve(uint8_t, buf, buf.n + ks->name.l + ks->seq.l + 2);
+		kv_reserve(uint8_t, mem, mem.n + ks->name.l + ks->seq.l + 2);
 		s->l_seq = ks->seq.l;
 		s->rid = seq.n + n - 1;
-		s->name = (char *)buf.n;
-		kv_pushm(uint8_t, buf, ks->name.s, ks->name.l);
-		kv_push(uint8_t, buf, '\0');
-		s->seq = (uint8_t *)buf.n;
+		s->name = (char *)mem.n;
+		kv_pushm(uint8_t, mem, ks->name.s, ks->name.l);
+		kv_push(uint8_t, mem, '\0');
+		s->seq = (uint8_t *)mem.n;
 		for (i = 0; i < ks->seq.l; ++i)
-			kv_push(uint8_t, buf, seq_nt4_table_4bit[0x1f&ks->seq.s[i]]);
-		kv_push(uint8_t, buf, '\0');
-		if (buf.n >= chunk_size) break;
+			kv_push(uint8_t, mem, seq_nt4_table_4bit[0x1f&ks->seq.s[i]]);
+		kv_push(uint8_t, mem, '\0');
+		if (mem.n >= chunk_size) break;
 	}
-	kv_pushm(uint8_t, buf, margin, 64);
+	kv_pushm(uint8_t, mem, margin, 64);
 
 	for (i = 0; i < seq.n; i++) {
-		seq.a[i].name += (ptrdiff_t)buf.a;
-		seq.a[i].seq += (ptrdiff_t)buf.a;
+		seq.a[i].name += (ptrdiff_t)mem.a;
+		seq.a[i].seq += (ptrdiff_t)mem.a;
 	}
-	if (seq.n == 0) free(buf.a), buf.a = 0, fp->is_eof = 1;
+	if (seq.n == 0) free(mem.a), mem.a = 0, fp->is_eof = 1;
 	*n_ += seq.n;
-	*base = (void*)buf.a;
-	*size = buf.n;
+	*base = (void*)mem.a;
+	*size = mem.n;
 	return seq.a;
 }
 
@@ -471,7 +475,7 @@ static void *mm_idx_post(void *arg, void *item)
 	return 0;
 }
 
-static mm_idx_t *mm_idx_gen(bseq_file_t *fp, uint32_t w, uint32_t k, uint32_t b, float *frq, uint32_t n_frq, uint64_t batch_size, uint32_t n_threads)
+static mm_idx_t *mm_idx_gen(bseq_file_t *fp, uint32_t w, uint32_t k, uint32_t b, uint64_t batch_size, uint32_t n_threads)
 {
 	uint64_t i;
 	mm_idx_pipeline_t pl = {0}, **p;
@@ -506,11 +510,6 @@ static mm_idx_t *mm_idx_gen(bseq_file_t *fp, uint32_t w, uint32_t k, uint32_t b,
 
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
-
-	pl.mi->occ = calloc(pl.mi->n_occ = n_frq, sizeof(uint64_t));
-	for (i = 0; i < n_frq; ++i) {
-		pl.mi->occ[i] = mm_idx_cal_max_occ(pl.mi, frq[i]);
-	}
 	return pl.mi;
 }
 
@@ -520,7 +519,7 @@ static mm_idx_t *mm_idx_build(const char *fn, uint32_t w, uint32_t k, uint32_t b
 	mm_idx_t *mi;
 	fp = bseq_open(fn);
 	if (fp == 0) return 0;
-	mi = mm_idx_gen(fp, w, k, b, frq, n_frq, 1<<18, n_threads);
+	mi = mm_idx_gen(fp, w, k, b, 1<<18, n_threads);
 	bseq_close(fp);
 	return mi;
 }
@@ -529,19 +528,18 @@ static mm_idx_t *mm_idx_build(const char *fn, uint32_t w, uint32_t k, uint32_t b
  * index I/O *
  *************/
 
-#define MM_IDX_MAGIC "MAI\3"		/* minialign index version 3, differs from minimap index signature */
+#define MM_IDX_MAGIC "MAI\4"		/* minialign index version 4, differs from minimap index signature */
 
 static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 {
-	union { uint32_t i; float f; } x[4];
+	uint32_t x[3];
 	uint64_t i, j, size = 0, y[2];
 	for (i = 0; i < mi->size.n; ++i) size += mi->size.a[i];
-	x[0].i = mi->w, x[1].i = mi->k, x[2].i = mi->b, x[3].i = mi->n_occ;
-	y[0] = mi->s.n, y[1] = size;
+	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
 	fwrite(MM_IDX_MAGIC, 1, 4, fp);
-	fwrite(x, 4, 4, fp);
+	fwrite(x, 4, 3, fp);
 	fwrite(y, 8, 2, fp);
-	fwrite(mi->occ, 8, mi->n_occ, fp);
+
 	for (i = 0; i < 1<<mi->b; ++i) {
 		mm_idx_bucket_t *b = &mi->B[i];
 		khint_t k;
@@ -574,19 +572,15 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 static mm_idx_t *mm_idx_load(FILE *fp)
 {
 	char magic[4];
-	union { uint32_t i; float f; } x[4];
+	uint32_t x[3];
 	uint64_t i, bsize, y[2];
 
 	mm_idx_t *mi;
 	if (fread(magic, 1, 4, fp) != 4) return 0;
 	if (strncmp(magic, MM_IDX_MAGIC, 4) != 0) return 0;
-	if (fread(x, 4, 4, fp) != 4) return 0;
+	if (fread(x, 4, 3, fp) != 3) return 0;
 	if (fread(y, 8, 2, fp) != 2) return 0;
-	mi = mm_idx_init(x[0].i, x[1].i, x[2].i);
-	mi->n = mi->s.n = y[0]; bsize = y[1];
-	mi->occ = calloc(mi->n_occ = x[3].i, sizeof(uint64_t));
-	if (fread(mi->occ, 8, mi->n_occ, fp) != mi->n_occ) goto _mm_idx_load_fail;
-
+	mi = mm_idx_init(x[0], x[1], x[2]); mi->n = mi->s.n = y[0]; bsize = y[1];
 	for (i = 0; i < 1<<mi->b; ++i) {
 		mm_idx_bucket_t *b = &mi->B[i];
 		uint32_t j, hsize;
@@ -617,8 +611,7 @@ static mm_idx_t *mm_idx_load(FILE *fp)
 	if (fread(mi->base.a[0], sizeof(char), mi->size.a[0], fp) != mi->size.a[0]) goto _mm_idx_load_fail;
 	mi->s.a = malloc(sizeof(bseq_t) * mi->s.n);
 	if ((i = fread(mi->s.a, sizeof(bseq_t), mi->s.n, fp)) != mi->s.n) goto _mm_idx_load_fail;
-	for (i = 0; i < mi->s.n; ++i)
-		mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
+	for (i = 0; i < mi->s.n; ++i) mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
 	return mi;
 _mm_idx_load_fail:
 	mm_idx_destroy(mi);
@@ -631,16 +624,48 @@ _mm_idx_load_fail:
 
 static void mm_mapopt_init(mm_mapopt_t *opt)
 {
-	opt->ofs_hlim = 1500;
-	opt->ofs_llim = 1500;
-	opt->min_len = 2000;
+	opt->k = 15;
+	opt->w = 16;
+	opt->b = 14;
+	opt->sidx = 0;
+	opt->eidx = 3;
+	opt->ofs_hlim = 5000;
+	opt->ofs_llim = 5000;
 	opt->m = 1;
 	opt->x = 2;
 	opt->gi = 2;
 	opt->ge = 1;
 	opt->xdrop = 50;
-	opt->min_score = 100;
+	opt->min = 200;
 	opt->min_ratio = 0.8;
+	opt->frq[0] = 0.05, opt->frq[1] = 0.01, opt->frq[2] = 0.001;
+	opt->n_frq = 3;
+	opt->n_threads = 1;
+	opt->batch_size = 10000000;
+	return;
+}
+
+static const char *mm_mapopt_check(mm_mapopt_t *opt)
+{
+	uint64_t i;
+	if (opt->w >= 16) return "w must be inside [1,16).";
+	if (opt->k >= 32) return "k must be inside [1,32).";
+	if (opt->sidx >= 16) return "sidx must be inside [0,16).";
+	if (opt->eidx >= 16) return "eidx must be inside [0,16).";
+	if (opt->ofs_hlim < 100 || opt->ofs_hlim >= 100000) return "hlim must be inside [100,100000).";
+	if (opt->ofs_llim < 100 || opt->ofs_llim >= 100000) return "llim must be inside [100,100000).";
+	if (opt->m < 1 || opt->m > 5) return "Match award must be inside [1,5].";
+	if (opt->x < 1 || opt->x > 5) return "Mismatch penalty must be inside [1,5].";
+	if (opt->gi < 1 || opt->gi > 5) return "Gap open penalty must be inside [1,5].";
+	if (opt->ge < 1 || opt->ge > 5) return "Gap extension penalty must be inside [1,5].";
+	if (opt->xdrop < 10 || opt->xdrop > 100) return "Xdrop cutoff must be inside [10,100].";
+	if (opt->min > INT32_MAX) return  "Minimum alignment length must be > 0.";
+	if (opt->min_ratio < 0.0 || opt->min_ratio > 1.0) return  "Minimum alignment length ratio must be inside [0.0,1.0].";
+	if (opt->n_frq >= 16) return "Frequency thresholds must be fewer than 16.";
+	for (i = 0; i < opt->n_frq; ++i) if (opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i])) return "Frequency thresholds must be inside [0.0,1.0] and descending.";
+	if (opt->n_threads < 1) return "Thread counts must be > 0.";
+	if (opt->batch_size > INT64_MAX) return "Batch size must be > 0.";
+	return 0;
 }
 
 /**************************
@@ -648,21 +673,24 @@ static void mm_mapopt_init(mm_mapopt_t *opt)
  **************************/
 
 typedef struct {
-	uint32_t rid;
-	uint32_t flag;
-	int32_t qs, qe, rs, re;
+	int32_t rid;
+	uint32_t score;
+	int32_t rs, re, qs, qe;
 	char *cigar;	// 160907: alignment cigar string
 } reg_t;
 typedef struct { size_t n, m; reg_t *a; } reg_v;
 
 typedef struct {
-	uint64_t batch_size, buf_size;
-	uint32_t n_processed, n_threads;
+	uint64_t buf_size;
+	uint32_t n_processed;
 	const mm_mapopt_t *opt;
+	uint64_t *occ;
+	uint32_t n_occ;
 	bseq_file_t *fp;
 	const mm_idx_t *mi;
 	gaba_t *gaba;
 	char *base, *tail, *p;
+	v2u32_v sort;
 } mm_align_pipeline_t;
 
 typedef struct {
@@ -677,10 +705,12 @@ typedef struct {
 
 typedef struct { // per-thread buffer
 	const mm_align_pipeline_t *p;
+	gaba_section_t qf, qr, t;
 	mm128_v mini; // query minimizers
 	mm128_v resc;
 	mm128_v coef; // Hough transform coefficient
 	v2u32_v intv; // intervals on sorted coef
+	poshash_t *pos;
 	gaba_dp_t *dp;	// alignment work
 } tbuf_t;
 
@@ -688,7 +718,7 @@ static tbuf_t *mm_tbuf_init(const mm_align_pipeline_t *pl)
 {
 	tbuf_t *b = (tbuf_t*)calloc(1, sizeof(tbuf_t));
 	const uint8_t *lim = (const uint8_t *)0x800000000000;
-	b->p = pl; b->dp = gaba_dp_init(pl->gaba, lim, lim);
+	b->p = pl; b->pos = kh_init(pos); b->dp = gaba_dp_init(pl->gaba, lim, lim);
 	return b;
 }
 
@@ -696,7 +726,7 @@ static void mm_tbuf_destroy(tbuf_t *b)
 {
 	if (b == 0) return;
 	free(b->mini.a); free(b->coef.a); free(b->intv.a);
-	gaba_dp_clean(b->dp);
+	kh_destroy(pos, b->pos); gaba_dp_clean(b->dp);
 	free(b);
 }
 
@@ -716,11 +746,11 @@ static void mm_expand(const v2u32_t *r, uint32_t n, int32_t qs, mm128_v *coef)
 	return;
 }
 
-static uint64_t mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t w, uint32_t k, uint32_t max_occ, uint32_t resc_occ, mm128_v *mini, mm128_v *coef, mm128_v *resc)
+static uint64_t mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t max_occ, uint32_t resc_occ, mm128_v *mini, mm128_v *coef, mm128_v *resc)
 {
 	uint64_t i, n, cnt = 0;
 	mini->n = coef->n = 0;
-	mm_sketch(seq, l_seq, w, k, 0, mini);
+	mm_sketch(seq, l_seq, mi->w, mi->k, 0, mini);
 
 	for (i = 0; i < mini->n; ++i) {
 		const v2u32_t *r;
@@ -739,53 +769,50 @@ static uint64_t mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *se
 	return(cnt);
 }
 
-static uint64_t mm_chain(mm128_v *coef, uint32_t ofs_llim, uint32_t ofs_hlim, uint32_t min_len, v2u32_v *intv)
+static void mm_chain(mm128_v *coef, uint32_t ofs_llim, uint32_t ofs_hlim, uint32_t min, v2u32_v *intv)
 {
-	uint64_t i, j, k, n, cnt = 0;
+	uint64_t i, j, k, n;
 	const int32_t ofs = 0x40000000;
 	const uint32_t chained = 0x80000000, mask = 0x7fffffff;
 	for (intv->n = i = 0; i < coef->n; i = MIN2(j, k)) {
 		uint32_t rid = coef->a[i].u32[1];
 		int32_t rs = coef->a[i].u32[2], qs = coef->a[i].u32[3], re = rs, qe = qs;
-		int32_t lub = coef->a[i].u32[0] + ofs_llim, hub = rs - (qs<<1) + ofs, hlb = hub - ofs_hlim;
-		uint32_t cnt = 0, len = 0;
-		debug("rs(%d), qs(%d), (%d, %d)", rs, qs, rs - (qs>>1), rs - (qs<<1));
-		for (j = i+1, k = UINT64_MAX, n = i; j < coef->n && (int32_t)coef->a[j].u32[0] < lub; j++) {
+		int32_t l, h, lub = coef->a[i].u32[0] + ofs_llim, hub = rs - (qs<<1) + ofs, hlb = hub - ofs_hlim;
+		uint32_t len = 0;
+		for (j = i+1, k = UINT64_MAX, n = i; j < coef->n && (l = (int32_t)coef->a[j].u32[0]) < lub; j++) {
 			if ((int32_t)coef->a[j].u32[2] < 0) continue;
 			re = coef->a[j].u32[2] & mask, qe = coef->a[j].u32[3];
-			debug("re(%d), qe(%d), (%d, %d)", re, qe, re - (qe>>1), re - (qe<<1));
-			int32_t l = coef->a[j].u32[0], h = ofs + re - (qe<<1);
-			if (rid != coef->a[j].u32[1] || l > lub || h < hlb) { k = MIN2(j, k); continue; }	// out of range, skip
-			lub = l + ofs_llim; hlb = h - ofs_hlim;
-			coef->a[j].u32[2] |= chained; n = j; cnt++;
+			if (rid != coef->a[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }	// out of range, skip
+			lub = l + ofs_llim; hub = h; hlb = h - ofs_hlim;
+			coef->a[j].u32[2] |= chained; n = j;
 		}
-		debug("r(%d, %d), q(%d, %d), (%d, %d)", rs, re, qs, qe, rs - (qs>>1), rs - (qs<<1));
 		re = coef->a[n].u32[2] & mask; qe = coef->a[n].u32[3]; qs = _m(qs); qe = _m(qe);
 		len = _s(re-rs)*(re-rs)+_s(qe-qs)*(qe-qs);
-		if (len < min_len) continue;
-		cnt++;
+		if (len < min) continue;
 		v2u32_t *p;
 		kv_pushp(v2u32_t, *intv, &p);
 		p->x[0] = (uint32_t)ofs - len; p->x[1] = i;
-		debug("r(%d, %d), q(%d, %d), len(%u)", rs, re, qs, qe, len);
 	}
-	debug("cnt(%lu)", cnt);
-	return(cnt);
+	return;
 }
 
-static gaba_alignment_t *mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint32_t k, uint32_t min_score, uint32_t min_len, gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t)
+static uint32_t mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint32_t k, uint32_t min, uint32_t sidx, uint32_t eidx, gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, poshash_t *pos, reg_v *reg)
 {
 	uint64_t i, j;
+	khint_t itr;
+	int absent;
+	reg_t *s;
 	const uint32_t mask = 0x7fffffff;
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
 	gaba_section_t rf, rr, *qu, *qd, *r, *q;
+	gaba_pos_pair_t p;
 	rf.id = 2; rf.len = ref->l_seq; rf.base = (const uint8_t*)ref->seq;
 	rr.id = 3; rr.len = ref->l_seq; rr.base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim);
-
 	gaba_dp_flush(dp, lim, lim);
 	gaba_alignment_t *a[3] = {0};
-	for (i = 1, j = 0; i < 3 && i < n; ++i) {
+	for (i = sidx, j = 0; i < eidx && i < n; ++i) {
 		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) continue;	// skip head
+		const gaba_stack_t *stack = gaba_dp_save_stack(dp);
 		int32_t rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
 		uint64_t rev = qs<0; qu = rev? qf : qr; qd = rev? qr : qf;
 		qs = _m(qs); qs = rev? qf->len-qs+k-1 : qs;
@@ -799,8 +826,11 @@ static gaba_alignment_t *mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint3
 			m = (f->max > m->max)? f : m;
 		} while(!(mask & f->status));
 		// find max
-		gaba_pos_pair_t p = gaba_dp_search_max(dp, m);
+		p = gaba_dp_search_max(dp, m);
+		// check duplicate
+		if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) != kh_end(pos) && (uint32_t)kh_val(pos, itr) == p.bpos) continue;
 		// downward extension from max
+		gaba_dp_flush_stack(dp, stack);
 		m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1);
 		mask = GABA_STATUS_TERM;
 		do {
@@ -811,34 +841,36 @@ static gaba_alignment_t *mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint3
 		} while(!(mask & f->status));
 		// convert alignment to cigar
 		a[j++] = gaba_dp_trace(dp, NULL, m, NULL);
-		if (a[j-1]->score < min_score || gaba_plen(a[j-1]->sec) < min_len) continue;
+		if (a[j-1]->score < min) continue;
 		break;
 	}
 	if (j == 0) return 0;
 	// collect longest
 	for (i = 1; i < j; ++i) if (a[0]->score < a[i]->score) a[0] = a[i];
-	return(a[0]);
+	if (a[0]->score < min) return 0;
+	// record pos and cigar
+	if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) == kh_end(pos)) {
+		itr = kh_put(pos, pos, (((uint64_t)ref->rid<<32) | p.apos), &absent);
+		kh_val(pos, itr) = (reg->n<<32) | p.bpos;
+		kv_pushp(reg_t, *reg, &s);
+	} else {
+		s = &reg->a[kh_val(pos, itr)>>32];
+		if (s->score >= a[0]->score) return 0;
+		kh_val(pos, itr) &= 0xffffffff00000000; kh_val(pos, itr) |= p.bpos;		// replace qpos
+		free(s->cigar);	// replace cigar
+	}
+	s->rid = ((a[0]->sec->bid&0x01)? 0 : 0xffffffff) ^ ref->rid; s->score = a[0]->score;
+	s->rs = ref->l_seq-a[0]->sec->apos-a[0]->sec->alen; s->re = ref->l_seq-a[0]->sec->apos;
+	s->qs = qf->len-a[0]->sec->bpos-a[0]->sec->blen; s->qe = qf->len-a[0]->sec->bpos;
+	s->cigar = (char *)calloc(a[0]->path->len < 512 ? 1024 : 2*a[0]->path->len, 1);
+	gaba_dp_dump_cigar_reverse(s->cigar, 2*a[0]->path->len, a[0]->path->array, 0, a[0]->path->len);
+	return a[0]->score;
 }
 
-static void mm_record(bseq_t *ref, uint32_t l_seq, gaba_alignment_t *a, reg_v *reg)
-{
-	char *cig;
-	reg_t *r;
-	kv_pushp(reg_t, *reg, &r);
-	r->rid = ref->rid; r->flag = ((a->sec->bid&0x01)? 0 : 0x10) | (reg->n==1? 0 : 0x100);
-	r->rs = ref->l_seq-a->sec->apos-a->sec->alen; r->re = ref->l_seq-a->sec->apos;
-	r->qs = l_seq-a->sec->bpos-a->sec->blen; r->qe = l_seq-a->sec->bpos;
-	r->cigar = cig = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
-	if (r->qs) cig += sprintf(cig, "%d%c", r->qs, (reg->n==1)? 'S' : 'H');
-	cig += gaba_dp_dump_cigar_reverse(cig, 2*a->path->len, a->path->array, 0, a->path->len);
-	if (l_seq-r->qe) cig += sprintf(cig, "%d%c", l_seq-r->qe, (reg->n==1)? 'S' : 'H');
-	return;
-}
-
-static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, const mm_mapopt_t *opt, uint64_t *n_reg)
+static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t n_occ, uint64_t *occ, const mm_mapopt_t *opt, uint64_t *n_reg)
 {
 	uint64_t i, j, k;
-	int32_t min_score = opt->min_score;
+	int32_t len, min = opt->min;
 	const int32_t ofs = 0x40000000;
 	const uint32_t mask = 0x7fffffff;
 	reg_v reg = {0};
@@ -850,27 +882,26 @@ static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint
 	qf.id = 0; qf.len = l_seq; qf.base = (const uint8_t*)seq;
 	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev((const uint8_t*)seq+l_seq-1, lim);
 	t.id = 4; t.len = 32; t.base = tail+32;
-	b->mini.n = b->coef.n = b->resc.n = b->intv.n = 0;
-	for (i = j = 0; reg.n == 0 && i < mi->n_occ; ++i) {
+	b->mini.n = b->coef.n = b->resc.n = b->intv.n = 0; kh_clear(pos, b->pos);
+	for (i = j = 0; reg.n == 0 && i < n_occ; ++i) {
 		if (i == 0) {
-			mm_collect(mi, l_seq, seq, mi->w, mi->k, mi->occ[mi->n_occ-1], mi->occ[0], &b->mini, &b->coef, &b->resc);
+			mm_collect(mi, l_seq, seq, occ[n_occ-1], occ[0], &b->mini, &b->coef, &b->resc);
 		} else {
 			if (i == 1) radix_sort_128x(b->resc.a, b->resc.a + b->resc.n);
 			for (k = 0; k < b->coef.n; ++k) b->coef.a[k].u32[2] &= mask;
-			for (; j < b->resc.n && b->resc.a[j].u32[1] <= mi->occ[i]; ++j)
+			for (; j < b->resc.n && b->resc.a[j].u32[1] <= occ[i]; ++j)
 				mm_expand((const v2u32_t*)b->resc.a[j].u64[1], b->resc.a[j].u32[1], b->resc.a[j].u32[0], &b->coef);
 		}
 		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
-		mm_chain(&b->coef, opt->ofs_llim, opt->ofs_hlim, opt->min_len, &b->intv);
+		mm_chain(&b->coef, opt->ofs_llim, opt->ofs_hlim, min>>2, &b->intv);
 		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
-		if (b->intv.a == 0 || b->intv.a[0].x[0] > ofs - opt->min_len) continue;
-		for (k = 0; k < b->intv.n && b->intv.a[k].x[0] < ofs - opt->min_len; ++k) {
+		if (b->intv.a == 0) continue;
+		for (k = 0; k < b->intv.n && b->intv.a[k].x[0] < ofs - (min>>2); ++k) {
 			mm128_t *c = &b->coef.a[b->intv.a[k].x[1]];
 			bseq_t *ref = &mi->s.a[c->u32[1]];
-			gaba_alignment_t *a = mm_extend(ref, c, b->coef.n-b->intv.a[k].x[1], mi->k, opt->min_score, opt->min_len, b->dp, &qf, &qr, &t);
-			if (a == 0 || a->score < min_score) continue;
-			min_score = MAX2(min_score, opt->min_ratio*a->score);
-			mm_record(ref, l_seq, a, &reg);
+			len = mm_extend(ref, c, b->coef.n-b->intv.a[k].x[1], mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &t, b->pos, &reg);
+			if (len == 0) continue;
+			min = MAX2(min, opt->min_ratio*len);
 		}
 	}
 	*n_reg = reg.n;
@@ -879,12 +910,35 @@ static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint
 #undef _s
 #undef _m
 
+static void mm_est_mapq(uint32_t n_reg, const reg_t *reg, v2u32_t *map, uint32_t m, uint32_t x)
+{
+	#define _len(x)		( (x)->re+(x)->qe-(x)->rs-(x)->qs )
+	#define _clip(x)	MAX2(0, MIN2(((uint32_t)(x)), 60))
+
+	uint64_t i;
+	const reg_t *preg = &reg[map[0].x[1]], *sreg = (n_reg>1)? &reg[map[1].x[1]] : NULL, *breg = (n_reg>1)? &reg[map[n_reg-1].x[1]] : NULL;
+	uint32_t ssc = (n_reg>1)? sreg->score : 0, bsc = (n_reg>1)? breg->score : 0, tsc = 0;
+	double elen = (double)_len(preg) / 2.0, pid = 1.0 - (double)(elen * m - preg->score) / (double)(m + x) / elen;
+	double ec = 2.0 / (pid * (double)(m + x) - (double)x), ulen = ec * (preg->score - ssc), pe = 1.0 / (ulen * ulen + (double)n_reg);
+
+	for (i = 0; i < n_reg; ++i) {
+		const reg_t *r = &reg[i];
+		if (r != preg) tsc += r->score - bsc + 1;
+	}
+	map[0].x[0] = _clip(-10.0 * log10(pe));
+	for (i = 1; i < n_reg; ++i) {
+		const reg_t *r = &reg[map[i].x[1]];
+		map[i].x[0] = _clip(-10.0 * log10(1.0 - pe * (double)(r->score - bsc + 1) / (double)tsc));
+	}
+	return;
+}
+
 static void *mm_align_source(void *arg)
 {
 	mm_align_pipeline_t *p = (mm_align_pipeline_t*)arg;
 	mm_align_step_t *s = (mm_align_step_t*)calloc(1, sizeof(mm_align_step_t));
 	uint64_t base_n_seq = p->n_processed;
-	s->seq = bseq_read(p->fp, p->batch_size, &p->n_processed, &s->base, &s->size);
+	s->seq = bseq_read(p->fp, p->opt->batch_size, &p->n_processed, &s->base, &s->size);
 	s->n_seq = p->n_processed - base_n_seq;
 	if (s->seq == 0) free(s), s = 0;
 	return s;
@@ -898,7 +952,7 @@ static void *mm_align_worker(void *arg, void *item)
 	for (i = 0; i < s->n_seq; ++i) {
 		mm128_t *r;
 		kv_pushp(mm128_t, s->reg, &r);
-		r->u64[0] = (uintptr_t)mm_align(t, t->p->mi, s->seq[i].l_seq, s->seq[i].seq, t->p->opt, &r->u64[1]);
+		r->u64[0] = (uintptr_t)mm_align(t, t->p->mi, s->seq[i].l_seq, s->seq[i].seq, t->p->n_occ, t->p->occ, t->p->opt, &r->u64[1]);
 	}
 	return s;
 }
@@ -926,6 +980,7 @@ static void mm_align_drain(void *arg, void *item)
 
 	for (i = 0; i < s->n_seq; ++i) {
 		reg_t *r = (reg_t*)s->reg.a[i].u64[0];
+		uint32_t n_reg = s->reg.a[i].u64[1];
 		bseq_t *t = &s->seq[i];
 		char *q;
 		if (r == 0) {
@@ -936,66 +991,87 @@ static void mm_align_drain(void *arg, void *item)
 			for (k = 0; k < strlen(c2); k++) _put(p, c2[k]);
 			continue;
 		}
-		for (j = 0; j < s->reg.a[i].u64[1]; ++j) {
-			const char *c1 = "\t255\t", *c2 = "\t*\t0\t0\t", *c3 = "\t*\tRG:Z:1\n";
-			int qs = j==0? 0 : r[j].qs, qe = j==0? t->l_seq : r[j].qe;
-			for (q = t->name; *q; q++) _put(p, *q);
-			_put(p, '\t'); _putn(p, r[j].flag); _put(p, '\t');
-			for (q = p->mi->s.a[r[j].rid].name; *q; q++) _put(p, *q);
-			_put(p, '\t'); _putn(p, r[j].rs+1); 
-			for (k = 0; k < strlen(c1); k++) _put(p, c1[k]);
-			for (q = r[j].cigar; *q; q++) _put(p, *q);
-			for (k = 0; k < strlen(c2); k++) _put(p, c2[k]);
-			if (r[j].flag&0x10) { for (k = qe-1; k >= qs; k--) _put(p, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k]]); }
-			else { for (k = qs; k < qe; k++) _put(p, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
-			for (k = 0; k < strlen(c3); k++) _put(p, c3[k]);
-			free(r[j].cigar);
+		p->sort.n = 0;
+		for (j = 0; j < n_reg; ++j) {
+			v2u32_t *s;
+			kv_pushp(v2u32_t, p->sort, &s);
+			s->x[0] = -r[j].score; s->x[1] = j;
 		}
+		radix_sort_64x(p->sort.a, p->sort.a + p->sort.n);
+		mm_est_mapq(n_reg, r, p->sort.a, p->opt->m, p->opt->x);
+
+		for (j = 0; j < n_reg && r[p->sort.a[j].x[1]].score > p->opt->min_ratio*r[p->sort.a[0].x[1]].score; ++j) {
+			const char *c1 = "\t*\t0\t0\t", *c2 = "\t*\tRG:Z:1\n";
+			int qs = j==0? 0 : r[p->sort.a[j].x[1]].qs, qe = j==0? t->l_seq : r[p->sort.a[j].x[1]].qe;
+			for (q = t->name; *q; q++) _put(p, *q);
+			_put(p, '\t'); _putn(p, (r[p->sort.a[j].x[1]].rid<0?16:0) | (j==0?0:256)); _put(p, '\t');
+			for (q = p->mi->s.a[(r[p->sort.a[j].x[1]].rid>>31) ^ r[p->sort.a[j].x[1]].rid].name; *q; q++) _put(p, *q);
+			_put(p, '\t'); _putn(p, r[p->sort.a[j].x[1]].rs+1);
+			_put(p, '\t'); _putn(p, p->sort.a[j].x[0]); _put(p, '\t');
+			if (r[p->sort.a[j].x[1]].qs) { _putn(p, r[p->sort.a[j].x[1]].qs); _put(p, j==0? 'S' : 'H'); }
+			for (q = r[p->sort.a[j].x[1]].cigar; *q; q++) _put(p, *q);
+			if (t->l_seq-r[p->sort.a[j].x[1]].qe) { _putn(p, t->l_seq-r[p->sort.a[j].x[1]].qe); _put(p, j==0? 'S' : 'H'); }
+			for (k = 0; k < strlen(c1); k++) _put(p, c1[k]);
+			if (r[p->sort.a[j].x[1]].rid < 0) { for (k = qe-1; k >= qs; k--) _put(p, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k]]); }
+			else { for (k = qs; k < qe; k++) _put(p, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
+			for (k = 0; k < strlen(c2); k++) _put(p, c2[k]);
+			free(r[p->sort.a[j].x[1]].cigar);
+		}
+		for (; j < n_reg; ++j) free(r[p->sort.a[j].x[1]].cigar);
 		free(r);
 	}
 	free(s->reg.a); free(s->base); free(s->seq); free(s);
 	return;
 }
 
-static int mm_align_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt, uint32_t n_threads, uint32_t tbatch_size)
+static void mm_print_header(const mm_idx_t *idx)
 {
 	uint32_t i;
-	mm_align_pipeline_t pl = {0};
-	tbuf_t **t;
-	n_threads += (n_threads == 0);
-	pl.fp = bseq_open(fn);
-	if (pl.fp == 0) return -1;
-
-	// initialize alignment context
-	pl.opt = opt, pl.mi = idx;
-	pl.n_threads = n_threads, pl.batch_size = tbatch_size;
-	int m = opt->m, x = -opt->x, gi = opt->gi, ge = opt->ge;
-	struct gaba_score_s sc = {{{m,x,x,x},{x,m,x,x},{x,x,m,x},{x,x,x,m}},gi,ge,gi,ge};
-	struct gaba_params_s p = {0,0,0,opt->xdrop,&sc};
-	pl.gaba = gaba_init(&p);
-	pl.buf_size = 512 * 1024;
-	pl.base = pl.p = malloc(sizeof(char) * pl.buf_size);
-	pl.tail = pl.base + pl.buf_size;
-
-	// print sam header
 	printf("@HD\tVN:1.0\tSO:unsorted\n");
 	for (i = 0; i < idx->n; ++i) printf("@SQ\tSN:%s\tLN:%d\n", idx->s.a[i].name, idx->s.a[i].l_seq);
 	printf("@RG\tID:1\n");
 	printf("@PG\tID:6\tPN:minialign\n");
+	return;
+}
 
-	t = (tbuf_t**)calloc(n_threads, sizeof(tbuf_t*));
-	for (i = 0; i < n_threads; ++i) t[i] = mm_tbuf_init(&pl);
-	ptask_t *pt = ptask_init(mm_align_worker, (void**)t, n_threads, 1024);
-	ptask_stream(pt, mm_align_source, &pl, mm_align_drain, &pl, 1024/n_threads);
+static int mm_align_file(const mm_idx_t *idx, const char *fn, const mm_mapopt_t *opt)
+{
+	uint32_t i;
+	mm_align_pipeline_t pl = {0};
+	tbuf_t **t;
+	pl.fp = bseq_open(fn);
+	if (pl.fp == 0) return -1;
+	pl.opt = opt, pl.mi = idx;
+
+	// calc occ
+	pl.occ = calloc(pl.opt->n_frq, sizeof(uint64_t));
+	pl.n_occ = pl.opt->n_frq;
+	for (i = 0; i < pl.n_occ; ++i) pl.occ[i] = mm_idx_cal_max_occ(idx, pl.opt->frq[i]);
+
+	// init output buf
+	pl.buf_size = 512 * 1024;
+	pl.base = pl.p = malloc(sizeof(char) * pl.buf_size);
+	pl.tail = pl.base + pl.buf_size;
+
+	// initialize alignment context
+	int m = opt->m, x = -opt->x, gi = opt->gi, ge = opt->ge;
+	struct gaba_score_s sc = {{{m,x,x,x},{x,m,x,x},{x,x,m,x},{x,x,x,m}},gi,ge,gi,ge};
+	struct gaba_params_s p = {0,0,0,opt->xdrop,&sc};
+	pl.gaba = gaba_init(&p);
+
+	t = (tbuf_t**)calloc(pl.opt->n_threads, sizeof(tbuf_t*));
+	for (i = 0; i < pl.opt->n_threads; ++i) t[i] = mm_tbuf_init(&pl);
+	ptask_t *pt = ptask_init(mm_align_worker, (void**)t, pl.opt->n_threads, 1024);
+	ptask_stream(pt, mm_align_source, &pl, mm_align_drain, &pl, 1024/pl.opt->n_threads);
 	ptask_clean(pt);
-	for (i = 0; i < n_threads; ++i) mm_tbuf_destroy(t[i]);
+	for (i = 0; i < pl.opt->n_threads; ++i) mm_tbuf_destroy(t[i]);
 	free(t);
 
 	fwrite(pl.base, sizeof(char), pl.p - pl.base, stdout);
 
 	bseq_close(pl.fp);
 	gaba_clean(pl.gaba);
-	free(pl.base);
+	free(pl.base); free(pl.occ);
 	return 0;
 }
 
@@ -1013,13 +1089,11 @@ static void liftrlimit()
 #endif
 }
 
-
 int main(int argc, char *argv[])
 {
+	int i, ch, is_idx = 0;
 	mm_mapopt_t opt;
-	int i, ch, k = 15, w = -1, b = 14, n_frq = 3, n_threads = 1, is_idx = 0;
-	int tbatch_size = 10000000;
-	float frq[32] = {0.05, 0.01, 0.001, 0};
+	const char *err;
 	bseq_file_t *fp = 0;
 	char *fnw = 0;
 	FILE *fpr = 0, *fpw = 0;
@@ -1028,35 +1102,37 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:m:a:b:p:q:L:H:X:v")) >= 0) {
-		if (ch == 'k') k = atoi(optarg);
-		else if (ch == 'w') w = atoi(optarg);
+	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:m:a:b:p:q:L:H:S:E:X:v")) >= 0) {
+		if (ch == 'k') opt.k = atoi(optarg);
+		else if (ch == 'w') opt.w = atoi(optarg);
 		else if (ch == 'f') {
-			const char *p = optarg; n_frq = 0;
+			const char *p = optarg; opt.n_frq = 0;
 			while (*p) {
-				frq[n_frq++] = atof(p);
+				opt.frq[opt.n_frq++] = atof(p);
 				while (*p && *p != ',') p++;
-				if (!*p) break;
+				if (!*p || opt.n_frq >= 16) break;
 				p++;
 			}
 		}
-		else if (ch == 'B') b = atoi(optarg);
-		else if (ch == 't') n_threads = atoi(optarg);
+		else if (ch == 'B') opt.b = atoi(optarg);
+		else if (ch == 't') opt.n_threads = atoi(optarg);
 		else if (ch == 'V') mm_verbose = atoi(optarg);
 		else if (ch == 'd') fnw = optarg;
 		else if (ch == 'l') is_idx = 1;
-		else if (ch == 's') opt.min_len = atoi(optarg);
-		else if (ch == 'm') opt.min_score = atoi(optarg);
+		else if (ch == 's') opt.min = atoi(optarg);
+		else if (ch == 'm') opt.min_ratio = atof(optarg);
 		else if (ch == 'a') opt.m = atoi(optarg);
 		else if (ch == 'b') opt.x = atoi(optarg);
 		else if (ch == 'p') opt.gi = atoi(optarg);
 		else if (ch == 'q') opt.ge = atoi(optarg);
 		else if (ch == 'L') opt.ofs_llim = atoi(optarg);
 		else if (ch == 'H') opt.ofs_hlim = atoi(optarg);
+		else if (ch == 'S') opt.sidx = atoi(optarg);
+		else if (ch == 'E') opt.eidx = atoi(optarg);
 		else if (ch == 'X') opt.xdrop = atoi(optarg);
 		else if (ch == 'v') { puts(MM_VERSION); return 0; }
 	}
-	if (w < 0) w = (int)(.6666667 * k + .499);
+	if (opt.w >= 16) opt.w = (int)(.6666667 * opt.k + .499);
 
 	if (argc == optind) {
 		fprintf(stderr, "\n"
@@ -1076,7 +1152,7 @@ int main(int argc, char *argv[])
 						"\n");
 		fprintf(stderr, "Options:\n");
 		fprintf(stderr, "  Indexing:\n");
-		fprintf(stderr, "    -k INT       k-mer size [%d]\n", k);
+		fprintf(stderr, "    -k INT       k-mer size [%d]\n", opt.k);
 		fprintf(stderr, "    -w INT       minimizer window size [{-k}*2/3]\n");
 		fprintf(stderr, "    -d FILE      dump index to FILE []\n");
 		fprintf(stderr, "    -l FILE      load index from FILE [] (overriding -k, -w, and -f)\n");
@@ -1086,13 +1162,18 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -b INT       mismatch penalty [%d]\n", opt.x);
 		fprintf(stderr, "    -p INT       gap open penalty [%d]\n", opt.gi);
 		fprintf(stderr, "    -q INT       gap extension penalty [%d]\n", opt.ge);
-		fprintf(stderr, "    -m INT       minimum alignment score [%d]\n", opt.min_score);
-		fprintf(stderr, "    -s INT       minimum alignment path length [%d]\n", opt.min_len);
+		fprintf(stderr, "    -s INT       minimum alignment path length [%d]\n", opt.min);
+		fprintf(stderr, "    -m INT       minimum alignment path length ratio [%f]\n", opt.min_ratio);
 		fprintf(stderr, "  Misc:\n");
-		fprintf(stderr, "    -t INT       number of threads [%d]\n", n_threads);
+		fprintf(stderr, "    -t INT       number of threads [%d]\n", opt.n_threads);
 		fprintf(stderr, "    -v           show version number\n");
 		fprintf(stderr, "\n");
 		return 1;
+	}
+
+	if ((err = mm_mapopt_check(&opt))) {
+		fprintf(stderr, "[M::%s::] ERROR: %s\n", __func__, err);
+		return -1;
 	}
 
 	if (is_idx) fpr = fopen(argv[optind], "rb");
@@ -1102,20 +1183,15 @@ int main(int argc, char *argv[])
 		mm_idx_t *mi = 0;
 		if (fpr) mi = mm_idx_load(fpr);
 		else if (!bseq_eof(fp))
-			mi = mm_idx_gen(fp, w, k, b, frq, n_frq, tbatch_size, n_threads);
+			mi = mm_idx_gen(fp, opt.w, opt.k, opt.b, opt.batch_size, opt.n_threads);
 		if (mi == 0) break;
 		if (mm_verbose >= 3)
 			fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %d target sequence(s)\n",
 					__func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->n);
-		if (mm_verbose >= 3) {
-			fprintf(stderr, "[M::%s] occurrence thresholds:", __func__);
-			for (i = 0; i < mi->n_occ; ++i)
-				fprintf(stderr, " %u", (uint32_t)mi->occ[i]);
-			fprintf(stderr, "\n");
-		}
 		if (fpw) mm_idx_dump(fpw, mi);
+		if (argc - optind > 1) mm_print_header(mi);
 		for (i = optind + 1; i < argc; ++i)
-			mm_align_file(mi, argv[i], &opt, n_threads, tbatch_size);
+			mm_align_file(mi, argv[i], &opt);
 		mm_idx_destroy(mi);
 	}
 	if (fpw) fclose(fpw);
