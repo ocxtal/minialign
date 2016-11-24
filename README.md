@@ -72,6 +72,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Updates
 
+* 2016/11/24 (0.3.3) Fix bugs in index load / dump functions.
 * 2016/11/24 (0.3.2) Fix bugs in the chaining routine, make minimum score threshold option deprecated.
 * 2016/11/1 (0.3.1) Changed minimum path length threshold option from '-M' to '-s'.
 * 2016/11/1 (0.3.0) First release of 0.3 series, with a better chaining algorithm.
