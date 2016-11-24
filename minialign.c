@@ -14,9 +14,6 @@
 #include "ptask.h"
 #include "gaba.h"
 
-#define DEBUG
-#include "log.h"
-
 #define MM_VERSION "0.3.2"
 
 #include "arch/arch.h"
@@ -536,7 +533,6 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 	uint64_t x[3];
 	uint64_t i, j, size = 0, y[2];
 	for (i = 0; i < mi->size.n; ++i) size += mi->size.a[i];
-	debug("base.n(%lu), size.n(%lu), size(%lu)", mi->base.n, mi->size.n, size);
 	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
 	fwrite(MM_IDX_MAGIC, 1, 4, fp);
 	fwrite(x, 4, 3, fp);
@@ -566,7 +562,6 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 		}
 		mi->s.a[i].name -= (ptrdiff_t)mi->base.a[j], mi->s.a[i].seq -= (ptrdiff_t)mi->base.a[j];
 		mi->s.a[i].name += (ptrdiff_t)size, mi->s.a[i].seq += (ptrdiff_t)size;
-		debug("size(%lx), name(%p), seq(%p)", size, mi->s.a[i].name, mi->s.a[i].seq);
 	}
 	fwrite(mi->s.a, sizeof(bseq_t), mi->s.n, fp);
 }
@@ -613,14 +608,11 @@ static mm_idx_t *mm_idx_load(FILE *fp)
 	if (fread(mi->base.a[0], sizeof(char), mi->size.a[0], fp) != mi->size.a[0]) goto _mm_idx_load_fail;
 	mi->s.a = malloc(sizeof(bseq_t) * mi->s.n);
 	if ((i = fread(mi->s.a, sizeof(bseq_t), mi->s.n, fp)) != mi->s.n) goto _mm_idx_load_fail;
-	debug("bsize(%lu), mi->s.n(%lu), base(%p)", bsize, mi->s.n, mi->base.a[0]);
 	for (i = 0; i < mi->s.n; ++i) {
-		debug("base(%p), name(%p), seq(%p)", mi->base.a[0], mi->s.a[i].name, mi->s.a[i].seq);
 		mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
 	}
 	return mi;
 _mm_idx_load_fail:
-	fprintf(stderr, "failed to load index\n");
 	mm_idx_destroy(mi);
 	return 0;
 }
@@ -785,24 +777,20 @@ static void mm_chain(mm128_v *coef, uint32_t ofs_llim, uint32_t ofs_hlim, uint32
 		int32_t rs = coef->a[i].u32[2], qs = coef->a[i].u32[3], re = rs, qe = qs;
 		int32_t lub = coef->a[i].u32[0] + ofs_llim, hub = rs - (qs<<1) + ofs, hlb = hub - ofs_hlim;
 		uint32_t len = 0;
-		debug("rs(%d), qs(%d), (%d, %d)", rs, qs, rs - (qs>>1), rs - (qs<<1));
 		for (j = i+1, k = UINT64_MAX, n = i; j < coef->n && (int32_t)coef->a[j].u32[0] < lub; j++) {
 			if ((int32_t)coef->a[j].u32[2] < 0) continue;
 			re = coef->a[j].u32[2] & mask, qe = coef->a[j].u32[3];
-			debug("re(%d), qe(%d), (%d, %d)", re, qe, re - (qe>>1), re - (qe<<1));
 			int32_t l = coef->a[j].u32[0], h = ofs + re - (qe<<1);
 			if (rid != coef->a[j].u32[1] || l > lub || h < hlb) { k = MIN2(j, k); continue; }	// out of range, skip
 			lub = l + ofs_llim; hlb = h - ofs_hlim;
 			coef->a[j].u32[2] |= chained; n = j;
 		}
-		debug("r(%d, %d), q(%d, %d), (%d, %d)", rs, re, qs, qe, rs - (qs>>1), rs - (qs<<1));
 		re = coef->a[n].u32[2] & mask; qe = coef->a[n].u32[3]; qs = _m(qs); qe = _m(qe);
 		len = _s(re-rs)*(re-rs)+_s(qe-qs)*(qe-qs);
 		if (len < min_len) continue;
 		v2u32_t *p;
 		kv_pushp(v2u32_t, *intv, &p);
 		p->x[0] = (uint32_t)ofs - len; p->x[1] = i;
-		debug("r(%d, %d), q(%d, %d), len(%u)", rs, re, qs, qe, len);
 	}
 	return;
 }
