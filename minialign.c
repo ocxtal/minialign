@@ -1121,7 +1121,7 @@ int main(int argc, char *argv[])
 		else if (ch == 's') opt.min = atoi(optarg);
 		else if (ch == 'm') opt.min_ratio = atof(optarg);
 		else if (ch == 'r') {
-			if (mm_verbose >= 3) fprintf(stderr, "Minimum length threshold option is deprecated in version 0.4.0. It is translated as score ratio.).\n");
+			if (mm_verbose >= 3) fprintf(stderr, "Minimum length threshold option is deprecated in version 0.4.0. It is interpreted as score ratio.).\n");
 			opt.min_ratio = atof(optarg);
 		}
 		else if (ch == 'a') opt.m = atoi(optarg);
