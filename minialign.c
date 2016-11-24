@@ -929,6 +929,9 @@ static void mm_est_mapq(uint32_t n_reg, const reg_t *reg, v2u32_t *map, uint32_t
 		const reg_t *r = &reg[map[i].x[1]];
 		map[i].x[0] = _clip(-10.0 * log10(1.0 - pe * (double)(r->score - bsc + 1) / (double)tsc));
 	}
+
+	#undef _len
+	#undef _clip
 	return;
 }
 
