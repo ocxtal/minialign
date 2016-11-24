@@ -1101,7 +1101,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:m:a:b:p:q:L:H:S:E:X:v")) >= 0) {
+	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:m:r:a:b:p:q:L:H:S:E:X:v")) >= 0) {
 		if (ch == 'k') opt.k = atoi(optarg);
 		else if (ch == 'w') opt.w = atoi(optarg);
 		else if (ch == 'f') {
@@ -1120,6 +1120,10 @@ int main(int argc, char *argv[])
 		else if (ch == 'l') is_idx = 1;
 		else if (ch == 's') opt.min = atoi(optarg);
 		else if (ch == 'm') opt.min_ratio = atof(optarg);
+		else if (ch == 'r') {
+			if (mm_verbose >= 3) fprintf(stderr, "Minimum length threshold option is deprecated in version 0.4.0. It is translated as score ratio.).\n");
+			opt.min_ratio = atof(optarg);
+		}
 		else if (ch == 'a') opt.m = atoi(optarg);
 		else if (ch == 'b') opt.x = atoi(optarg);
 		else if (ch == 'p') opt.gi = atoi(optarg);

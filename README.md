@@ -23,7 +23,7 @@ Frequently used options are: scoring parameters, minimum length/score cut-offs, 
 
 ```
 $ minialign -a1 -b2 -p2 -q1		# match, mismatch, gap-open and gap-extend
-$ minialign -s1000	# set minimum path length threshold to 1000
+$ minialign -s1000	# set minimum score threshold to 1000
 $ minialign -r0.8	# set report threshold at 0.8 of the highest score for every read
 $ minialign -t10	# minialign is now 10x faster!!!
 ```
@@ -72,6 +72,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Updates
 
+* 2016/11/25 (0.4.0) Added mapping quality output, fix bug in chaining, and change output threshold measure from length to score (note: '-m' option is now score ratio threshold, not length)
 * 2016/11/24 (0.3.3) Fix bugs in index load / dump functions.
 * 2016/11/24 (0.3.2) Fix bugs in the chaining routine, make minimum score threshold option deprecated.
 * 2016/11/1 (0.3.1) Changed minimum path length threshold option from '-M' to '-s'.
