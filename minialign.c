@@ -530,7 +530,7 @@ static mm_idx_t *mm_idx_build(const char *fn, uint32_t w, uint32_t k, uint32_t b
 
 static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 {
-	uint64_t x[3];
+	uint32_t x[3];
 	uint64_t i, j, size = 0, y[2];
 	for (i = 0; i < mi->size.n; ++i) size += mi->size.a[i];
 	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
@@ -569,7 +569,7 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 static mm_idx_t *mm_idx_load(FILE *fp)
 {
 	char magic[4];
-	uint32_t x[4];
+	uint32_t x[3];
 	uint64_t i, bsize, y[2];
 
 	mm_idx_t *mi;
