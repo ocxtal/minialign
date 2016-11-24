@@ -1064,7 +1064,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:m:a:b:p:q:L:H:A:B:X:v")) >= 0) {
+	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:r:m:a:b:p:q:L:H:A:B:X:v")) >= 0) {
 		if (ch == 'k') opt.k = atoi(optarg);
 		else if (ch == 'w') opt.w = atoi(optarg);
 		else if (ch == 'f') {
@@ -1082,7 +1082,11 @@ int main(int argc, char *argv[])
 		else if (ch == 'd') fnw = optarg;
 		else if (ch == 'l') is_idx = 1;
 		else if (ch == 's') opt.min_len = atoi(optarg);
-		else if (ch == 'm') opt.min_len_ratio = atof(optarg);
+		else if (ch == 'r') opt.min_len_ratio = atof(optarg);
+		else if (ch == 'm') {
+			if (mm_verbose >= 3) fprintf(stderr, "Minimum score threshold option is deprecated in version 0.3.2. It is translated into minimum path length threshold with <m> / (0.6 * <match award>).\n");
+			opt.min_len = atoi(optarg) / (0.6 * opt.m);
+		}
 		else if (ch == 'a') opt.m = atoi(optarg);
 		else if (ch == 'b') opt.x = atoi(optarg);
 		else if (ch == 'p') opt.gi = atoi(optarg);
@@ -1125,7 +1129,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -p INT       gap open penalty [%d]\n", opt.gi);
 		fprintf(stderr, "    -q INT       gap extension penalty [%d]\n", opt.ge);
 		fprintf(stderr, "    -s INT       minimum alignment path length [%d]\n", opt.min_len);
-		fprintf(stderr, "    -m INT       minimum alignment path length ratio [%f]\n", opt.min_len_ratio);
+		fprintf(stderr, "    -r INT       minimum alignment path length ratio [%f]\n", opt.min_len_ratio);
 		fprintf(stderr, "  Misc:\n");
 		fprintf(stderr, "    -t INT       number of threads [%d]\n", opt.n_threads);
 		fprintf(stderr, "    -v           show version number\n");
