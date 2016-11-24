@@ -539,7 +539,6 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 	fwrite(MM_IDX_MAGIC, 1, 4, fp);
 	fwrite(x, 4, 3, fp);
 	fwrite(y, 8, 2, fp);
-
 	for (i = 0; i < 1<<mi->b; ++i) {
 		mm_idx_bucket_t *b = &mi->B[i];
 		khint_t k;
@@ -659,8 +658,8 @@ static const char *mm_mapopt_check(mm_mapopt_t *opt)
 	if (opt->gi < 1 || opt->gi > 5) return "Gap open penalty must be inside [1,5].";
 	if (opt->ge < 1 || opt->ge > 5) return "Gap extension penalty must be inside [1,5].";
 	if (opt->xdrop < 10 || opt->xdrop > 100) return "Xdrop cutoff must be inside [10,100].";
-	if (opt->min > INT32_MAX) return  "Minimum alignment length must be > 0.";
-	if (opt->min_ratio < 0.0 || opt->min_ratio > 1.0) return  "Minimum alignment length ratio must be inside [0.0,1.0].";
+	if (opt->min > INT32_MAX) return  "Minimum alignment score must be > 0.";
+	if (opt->min_ratio < 0.0 || opt->min_ratio > 1.0) return  "Minimum alignment score ratio must be inside [0.0,1.0].";
 	if (opt->n_frq >= 16) return "Frequency thresholds must be fewer than 16.";
 	for (i = 0; i < opt->n_frq; ++i) if (opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i])) return "Frequency thresholds must be inside [0.0,1.0] and descending.";
 	if (opt->n_threads < 1) return "Thread counts must be > 0.";
@@ -1162,8 +1161,8 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -b INT       mismatch penalty [%d]\n", opt.x);
 		fprintf(stderr, "    -p INT       gap open penalty [%d]\n", opt.gi);
 		fprintf(stderr, "    -q INT       gap extension penalty [%d]\n", opt.ge);
-		fprintf(stderr, "    -s INT       minimum alignment path length [%d]\n", opt.min);
-		fprintf(stderr, "    -m INT       minimum alignment path length ratio [%f]\n", opt.min_ratio);
+		fprintf(stderr, "    -s INT       minimum alignment score [%d]\n", opt.min);
+		fprintf(stderr, "    -m INT       minimum alignment score ratio [%f]\n", opt.min_ratio);
 		fprintf(stderr, "  Misc:\n");
 		fprintf(stderr, "    -t INT       number of threads [%d]\n", opt.n_threads);
 		fprintf(stderr, "    -v           show version number\n");
