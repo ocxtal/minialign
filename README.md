@@ -76,8 +76,6 @@ Since the minimizer-based seeding and the rough chaining algorithm of the softwa
 
 Notes: Row: identity, column: length in bases. Sensitivity (recall) is defined as above. Reads are generated from hg38 without ALT / random contigs using PBSIM with the (len-SD, acc-SD) pairs set to (len-mean / 10, 0.01). Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the score filter ratio `-r` set at 0.5.
 
-Note that BWA-MEM performed its sensitivity ~97.6%, which is around 2% behind that of minialign, on the 20kb read set (probably due to its slightly longer minimum exact matching length k = 19 for the default).
-
 ## Algorithm overview
 
 ### Minimizer-based index structure
