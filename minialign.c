@@ -144,9 +144,6 @@ static bseq_file_t *bseq_open(const char *fn)
 	if (f == 0) return 0;
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
 	fp->fp = f;
-	#if ZLIB_VERNUM >= 0x1240
-		gzbuffer(fp->fp, 64*1024);
-	#endif
 	fp->ks = kseq_init(fp->fp);
 	return fp;
 }
