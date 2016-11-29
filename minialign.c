@@ -565,6 +565,13 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 		mi->s.a[i].name += (ptrdiff_t)size, mi->s.a[i].seq += (ptrdiff_t)size;
 	}
 	fwrite(mi->s.a, sizeof(bseq_t), mi->s.n, fp);
+	// restore pointers
+	for (i = j = size = 0; i < mi->s.n; ++i) {
+		mi->s.a[i].name -= (ptrdiff_t)size, mi->s.a[i].seq -= (ptrdiff_t)size;
+		mi->s.a[i].name += (ptrdiff_t)mi->base.a[j], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[j];
+		if ((uintptr_t)mi->s.a[i].name > size + mi->size.a[j]) size += mi->size.a[j++];
+	}
+	return;
 }
 
 static mm_idx_t *mm_idx_load(FILE *fp)
