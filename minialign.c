@@ -806,7 +806,7 @@ static uint32_t mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint32_t k, ui
 	const uint32_t mask = 0x7fffffff;
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
 	gaba_section_t rf, rr, *qu, *qd, *r, *q;
-	gaba_pos_pair_t p;
+	gaba_pos_pair_t p = {0};
 	rf.id = 2; rf.len = ref->l_seq; rf.base = (const uint8_t*)ref->seq;
 	rr.id = 3; rr.len = ref->l_seq; rr.base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim);
 	gaba_dp_flush(dp, lim, lim);
