@@ -92,6 +92,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Notes, issues and limitations
 
+* k-mer length (`k`) and minimizer window size (`w`) cannot be changed when the index is loaded from file. If you frequently adjust the two parameters, please prepare indices for each value or use the on-the-fly index construction mode.
 * SDUST masking is removed from the original minimap implementation.
 * Repetitive seed-hit region detection is also removed.
 * Large gap open penalty (> 5) and large X-drop penalty (> 64) are disallowed due to the limitation of the GABA library.
