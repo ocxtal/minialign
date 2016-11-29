@@ -1152,7 +1152,7 @@ int main(int argc, char *argv[])
 						"    $ minialign [options] <ref.fa> <reads.fa> > mapping.sam\n"
 						"\n"
 						"  with prebuilt index (saves ~1min for human genome per run):\n"
-						"    $ minialign [options] <ref.fa> -d <index.mai>\n"
+						"    $ minialign [options] -d <index.mai> <ref.fa>\n"
 						"    $ minialign -l <index.mai> <reads.fa> > mapping.sam\n"
 						"\n");
 		fprintf(stderr, "Options:\n");
