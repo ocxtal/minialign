@@ -1020,7 +1020,7 @@ static void mm_align_drain(void *arg, void *item)
 			for (q = r[p->sort.a[j].x[1]].cigar; *q; q++) _put(p, *q);
 			if (t->l_seq-r[p->sort.a[j].x[1]].qe) { _putn(p, t->l_seq-r[p->sort.a[j].x[1]].qe); _put(p, j==0? 'S' : 'H'); }
 			for (k = 0; k < strlen(c1); k++) _put(p, c1[k]);
-			if (r[p->sort.a[j].x[1]].rid < 0) { for (k = qe-1; k >= qs; k--) _put(p, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k]]); }
+			if (r[p->sort.a[j].x[1]].rid < 0) { for (k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(p, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
 			else { for (k = qs; k < qe; k++) _put(p, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
 			for (k = 0; k < strlen(c2); k++) _put(p, c2[k]);
 			free(r[p->sort.a[j].x[1]].cigar);
