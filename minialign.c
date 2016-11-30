@@ -15,7 +15,7 @@
 #include "ptask.h"
 #include "gaba.h"
 
-#define MM_VERSION "0.4.0"
+#define MM_VERSION "0.4.1"
 
 #include "arch/arch.h"
 #define _VECTOR_ALIAS_PREFIX		v16i8

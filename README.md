@@ -101,6 +101,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Updates
 
+* 2016/12/1 (0.4.1) Fix bug in sam output (broken CIGAR with both reverse-complemented and secondary flags).
 * 2016/11/27 (0.4.0) Added mapping quality output, fix bug in chaining, and change output threshold measure from length to score (note: `-s` flag is changed to minimum score, `-r` is interpreted as score ratio).
 * 2016/11/24 (0.3.3) Fix bugs in index load / dump functions.
 * 2016/11/24 (0.3.2) Fix bugs in the chaining routine, make minimum score threshold option deprecated.
