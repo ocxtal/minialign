@@ -14,8 +14,9 @@
 #include "kvec.h"
 #include "ptask.h"
 #include "gaba.h"
+#include "sassert.h"
 
-#define MM_VERSION "0.4.1"
+#define MM_VERSION "0.4.2"
 
 #include "arch/arch.h"
 #define _VECTOR_ALIAS_PREFIX		v16i8
@@ -26,6 +27,9 @@
 
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
+
+// #define DEBUG
+#include "log.h"
 
 /* minimap.h */
 
@@ -81,7 +85,7 @@ typedef struct {
 	uint64_t batch_size;
 	uint32_t sidx, eidx, n_threads, min, k, w, b;
 	double min_ratio;
-	int32_t m, x, gi, ge, xdrop, ofs_llim, ofs_hlim;
+	int32_t m, x, gi, ge, xdrop, llim, hlim, elim, blim;
 	uint32_t n_frq;
 	float frq[16];
 } mm_mapopt_t;
@@ -634,8 +638,10 @@ static void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->b = 14;
 	opt->sidx = 0;
 	opt->eidx = 3;
-	opt->ofs_hlim = 5000;
-	opt->ofs_llim = 5000;
+	opt->hlim = 5000;
+	opt->llim = 5000;
+	opt->elim = 500;
+	opt->blim = 1000;
 	opt->m = 1;
 	opt->x = 2;
 	opt->gi = 2;
@@ -657,8 +663,8 @@ static const char *mm_mapopt_check(mm_mapopt_t *opt)
 	if (opt->k >= 32) return "k must be inside [1,32).";
 	if (opt->sidx >= 16) return "sidx must be inside [0,16).";
 	if (opt->eidx >= 16) return "eidx must be inside [0,16).";
-	if (opt->ofs_hlim < 100 || opt->ofs_hlim >= 100000) return "hlim must be inside [100,100000).";
-	if (opt->ofs_llim < 100 || opt->ofs_llim >= 100000) return "llim must be inside [100,100000).";
+	if (opt->hlim < 100 || opt->hlim >= 100000) return "hlim must be inside [100,100000).";
+	if (opt->llim < 100 || opt->llim >= 100000) return "llim must be inside [100,100000).";
 	if (opt->m < 1 || opt->m > 5) return "Match award must be inside [1,5].";
 	if (opt->x < 1 || opt->x > 5) return "Mismatch penalty must be inside [1,5].";
 	if (opt->gi < 1 || opt->gi > 5) return "Gap open penalty must be inside [1,5].";
@@ -678,12 +684,14 @@ static const char *mm_mapopt_check(mm_mapopt_t *opt)
  **************************/
 
 typedef struct {
+	int32_t rs, qs, re, qe;
 	int32_t rid;
 	uint32_t score;
-	int32_t rs, re, qs, qe;
 	char *cigar;	// 160907: alignment cigar string
 } reg_t;
 typedef struct { size_t n, m; reg_t *a; } reg_v;
+_static_assert(offsetof(reg_t, re) == offsetof(mm128_t, u32[2]));
+_static_assert(offsetof(reg_t, qe) == offsetof(mm128_t, u32[3]));
 
 typedef struct {
 	uint64_t buf_size;
@@ -735,8 +743,10 @@ static void mm_tbuf_destroy(tbuf_t *b)
 	free(b);
 }
 
-#define _s(x)	( (x)<0?-1:1)
-#define _m(x)	( (((int32_t)(x))>>31)^(x) )
+#define _s(x)		( (x)<0?-1:1)
+#define _m(x)		( (((int32_t)(x))>>31)^(x) )
+#define _len(x)		( (x)->re+(x)->qe-(x)->rs-(x)->qs )
+#define _clip(x)	MAX2(0, MIN2(((uint32_t)(x)), 60))
 static void mm_expand(const v2u32_t *r, uint32_t n, int32_t qs, mm128_v *coef)
 {
 	uint64_t i;
@@ -774,7 +784,8 @@ static uint64_t mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *se
 	return(cnt);
 }
 
-static void mm_chain(mm128_v *coef, uint32_t ofs_llim, uint32_t ofs_hlim, uint32_t min, v2u32_v *intv)
+#if 0
+static void mm_chain(mm128_v *coef, uint32_t llim, uint32_t hlim, uint32_t min, v2u32_v *intv)
 {
 	uint64_t i, j, k, n;
 	const int32_t ofs = 0x40000000;
@@ -782,17 +793,48 @@ static void mm_chain(mm128_v *coef, uint32_t ofs_llim, uint32_t ofs_hlim, uint32
 	for (intv->n = i = 0; i < coef->n; i = MIN2(j, k)) {
 		uint32_t rid = coef->a[i].u32[1];
 		int32_t rs = coef->a[i].u32[2], qs = coef->a[i].u32[3], re = rs, qe = qs;
-		int32_t l, h, lub = coef->a[i].u32[0] + ofs_llim, hub = rs - (qs<<1) + ofs, hlb = hub - ofs_hlim;
+		int32_t l, h, lub = coef->a[i].u32[0] + llim, hub = rs - (qs<<1) + ofs, hlb = hub - hlim;
 		uint32_t len = 0;
 		for (j = i+1, k = UINT64_MAX, n = i; j < coef->n && (l = (int32_t)coef->a[j].u32[0]) < lub; j++) {
 			if ((int32_t)coef->a[j].u32[2] < 0) continue;
-			re = coef->a[j].u32[2] & mask, qe = coef->a[j].u32[3];
+			re = coef->a[j].u32[2]/* & mask*/, qe = coef->a[j].u32[3];	/* tagged seeds are skipped, no need to mask */
 			if (rid != coef->a[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }	// out of range, skip
-			lub = l + ofs_llim; hub = h; hlb = h - ofs_hlim;
+			lub = l + llim; hub = h; hlb = h - hlim;
 			coef->a[j].u32[2] |= chained; n = j;
 		}
 		re = coef->a[n].u32[2] & mask; qe = coef->a[n].u32[3]; qs = _m(qs); qe = _m(qe);
-		len = _s(re-rs)*(re-rs)+_s(qe-qs)*(qe-qs);
+		// len = _s(re-rs)*(re-rs)+_s(qe-qs)*(qe-qs);
+		len = re-rs+_s(qe-qs)*(qe-qs);
+		if (len < min) continue;
+		v2u32_t *p;
+		kv_pushp(v2u32_t, *intv, &p);
+		p->x[0] = (uint32_t)ofs - len; p->x[1] = i;
+	}
+	return;
+}
+#endif
+
+static void mm_chain(uint64_t l_coef, mm128_t *coef, uint32_t llim, uint32_t hlim, uint32_t min, v2u32_v *intv)
+{
+	uint64_t i, j, k, n;
+	const int32_t ofs = 0x40000000;
+	const uint32_t chained = 0x80000000, mask = 0x7fffffff;
+	for (intv->n = i = 0; i < l_coef; i = MIN2(j, k)) {
+		uint32_t rid = coef[i].u32[1];
+		int32_t rs = coef[i].u32[2], qs = coef[i].u32[3], re = rs, qe = qs;
+		int32_t l, h, lub = coef[i].u32[0] + llim, hub = rs - (qs<<1) + ofs, hlb = hub - hlim;
+		uint32_t len = 0;
+		for (j = i+1, k = UINT64_MAX, n = i; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
+			if ((int32_t)coef[j].u32[2] < 0) continue;
+			re = coef[j].u32[2]/* & mask*/, qe = coef[j].u32[3];	/* tagged seeds are skipped, no need to mask */
+			if (rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }	// out of range, skip
+			lub = l + llim; hub = h; hlb = h - hlim;
+			coef[j].u32[2] |= chained; n = j;
+		}
+		re = coef[n].u32[2] & mask; qe = coef[n].u32[3]; qs = _m(qs); qe = _m(qe);
+		// len = _s(re-rs)*(re-rs)+_s(qe-qs)*(qe-qs);
+		len = re-rs+_s(qe-qs)*(qe-qs);
+		debug("len(%u), re(%d), rs(%d), qe(%d), qs(%d)", len, re, rs, qe, qs);
 		if (len < min) continue;
 		v2u32_t *p;
 		kv_pushp(v2u32_t, *intv, &p);
@@ -801,12 +843,51 @@ static void mm_chain(mm128_v *coef, uint32_t ofs_llim, uint32_t ofs_hlim, uint32
 	return;
 }
 
-static uint32_t mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint32_t k, uint32_t min, uint32_t sidx, uint32_t eidx, gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, poshash_t *pos, reg_v *reg)
+static uint64_t mm_short_chain(uint64_t l_coef, mm128_t *coef, uint32_t llim, uint32_t hlim, uint32_t eidx)
+{
+	uint64_t j, k;
+	const int32_t ofs = 0x40000000;
+	const uint32_t chained = 0x80000000, mask = 0x7fffffff;
+	uint32_t rid = coef->u32[1];
+	int32_t rs = coef->u32[2] & mask, qs = coef->u32[3], re = rs, qe = qs;
+	int32_t l, h, lub = coef->u32[0] + llim, hub = rs - (qs<<1) + ofs, hlb = hub - hlim;
+	uint32_t len = 0;
+	debug("short chain, s(%d, %d), lub(%d), hub(%d), hlb(%d)", rs, qs, lub, hub, hlb);
+	for (j = 1, k = UINT64_MAX; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
+		re = coef[j].u32[2] & mask, qe = coef[j].u32[3];
+		debug("test (%d, %d)", re, qe);
+		if (rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }
+		// hlb = h - hlim; n = j;
+		debug("chained, len(%u)", len+1);
+		lub = l + llim; hub = h; hlb = h - hlim;	// n = j;
+		if (++len > eidx) break;
+	}
+	return MIN2(j, k);
+}
+
+static uint64_t mm_rescue(uint64_t l_coef, mm128_t *coef, mm128_t *r, uint32_t llim, uint32_t hlim, uint32_t elim, uint32_t blim, uint32_t eidx)
+{
+	uint64_t i;
+	const int32_t ofs = 0x40000000, mask = 0x7fffffff;
+	int32_t re = r->u32[2], qe = r->u32[3], l, h;
+	int32_t lt = ofs + re - (qe>>1), ht = ofs + re - (qe<<1), lb = lt - blim, le = lt + elim, hb = ht - blim, he = ht + elim, lub = lt + llim;
+	debug("tail(%d, %d), lt(%d), ht(%d), lb(%d), le(%d), hb(%d), he(%d), lub(%d), llim(%d), hlim(%d), elim(%d), blim(%d)", re, qe, lt, ht, lb, le, hb, he, lub, llim, hlim, elim, blim);
+	debug("coef(%d), lb(%d)", coef[0].u32[0], lb);
+	for (i = 0; i < l_coef && coef[i].u32[0] < lb; ++i) { /*debug("coef(%u), lb(%u)", coef[i].u32[0], lb);*/ }
+	for (i = 0; i < l_coef && (l = (int32_t)coef[i].u32[0]) < lub; ++i) {
+		uint32_t rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
+		debug("test (%d, %d)", rs, qs);
+		if ((h = ofs + rs - (qs<<1)) > hb || (l < le && h > he && ((l > lt) ^ (h < ht)))) continue;
+		debug("prev tail(%d, %d), chain head(%d, %d)", re, qe, rs, qs);
+		return mm_short_chain(l_coef - i, coef + i, llim, hlim, eidx);
+	}
+	return 1;
+}
+
+static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm128_t *coef, uint32_t k, uint32_t min, uint32_t sidx, uint32_t eidx, gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, poshash_t *pos, reg_v *reg)
 {
 	uint64_t i, j;
 	khint_t itr;
-	int absent;
-	reg_t *s;
 	const uint32_t mask = 0x7fffffff;
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
 	gaba_section_t rf, rr, *qu, *qd, *r, *q;
@@ -815,7 +896,7 @@ static uint32_t mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint32_t k, ui
 	rr.id = 3; rr.len = ref->l_seq; rr.base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim);
 	gaba_dp_flush(dp, lim, lim);
 	gaba_alignment_t *a[3] = {0};
-	for (i = sidx, j = 0; i < eidx && i < n; ++i) {
+	for (i = sidx, j = 0; i < eidx && i < l_coef; ++i) {
 		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) continue;	// skip head
 		const gaba_stack_t *stack = gaba_dp_save_stack(dp);
 		int32_t rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
@@ -833,7 +914,13 @@ static uint32_t mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint32_t k, ui
 		// find max
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
-		if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) != kh_end(pos) && (uint32_t)kh_val(pos, itr) == p.bpos) continue;
+		// if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) != kh_end(pos) && (uint32_t)kh_val(pos, itr) == p.bpos) continue;
+		debug("test hash, (%u, %u, %u)", ref->rid, p.apos, p.bpos);
+		if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) != kh_end(pos)) {
+			debug("hit hash, (%lu, %lu)", kh_val(pos, itr)>>32, kh_val(pos, itr) & 0xffffffff);
+			// if ((uint32_t)kh_val(pos, itr) == p.bpos) continue;
+			if ((uint32_t)kh_val(pos, itr) == p.bpos) return 0;
+		}
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
 		m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1);
@@ -846,47 +933,58 @@ static uint32_t mm_extend(bseq_t *ref, mm128_t *coef, uint32_t n, uint32_t k, ui
 		} while(!(mask & f->status));
 		// convert alignment to cigar
 		a[j++] = gaba_dp_trace(dp, NULL, m, NULL);
-		if (a[j-1]->score < min) continue;
+		if (a[j-1]->score < min) continue;	// search again
 		break;
 	}
 	if (j == 0) return 0;
 	// collect longest
 	for (i = 1; i < j; ++i) if (a[0]->score < a[i]->score) a[0] = a[i];
-	if (a[0]->score < min) return 0;
-	// record pos and cigar
-	if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) == kh_end(pos)) {
-		itr = kh_put(pos, pos, (((uint64_t)ref->rid<<32) | p.apos), &absent);
-		kh_val(pos, itr) = (reg->n<<32) | p.bpos;
+	return a[0];	// one alignment is returned regardless of the score
+}
+
+static const reg_t *mm_record(const bseq_t *ref, uint32_t l_seq, const gaba_alignment_t *a, poshash_t *pos, reg_v *reg)
+{
+	// uint32_t rrs = a->sec->apos, rqs = a->sec->bpos;
+	uint32_t rrs = a->rapos - 1, rqs = a->rbpos - 1;
+	debug("apos(%u, %u), bpos(%u, %u)", a->sec->apos, a->rapos, a->sec->bpos, a->rbpos);
+	khint_t itr;
+	int absent;
+	reg_t *s;
+	if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | rrs)) == kh_end(pos)) {
+		itr = kh_put(pos, pos, (((uint64_t)ref->rid<<32) | rrs), &absent);
+		kh_val(pos, itr) = (reg->n<<32) | rqs;
+		debug("record hash, (%u, %u, %u)", ref->rid, rrs, rqs);
 		kv_pushp(reg_t, *reg, &s);
 	} else {
 		s = &reg->a[kh_val(pos, itr)>>32];
-		if (s->score >= a[0]->score) return 0;
-		kh_val(pos, itr) &= 0xffffffff00000000; kh_val(pos, itr) |= p.bpos;		// replace qpos
+		if (s->score >= a->score) return 0;
+		kh_val(pos, itr) &= 0xffffffff00000000; kh_val(pos, itr) |= rqs;	// replace qpos
+		debug("replace hash, (%lu, %u, %u)", kh_val(pos, itr)>>32, rrs, rqs);
 		free(s->cigar);	// replace cigar
 	}
-	s->rid = ((a[0]->sec->bid&0x01)? 0 : 0xffffffff) ^ ref->rid; s->score = a[0]->score;
-	s->rs = ref->l_seq-a[0]->sec->apos-a[0]->sec->alen; s->re = ref->l_seq-a[0]->sec->apos;
-	s->qs = qf->len-a[0]->sec->bpos-a[0]->sec->blen; s->qe = qf->len-a[0]->sec->bpos;
-	s->cigar = (char *)calloc(a[0]->path->len < 512 ? 1024 : 2*a[0]->path->len, 1);
-	gaba_dp_dump_cigar_reverse(s->cigar, 2*a[0]->path->len, a[0]->path->array, 0, a[0]->path->len);
-	return a[0]->score;
+	s->rid = ((a->sec->bid&0x01)? 0 : 0xffffffff) ^ ref->rid; s->score = a->score;
+	s->rs = ref->l_seq-a->sec->apos-a->sec->alen; s->re = ref->l_seq-a->sec->apos;
+	s->qs = l_seq-a->sec->bpos-a->sec->blen; s->qe = l_seq-a->sec->bpos;
+	s->cigar = (char *)calloc(a->path->len < 512 ? 1024 : 2*a->path->len, 1);
+	gaba_dp_dump_cigar_reverse(s->cigar, 2*a->path->len, a->path->array, 0, a->path->len);
+	return s;
 }
 
 static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t n_occ, uint64_t *occ, const mm_mapopt_t *opt, uint64_t *n_reg)
 {
 	uint64_t i, j, k;
-	int32_t len, min = opt->min;
+	int32_t min = opt->min;
 	const int32_t ofs = 0x40000000;
 	const uint32_t mask = 0x7fffffff;
 	reg_v reg = {0};
 	// prepare section info for alignment
 	uint8_t tail[96];
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
-	gaba_section_t qf, qr, t;
+	gaba_section_t qf, qr, mg;
 	memset(tail, 0, 96);
 	qf.id = 0; qf.len = l_seq; qf.base = (const uint8_t*)seq;
 	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev((const uint8_t*)seq+l_seq-1, lim);
-	t.id = 4; t.len = 32; t.base = tail+32;
+	mg.id = 4; mg.len = 32; mg.base = tail+32;
 	b->mini.n = b->coef.n = b->resc.n = b->intv.n = 0; kh_clear(pos, b->pos);
 	for (i = j = 0; reg.n == 0 && i < n_occ; ++i) {
 		if (i == 0) {
@@ -898,28 +996,51 @@ static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint
 				mm_expand((const v2u32_t*)b->resc.a[j].u64[1], b->resc.a[j].u32[1], b->resc.a[j].u32[0], &b->coef);
 		}
 		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
-		mm_chain(&b->coef, opt->ofs_llim, opt->ofs_hlim, min>>2, &b->intv);
+		mm_chain(b->coef.n, b->coef.a, opt->llim, opt->hlim, min>>2, &b->intv);
 		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
 		if (b->intv.a == 0) continue;
-		for (k = 0; k < b->intv.n && b->intv.a[k].x[0] < ofs - (min>>2); ++k) {
-			mm128_t *c = &b->coef.a[b->intv.a[k].x[1]];
-			bseq_t *ref = &mi->s.a[c->u32[1]];
-			len = mm_extend(ref, c, b->coef.n-b->intv.a[k].x[1], mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &t, b->pos, &reg);
-			if (len == 0) continue;
-			min = MAX2(min, opt->min_ratio*len);
+		debug("chain count, n(%lu), qlen(%u)", b->intv.n, l_seq);
+		for (k = 0; k < b->intv.n && ofs - b->intv.a[k].x[0] > min>>2; ++k) {
+			const gaba_alignment_t *a = 0;
+			mm128_t *t = &b->coef.a[b->coef.n], r;
+			uint64_t p = b->coef.n-b->intv.a[k].x[1], q = p, l = 0, m = ofs - b->intv.a[k].x[0];
+			debug("ofs(%u), x(%u), m(%lu)", ofs, b->intv.a[k].x[0], m);
+			bseq_t *ref = &mi->s.a[(t-p)->u32[1]];
+			do {
+				debug("k(%lu), l(%lu), m(%lu)", k, l, m);
+				a = mm_extend(ref, p, t-p, mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &mg, b->pos, &reg);
+				debug("a(%p)", a);
+				if (p == q && a == 0) break;	// skip chain if first extension did not result in meaningful alignment
+				r.u32[2] = (t-p)->u32[2] & mask, r.u32[3] = (t-p)->u32[3];
+				if (a != 0) {
+					debug("l(%u), k(%lu), r(%u, %u), q(%u, %u)", l_seq, k, ref->l_seq-a->sec->apos-a->sec->alen, ref->l_seq-a->sec->apos, l_seq-a->sec->bpos-a->sec->blen, l_seq-a->sec->bpos);
+					
+					debug("record alignment, score(%ld), r(%u, %u), q(%u, %u), root(%u, %u), len(%u, %u)",
+						a->score,
+						a->sec->apos, a->sec->apos + a->sec->alen,
+						a->sec->bpos, a->sec->bpos + a->sec->blen,
+						a->rapos, a->rbpos,
+						ofs - b->intv.a[k].x[0], a->sec->alen + a->sec->blen);
+					
+					r.u32[2] = ref->l_seq-a->sec->apos; r.u32[3] = (a->sec->bid&0x01)? l_seq-a->sec->bpos : -a->sec->bpos+mi->k+1;
+					debug("r(%u, %u), root(%u, %u)", r.u32[2], r.u32[3], ref->l_seq-a->rapos, l_seq-a->rbpos);
+					min = MAX2(min, opt->min_ratio*a->score);
+					l += a->sec->alen+a->sec->blen;
+					if (a->score > min) mm_record(ref, l_seq, a, b->pos, &reg);
+					debug("l(%lu), m(%lu)", l, m);
+				} else {
+					debug("l(%u), k(%lu), r(%u, %u), q(%u, %u)", l_seq, k, r.u32[2], r.u32[2], _s(r.u32[3]), _s(r.u32[3]));
+				}
+				q = p;
+			} while (l < m && (p -= mm_rescue(p, t-p, &r, opt->llim, opt->hlim, opt->elim, opt->blim, opt->eidx)) < q - 1);
 		}
 	}
 	*n_reg = reg.n;
 	return reg.a;
 }
-#undef _s
-#undef _m
 
 static void mm_est_mapq(uint32_t n_reg, const reg_t *reg, v2u32_t *map, uint32_t m, uint32_t x)
 {
-	#define _len(x)		( (x)->re+(x)->qe-(x)->rs-(x)->qs )
-	#define _clip(x)	MAX2(0, MIN2(((uint32_t)(x)), 60))
-
 	uint64_t i;
 	const reg_t *preg = &reg[map[0].x[1]], *sreg = (n_reg>1)? &reg[map[1].x[1]] : NULL, *breg = (n_reg>1)? &reg[map[n_reg-1].x[1]] : NULL;
 	uint32_t ssc = (n_reg>1)? sreg->score : 0, bsc = (n_reg>1)? breg->score : 0, tsc = 0;
@@ -935,11 +1056,12 @@ static void mm_est_mapq(uint32_t n_reg, const reg_t *reg, v2u32_t *map, uint32_t
 		const reg_t *r = &reg[map[i].x[1]];
 		map[i].x[0] = _clip(-10.0 * log10(1.0 - pe * (double)(r->score - bsc + 1) / (double)tsc));
 	}
-
-	#undef _len
-	#undef _clip
 	return;
 }
+#undef _s
+#undef _m
+#undef _len
+#undef _clip
 
 static void *mm_align_source(void *arg)
 {
@@ -1018,6 +1140,7 @@ static void mm_align_drain(void *arg, void *item)
 			_put(p, '\t'); _putn(p, p->sort.a[j].x[0]); _put(p, '\t');
 			if (r[p->sort.a[j].x[1]].qs) { _putn(p, r[p->sort.a[j].x[1]].qs); _put(p, j==0? 'S' : 'H'); }
 			for (q = r[p->sort.a[j].x[1]].cigar; *q; q++) _put(p, *q);
+			debug("head(%u), tail(%u)", r[p->sort.a[j].x[1]].qs, t->l_seq-r[p->sort.a[j].x[1]].qe);
 			if (t->l_seq-r[p->sort.a[j].x[1]].qe) { _putn(p, t->l_seq-r[p->sort.a[j].x[1]].qe); _put(p, j==0? 'S' : 'H'); }
 			for (k = 0; k < strlen(c1); k++) _put(p, c1[k]);
 			if (r[p->sort.a[j].x[1]].rid < 0) { for (k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(p, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
@@ -1110,7 +1233,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_init(&opt);
 
-	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:m:r:a:b:p:q:L:H:S:E:X:v")) >= 0) {
+	while ((ch = getopt(argc, argv, "k:w:f:B:t:V:d:ls:m:r:a:b:p:q:L:H:I:J:S:E:X:v")) >= 0) {
 		if (ch == 'k') opt.k = atoi(optarg);
 		else if (ch == 'w') opt.w = atoi(optarg);
 		else if (ch == 'f') {
@@ -1137,8 +1260,10 @@ int main(int argc, char *argv[])
 		else if (ch == 'b') opt.x = atoi(optarg);
 		else if (ch == 'p') opt.gi = atoi(optarg);
 		else if (ch == 'q') opt.ge = atoi(optarg);
-		else if (ch == 'L') opt.ofs_llim = atoi(optarg);
-		else if (ch == 'H') opt.ofs_hlim = atoi(optarg);
+		else if (ch == 'L') opt.llim = atoi(optarg);
+		else if (ch == 'H') opt.hlim = atoi(optarg);
+		else if (ch == 'I') opt.blim = atoi(optarg);
+		else if (ch == 'J') opt.elim = atoi(optarg);
 		else if (ch == 'S') opt.sidx = atoi(optarg);
 		else if (ch == 'E') opt.eidx = atoi(optarg);
 		else if (ch == 'X') opt.xdrop = atoi(optarg);
