@@ -637,8 +637,8 @@ static void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->eidx = 3;
 	opt->hlim = 5000;
 	opt->llim = 5000;
-	opt->elim = 500;
-	opt->blim = 1000;
+	opt->blim = 0;
+	opt->elim = 200;
 	opt->m = 1;
 	opt->x = 2;
 	opt->gi = 2;
