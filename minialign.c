@@ -28,9 +28,6 @@
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
 
-// #define DEBUG
-#include "log.h"
-
 /* minimap.h */
 
 typedef struct bseq_file_s {
@@ -832,9 +829,7 @@ static void mm_chain(uint64_t l_coef, mm128_t *coef, uint32_t llim, uint32_t hli
 			coef[j].u32[2] |= chained; n = j;
 		}
 		re = coef[n].u32[2] & mask; qe = coef[n].u32[3]; qs = _m(qs); qe = _m(qe);
-		// len = _s(re-rs)*(re-rs)+_s(qe-qs)*(qe-qs);
 		len = re-rs+_s(qe-qs)*(qe-qs);
-		debug("len(%u), re(%d), rs(%d), qe(%d), qs(%d)", len, re, rs, qe, qs);
 		if (len < min) continue;
 		v2u32_t *p;
 		kv_pushp(v2u32_t, *intv, &p);
@@ -852,13 +847,9 @@ static uint64_t mm_short_chain(uint64_t l_coef, mm128_t *coef, uint32_t llim, ui
 	int32_t rs = coef->u32[2] & mask, qs = coef->u32[3], re = rs, qe = qs;
 	int32_t l, h, lub = coef->u32[0] + llim, hub = rs - (qs<<1) + ofs, hlb = hub - hlim;
 	uint32_t len = 0;
-	debug("short chain, s(%d, %d), lub(%d), hub(%d), hlb(%d)", rs, qs, lub, hub, hlb);
 	for (j = 1, k = UINT64_MAX; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
 		re = coef[j].u32[2] & mask, qe = coef[j].u32[3];
-		debug("test (%d, %d)", re, qe);
 		if (rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }
-		// hlb = h - hlim; n = j;
-		debug("chained, len(%u)", len+1);
 		lub = l + llim; hub = h; hlb = h - hlim;	// n = j;
 		if (++len > eidx) break;
 	}
@@ -871,14 +862,10 @@ static uint64_t mm_rescue(uint64_t l_coef, mm128_t *coef, mm128_t *r, uint32_t l
 	const int32_t ofs = 0x40000000, mask = 0x7fffffff;
 	int32_t re = r->u32[2], qe = r->u32[3], l, h;
 	int32_t lt = ofs + re - (qe>>1), ht = ofs + re - (qe<<1), lb = lt - blim, le = lt + elim, hb = ht - blim, he = ht + elim, lub = lt + llim;
-	debug("tail(%d, %d), lt(%d), ht(%d), lb(%d), le(%d), hb(%d), he(%d), lub(%d), llim(%d), hlim(%d), elim(%d), blim(%d)", re, qe, lt, ht, lb, le, hb, he, lub, llim, hlim, elim, blim);
-	debug("coef(%d), lb(%d)", coef[0].u32[0], lb);
-	for (i = 0; i < l_coef && coef[i].u32[0] < lb; ++i) { /*debug("coef(%u), lb(%u)", coef[i].u32[0], lb);*/ }
+	for (i = 0; i < l_coef && coef[i].u32[0] < lb; ++i) {}
 	for (i = 0; i < l_coef && (l = (int32_t)coef[i].u32[0]) < lub; ++i) {
 		uint32_t rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
-		debug("test (%d, %d)", rs, qs);
 		if ((h = ofs + rs - (qs<<1)) > hb || (l < le && h > he && ((l > lt) ^ (h < ht)))) continue;
-		debug("prev tail(%d, %d), chain head(%d, %d)", re, qe, rs, qs);
 		return mm_short_chain(l_coef - i, coef + i, llim, hlim, eidx);
 	}
 	return 1;
@@ -914,13 +901,7 @@ static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm1
 		// find max
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
-		// if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) != kh_end(pos) && (uint32_t)kh_val(pos, itr) == p.bpos) continue;
-		debug("test hash, (%u, %u, %u)", ref->rid, p.apos, p.bpos);
-		if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) != kh_end(pos)) {
-			debug("hit hash, (%lu, %lu)", kh_val(pos, itr)>>32, kh_val(pos, itr) & 0xffffffff);
-			// if ((uint32_t)kh_val(pos, itr) == p.bpos) continue;
-			if ((uint32_t)kh_val(pos, itr) == p.bpos) return 0;
-		}
+		if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) != kh_end(pos) && (uint32_t)kh_val(pos, itr) == p.bpos) return 0;
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
 		m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1);
@@ -944,22 +925,18 @@ static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm1
 
 static const reg_t *mm_record(const bseq_t *ref, uint32_t l_seq, const gaba_alignment_t *a, poshash_t *pos, reg_v *reg)
 {
-	// uint32_t rrs = a->sec->apos, rqs = a->sec->bpos;
 	uint32_t rrs = a->rapos - 1, rqs = a->rbpos - 1;
-	debug("apos(%u, %u), bpos(%u, %u)", a->sec->apos, a->rapos, a->sec->bpos, a->rbpos);
 	khint_t itr;
 	int absent;
 	reg_t *s;
 	if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | rrs)) == kh_end(pos)) {
 		itr = kh_put(pos, pos, (((uint64_t)ref->rid<<32) | rrs), &absent);
 		kh_val(pos, itr) = (reg->n<<32) | rqs;
-		debug("record hash, (%u, %u, %u)", ref->rid, rrs, rqs);
 		kv_pushp(reg_t, *reg, &s);
 	} else {
 		s = &reg->a[kh_val(pos, itr)>>32];
 		if (s->score >= a->score) return 0;
 		kh_val(pos, itr) &= 0xffffffff00000000; kh_val(pos, itr) |= rqs;	// replace qpos
-		debug("replace hash, (%lu, %u, %u)", kh_val(pos, itr)>>32, rrs, rqs);
 		free(s->cigar);	// replace cigar
 	}
 	s->rid = ((a->sec->bid&0x01)? 0 : 0xffffffff) ^ ref->rid; s->score = a->score;
@@ -999,37 +976,20 @@ static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint
 		mm_chain(b->coef.n, b->coef.a, opt->llim, opt->hlim, min>>2, &b->intv);
 		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
 		if (b->intv.a == 0) continue;
-		debug("chain count, n(%lu), qlen(%u)", b->intv.n, l_seq);
 		for (k = 0; k < b->intv.n && ofs - b->intv.a[k].x[0] > min>>2; ++k) {
 			const gaba_alignment_t *a = 0;
 			mm128_t *t = &b->coef.a[b->coef.n], r;
 			uint64_t p = b->coef.n-b->intv.a[k].x[1], q = p, l = 0, m = ofs - b->intv.a[k].x[0];
-			debug("ofs(%u), x(%u), m(%lu)", ofs, b->intv.a[k].x[0], m);
 			bseq_t *ref = &mi->s.a[(t-p)->u32[1]];
 			do {
-				debug("k(%lu), l(%lu), m(%lu)", k, l, m);
 				a = mm_extend(ref, p, t-p, mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &mg, b->pos, &reg);
-				debug("a(%p)", a);
 				if (p == q && a == 0) break;	// skip chain if first extension did not result in meaningful alignment
 				r.u32[2] = (t-p)->u32[2] & mask, r.u32[3] = (t-p)->u32[3];
 				if (a != 0) {
-					debug("l(%u), k(%lu), r(%u, %u), q(%u, %u)", l_seq, k, ref->l_seq-a->sec->apos-a->sec->alen, ref->l_seq-a->sec->apos, l_seq-a->sec->bpos-a->sec->blen, l_seq-a->sec->bpos);
-					
-					debug("record alignment, score(%ld), r(%u, %u), q(%u, %u), root(%u, %u), len(%u, %u)",
-						a->score,
-						a->sec->apos, a->sec->apos + a->sec->alen,
-						a->sec->bpos, a->sec->bpos + a->sec->blen,
-						a->rapos, a->rbpos,
-						ofs - b->intv.a[k].x[0], a->sec->alen + a->sec->blen);
-					
 					r.u32[2] = ref->l_seq-a->sec->apos; r.u32[3] = (a->sec->bid&0x01)? l_seq-a->sec->bpos : -a->sec->bpos+mi->k+1;
-					debug("r(%u, %u), root(%u, %u)", r.u32[2], r.u32[3], ref->l_seq-a->rapos, l_seq-a->rbpos);
 					min = MAX2(min, opt->min_ratio*a->score);
 					l += a->sec->alen+a->sec->blen;
 					if (a->score > min) mm_record(ref, l_seq, a, b->pos, &reg);
-					debug("l(%lu), m(%lu)", l, m);
-				} else {
-					debug("l(%u), k(%lu), r(%u, %u), q(%u, %u)", l_seq, k, r.u32[2], r.u32[2], _s(r.u32[3]), _s(r.u32[3]));
 				}
 				q = p;
 			} while (l < m && (p -= mm_rescue(p, t-p, &r, opt->llim, opt->hlim, opt->elim, opt->blim, opt->eidx)) < q - 1);
@@ -1140,7 +1100,6 @@ static void mm_align_drain(void *arg, void *item)
 			_put(p, '\t'); _putn(p, p->sort.a[j].x[0]); _put(p, '\t');
 			if (r[p->sort.a[j].x[1]].qs) { _putn(p, r[p->sort.a[j].x[1]].qs); _put(p, j==0? 'S' : 'H'); }
 			for (q = r[p->sort.a[j].x[1]].cigar; *q; q++) _put(p, *q);
-			debug("head(%u), tail(%u)", r[p->sort.a[j].x[1]].qs, t->l_seq-r[p->sort.a[j].x[1]].qe);
 			if (t->l_seq-r[p->sort.a[j].x[1]].qe) { _putn(p, t->l_seq-r[p->sort.a[j].x[1]].qe); _put(p, j==0? 'S' : 'H'); }
 			for (k = 0; k < strlen(c1); k++) _put(p, c1[k]);
 			if (r[p->sort.a[j].x[1]].rid < 0) { for (k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(p, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
