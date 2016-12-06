@@ -1,5 +1,5 @@
 
-# minialign
+# minialign [![Build Status](https://travis-ci.org/ocxtal/minialign.svg?branch=master)](https://travis-ci.org/ocxtal/minialign) [![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg)](http://bioconda.github.io/recipes/minialign/README.html)
 
 Minialign is a little bit fast and moderately accurate nucleotide sequence alignment tool designed for PacBio and Nanopore long reads. It is built on three key algorithms, minimizer-based index of the [minimap](https://github.com/lh3/minimap) overlapper, array-based seed chaining, and SIMD-parallel Smith-Waterman-Gotoh extension.
 
