@@ -1256,7 +1256,7 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "    -k INT       k-mer size [%d]\n", opt.k);
 		fprintf(stderr, "    -w INT       minimizer window size [{-k}*2/3]\n");
 		fprintf(stderr, "    -d FILE      dump index to FILE []\n");
-		fprintf(stderr, "    -l FILE      load index from FILE [] (overriding -k, -w, and -f)\n");
+		fprintf(stderr, "    -l FILE      load index from FILE [] (overriding -k and -w)\n");
 		fprintf(stderr, "  Mapping:\n");
 		fprintf(stderr, "    -f FLOAT,... occurrence thresholds [0.05,0.01,0.001]\n");
 		fprintf(stderr, "    -a INT       match award [%d]\n", opt.m);
