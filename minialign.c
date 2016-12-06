@@ -662,6 +662,8 @@ static const char *mm_mapopt_check(mm_mapopt_t *opt)
 	if (opt->eidx >= 16) return "eidx must be inside [0,16).";
 	if (opt->hlim < 100 || opt->hlim >= 100000) return "hlim must be inside [100,100000).";
 	if (opt->llim < 100 || opt->llim >= 100000) return "llim must be inside [100,100000).";
+	if (opt->blim >= 10000) return "blim must be inside [0,10000).";
+	if (opt->elim >= 10000) return "elim must be inside [0,10000).";
 	if (opt->m < 1 || opt->m > 5) return "Match award must be inside [1,5].";
 	if (opt->x < 1 || opt->x > 5) return "Mismatch penalty must be inside [1,5].";
 	if (opt->gi < 1 || opt->gi > 5) return "Gap open penalty must be inside [1,5].";
