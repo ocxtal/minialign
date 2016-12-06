@@ -1,0 +1,4 @@
+language: C
+script:
+  - make clean && make
+  - ./minialign -v
