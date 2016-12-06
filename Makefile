@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99 -D_POSIX_C_SOURCE=200112
+CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99 -D_POSIX_C_SOURCE=200112L
 LIBS = -lm -lz -lpthread
 SRCS = minialign.c ptask.c queue.c queue_internal.c gaba_wrap.c
 PREFIX = /usr/local
@@ -10,10 +10,10 @@ minialign: $(SRCS) gaba_linear.o gaba_affine.o
 	$(CC) -o minialign $(CFLAGS) $^ $(LIBS)
 
 gaba_linear.o:
-	$(CC) $(CFLAGS) -std=c99 -DMODEL=LINEAR -DSUFFIX gaba.c -c -o gaba_linear.o
+	$(CC) $(CFLAGS) -DMODEL=LINEAR -DSUFFIX gaba.c -c -o gaba_linear.o
 
 gaba_affine.o:
-	$(CC) $(CFLAGS) -std=c99 -DMODEL=AFFINE -DSUFFIX gaba.c -c -o gaba_affine.o
+	$(CC) $(CFLAGS) -DMODEL=AFFINE -DSUFFIX gaba.c -c -o gaba_affine.o
 
 clean:
 	rm -fr gmon.out *.o a.out minialign *~ *.a *.dSYM session*

@@ -1,3 +1,4 @@
+#include <getopt.h>
 #include <unistd.h>
 #include <zlib.h>
 #include <math.h>
