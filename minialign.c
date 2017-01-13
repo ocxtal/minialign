@@ -201,7 +201,6 @@ static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_q
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
 	fp->base_rid = base_rid; fp->keep_qual = keep_qual; fp->keep_tag = keep_tag;
 	fp->fp = f;
-	gzbuffer(fp->fp, 64*1024);
 	if ((c = gzgetc(fp->fp)) == 'B')	// test bam signature
 		gzungetc(c, fp->fp), fp->bh = bam_read_header(fp->fp);
 	else if (c == '>' || c == '@')
