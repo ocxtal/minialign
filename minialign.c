@@ -1138,7 +1138,7 @@ static void mm_est_mapq(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 	for (i = 1; i < n_reg; ++i) tsc += _reg(reg[i])->score - bsc + 1;
 	reg[0].u32[0] |= _clip(-10.0 * log10(pe));
 	for (i = 1; i < n_reg; ++i)
-		reg[i].u32[0] |= _clip(-10.0 * log10(1.0 - pe * (double)(_reg(reg[i])->score - bsc + 1) / (double)tsc));
+		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * log10(1.0 - pe * (double)(_reg(reg[i])->score - bsc + 1) / (double)tsc));
 	return;
 }
 #undef _reg
