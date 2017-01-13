@@ -9,14 +9,14 @@ C99 compiler (gcc / clang / icc) is required to build the program.
 
 ```
 $ make && make install	# PREFIX=/usr/local by default
-$ minialign <reference.fa> <reads.fq> > out.sam		# read-to-ref alignment
+$ minialign <reference.fa> <reads.[fa,fq,bam]> > out.sam		# read-to-ref alignment
 ```
 
 Reference sequence index can be stored in separate. Using prebuilt index saves around a minute per run for a human haploid (~3G) genome.
 
 ```
 $ minialign -d index.mai <reference.fa>	# build index
-$ minialign -l index.mai <reads.fq> > out.sam	# mapping on prebuilt index
+$ minialign -l index.mai <reads.[fa,fq,bam]> > out.sam	# mapping on prebuilt index
 ```
 
 Frequently used options are: scoring parameters, minimum score cut-offs, and number of threads.
@@ -92,6 +92,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Notes, issues and limitations
 
+* Quality strings are discarded by default, please pass `-Q` flag to keep quality string in the input fastq/bam files.
 * k-mer length (`k`) and minimizer window size (`w`) cannot be changed when the index is loaded from file. If you frequently adjust the two parameters, please prepare indices for each value or use the on-the-fly index construction mode.
 * The default score filter threshold `-s200` tends to drop reads shorter than 1k bases. To collect these short alignments, please set lower `-s` values such as `-s50`. (The `-s50` setting is especially effective on typical PacBio read sets.)
 * Large gap open penalty (> 5) and large X-drop penalty (> 64) are disallowed due to the limitation of the GABA library.
@@ -101,6 +102,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Updates
 
+* 2016/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.
 * 2016/12/6 (0.4.2) Add splitted alignment rescuing algorithm.
 * 2016/12/1 (0.4.1) Fix bug in sam output (broken CIGAR with both reverse-complemented and secondary flags).
 * 2016/11/27 (0.4.0) Added mapping quality output, fix bug in chaining, and change output threshold measure from length to score (note: `-s` flag is changed to minimum score, `-r` is interpreted as score ratio).
