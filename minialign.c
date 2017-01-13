@@ -247,13 +247,20 @@ static void bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *
 	memcpy(mem->a + mem->n, sname, c->l_qname); mem->n += c->l_qname;
 
 	s->seq = (uint8_t *)mem->n;
-	for (uint64_t i = 0; i < c->l_qseq; ++i) mem->a[mem->n++] = 0x0f & (sseq[i>>1]>>((~i&0x01)<<2));
+	if (c->flag&0x10) {
+		for (int64_t i = c->l_qseq-1; i >= 0; --i) mem->a[mem->n++] = "\x0\x8\x4\x0\x2\x0\x0\x0\x1"[0x0f & (sseq[i>>1]>>((~i&0x01)<<2))];
+	} else {
+		for (int64_t i = 0; i < c->l_qseq; ++i) mem->a[mem->n++] = 0x0f & (sseq[i>>1]>>((~i&0x01)<<2));
+	}
 	mem->a[mem->n++] = '\0';
 
 	s->qual = (uint8_t *)mem->n;
 	if (fp->keep_qual && *squal != 0xff) {
-		for (uint64_t i = 0; i < c->l_qseq; ++i) mem->a[mem->n++] = squal[i] + 33;
-		// memcpy(mem->a + mem->n, squal, c->l_qseq); mem->n += c->l_qseq;
+		if (c->flag&0x10) {
+			for (int64_t i = c->l_qseq-1; i >= 0; --i) mem->a[mem->n++] = squal[i] + 33;
+		} else {
+			for (int64_t i = 0; i < c->l_qseq; ++i) mem->a[mem->n++] = squal[i] + 33;
+		}
 	}
 	mem->a[mem->n++] = '\0';
 
@@ -1239,13 +1246,6 @@ static void mm_print_header(mm_align_t *b)
 	return;
 }
 
-static void mm_print_qual(mm_align_t *b, const bseq_t *t)
-{
-	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') { _puts(b, t->qual); }
-	else { _put(b, '*'); }
-	return;
-}
-
 static void mm_print_tags(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t flag)
 {
 	uint64_t f = b->opt->flag;
@@ -1315,7 +1315,10 @@ static void mm_print_unmapped(mm_align_t *b, const bseq_t *t)
 {
 	_puts(b, t->name); _puts(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");
 	for (uint64_t k = 0; k < t->l_seq; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]);
-	_put(b, '\t'); mm_print_qual(b, t); mm_print_tags(b, t, NULL, 0); mm_restore_tags(b, t); _put(b, '\n');
+	_put(b, '\t');
+	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') { _puts(b, t->qual); }
+	else { _put(b, '*'); }
+	mm_restore_tags(b, t); _put(b, '\n');
 	return;
 }
 
@@ -1333,7 +1336,14 @@ static void mm_print_mapped(mm_align_t *b, const bseq_t *t, const reg_t *a, uint
 	_puts(b, "\t*\t0\t0\t");
 	if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
 	else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
-	_put(b, '\t'); mm_print_qual(b, t); mm_print_tags(b, t, a, flag); mm_restore_tags(b, t); _put(b, '\n');
+	_put(b, '\t');
+	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
+		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, t->qual[k-1]); }
+		else { for (int64_t k = qs; k < qe; k++) _put(b, t->qual[k]); }
+	} else {
+		_put(b, '*');
+	}
+	mm_print_tags(b, t, a, flag); mm_restore_tags(b, t); _put(b, '\n');
 	return;
 }
 
@@ -1563,7 +1573,6 @@ static void mm_mapopt_parse_rg(mm_mapopt_t *o, const char *arg)
 		else { *q++ = *p++; }
 	}
 	*q = '\0';
-	fprintf(stderr, "R(%s, %s)\n", arg, b);
 	if (strstr(b, "@RG") != b) return;
 	if ((id = strstr(b, "\tID:")) == 0) return;
 
