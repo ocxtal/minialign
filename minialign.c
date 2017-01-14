@@ -1476,7 +1476,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 					"    $ minialign -l <index.mai> <reads.{fa,fq,bam}> > mapping.sam\n"
 					"\n"
 					"  all-versus-all alignment in a read set:\n"
-					"    $ minialign -X <reads.fa> [<reads.fa> ...] | samsplit <sam-prefix>\n"
+					"    $ minialign -X <reads.fa> [<reads.fa> ...] | samsplit <prefix>\n"
 					"\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  Global:\n");
@@ -1623,8 +1623,7 @@ int main(int argc, char *argv[])
 	ptr_v v = {0};
 	FILE *fpr = 0, *fpw = 0;
 
-	liftrlimit();
-	posixly_correct();
+	liftrlimit(); posixly_correct();
 	mm_realtime0 = realtime();
 	mm_mapopt_t *opt = mm_mapopt_init();
 	switch (mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &v)) {
