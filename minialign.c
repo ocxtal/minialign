@@ -17,7 +17,7 @@
 #include "gaba.h"
 #include "sassert.h"
 
-#define MM_VERSION "0.4.3"
+#define MM_VERSION "0.4.4"
 
 
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
@@ -444,8 +444,15 @@ typedef struct {
 	char *rg_line, *rg_id;
 } mm_mapopt_t;
 
-static void mm_mapopt_init(mm_mapopt_t *opt)
+static void mm_mapopt_destroy(mm_mapopt_t *opt)
 {
+	free(opt->rg_line); free(opt->rg_id); free(opt);
+	return;
+}
+
+static mm_mapopt_t *mm_mapopt_init(void)
+{
+	mm_mapopt_t *opt = calloc(1, sizeof(mm_mapopt_t));
 	opt->k = 15;
 	opt->w = 16;
 	opt->b = 14;
@@ -469,7 +476,7 @@ static void mm_mapopt_init(mm_mapopt_t *opt)
 	opt->batch_size = 1024 * 1024;
 	opt->outbuf_size = 512 * 1024;
 	opt->rg_line = opt->rg_id = NULL;
-	return;
+	return opt;
 }
 
 static const char *mm_mapopt_check(mm_mapopt_t *opt)
@@ -1077,63 +1084,8 @@ static void mm_record(const bseq_t *ref, uint32_t l_seq, const gaba_alignment_t 
 	return;
 }
 
-/*
-static reg_t *mm_align(tbuf_t *b, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t n_occ, uint64_t *occ, const mm_mapopt_t *opt, uint64_t *n_reg)
-{
-	uint64_t i, j, k;
-	int32_t min = opt->min;
-	const int32_t ofs = 0x40000000;
-	const uint32_t mask = 0x7fffffff;
-	reg_v reg = {0};
-	// prepare section info for alignment
-	uint8_t tail[96];
-	const uint8_t *lim = (const uint8_t*)0x800000000000;
-	gaba_section_t qf, qr, mg;
-	memset(tail, 0, 96);
-	qf.id = 0; qf.len = l_seq; qf.base = (const uint8_t*)seq;
-	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev((const uint8_t*)seq+l_seq-1, lim);
-	mg.id = 4; mg.len = 32; mg.base = tail+32;
-	b->mini.n = b->coef.n = b->resc.n = b->intv.n = 0; kh_clear(pos, b->pos);
-	for (i = j = 0; reg.n == 0 && i < n_occ; ++i) {
-		if (i == 0) {
-			mm_collect(mi, l_seq, seq, occ[n_occ-1], occ[0], &b->mini, &b->coef, &b->resc);
-		} else {
-			if (i == 1) radix_sort_128x(b->resc.a, b->resc.a + b->resc.n);
-			for (k = 0; k < b->coef.n; ++k) b->coef.a[k].u32[2] &= mask;
-			for (; j < b->resc.n && b->resc.a[j].u32[1] <= occ[i]; ++j)
-				mm_expand((const v2u32_t*)b->resc.a[j].u64[1], b->resc.a[j].u32[1], b->resc.a[j].u32[0], &b->coef);
-		}
-		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
-		mm_chain(b->coef.n, b->coef.a, opt->llim, opt->hlim, min>>2, &b->intv);
-		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
-		if (b->intv.a == 0) continue;
-		for (k = 0; k < b->intv.n && ofs - b->intv.a[k].x[0] > min>>2; ++k) {
-			const gaba_alignment_t *a = 0;
-			mm128_t *t = &b->coef.a[b->coef.n], r;
-			uint64_t p = b->coef.n-b->intv.a[k].x[1], q = p, l = 0, m = ofs - b->intv.a[k].x[0];
-			bseq_t *ref = &mi->s.a[(t-p)->u32[1]];
-			do {
-				khint_t itr;
-				a = mm_extend(ref, q, t-q, mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &mg, b->pos, &itr);
-				if (p == q && a == 0) break;	// skip chain if first extension did not result in meaningful alignment
-				r.u32[2] = (t-p)->u32[2] & mask, r.u32[3] = (t-p)->u32[3];
-				if (a != 0) {
-					r.u32[2] = ref->l_seq-a->sec->apos; r.u32[3] = (a->sec->bid&0x01)? l_seq-a->sec->bpos : -a->sec->bpos+mi->k+1;
-					min = MAX2(min, opt->min_ratio*a->score);
-					l += a->sec->alen+a->sec->blen;
-					if (a->score > min) mm_record(ref, l_seq, a, b->pos, itr, &reg);
-				}
-				q = p;
-			} while (l < m && (p -= mm_rescue(ref, p, t-p, &r, opt->llim, opt->hlim, opt->elim, opt->blim, opt->eidx)) < q - 1);
-		}
-	}
-	*n_reg = reg.n;
-	return reg.a;
-}
-*/
-
 #define _reg(x)		( (reg_t*)(x).u64[1] )
-static void mm_est_mapq(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	uint64_t i;
 	const reg_t *preg = _reg(reg[0]);
@@ -1146,6 +1098,17 @@ static void mm_est_mapq(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 	for (i = 1; i < n_reg; ++i)
 		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * log10(1.0 - pe * (double)(_reg(reg[i])->score - bsc + 1) / (double)tsc));
 	return;
+}
+
+static uint64_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+{
+	int32_t score, min = (int32_t)(_reg(reg[0])->score * opt->min_ratio);
+	uint64_t i = 0; for (; i < n_reg && (score = _reg(reg[i])->score) >= min; ++i) {
+		double elen = (double)_len((reg_t*)reg[i].u64[1]) / 2.0, pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
+		double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * score, pe = 1.0 / (ulen + 1);
+		reg[i].u32[0] |= _clip(-10.0 * log10(pe)) | ((i == 0? 0 : 0x800)<<16);
+	}
+	return i;
 }
 #undef _reg
 
@@ -1202,7 +1165,7 @@ static const mm128_t *mm_align_seq(mm_tbuf_t *b, const mm_mapopt_t *opt, const m
 	*n_reg = reg.n;
 	if (reg.n == 0) return 0;
 	radix_sort_128x(reg.a, reg.a + reg.n);
-	mm_est_mapq(opt, reg.n, reg.a);
+	((opt->flag & MM_AVA)? mm_post_ava : mm_post_ava)(opt, reg.n, reg.a);
 	return reg.a;
 }
 
@@ -1510,11 +1473,15 @@ static void mm_print_help(const mm_mapopt_t *opt)
 					"  mapping on a prebuilt index (saves ~1min for human genome per run):\n"
 					"    $ minialign [indexing options] -d <index.mai> <ref.fa>\n"
 					"    $ minialign -l <index.mai> <reads.{fa,fq,bam}> > mapping.sam\n"
+					"\n"
+					"  all-versus-all alignment in a read set:\n"
+					"    $ minialign -X -xava <reads.fa> [<reads.fa> ...] | samsplit <prefix>\n"
 					"\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  Global:\n");
-	fprintf(stderr, "    -x STR       load preset params {pacbio, ont} [ont]\n");
+	fprintf(stderr, "    -x STR       load preset params {pacbio, ont, ava} [ont]\n");
 	fprintf(stderr, "    -t INT       number of threads [%d]\n", opt->n_threads);
+	fprintf(stderr, "    -X           switch to all-versus-all alignment mode\n");
 	fprintf(stderr, "    -v           show version number [%s]\n", MM_VERSION);
 	fprintf(stderr, "  Indexing:\n");
 	fprintf(stderr, "    -k INT       k-mer size [%d]\n", opt->k);
@@ -1607,6 +1574,8 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 'x') {
 			if (strcmp(optarg, "pacbio") == 0 || strcmp(optarg, "ont") == 0) {	// two options are equivalent
 				o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
+			} else if (strcmp(optarg, "ava") == 0) {
+				o->k = 14; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.3; o->flag |= MM_AVA;
 			} else {
 				if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, optarg);
 			}
@@ -1648,35 +1617,33 @@ int main(int argc, char *argv[])
 {
 	int ret = 1;
 	uint32_t base_rid = 0, base_qid = 0;
-	mm_mapopt_t opt = {0};
 	const char *err, *fnr = 0, *fnw = 0;
 	bseq_file_t *fp = 0;
 	ptr_v v = {0};
 	FILE *fpr = 0, *fpw = 0;
 
-	liftrlimit();
-	posixly_correct();
+	liftrlimit(); posixly_correct();
 	mm_realtime0 = realtime();
-	mm_mapopt_init(&opt);
-	switch (mm_mapopt_parse(&opt, argc, argv, &fnr, &fnw, &v)) {
+	mm_mapopt_t *opt = mm_mapopt_init();
+	switch (mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &v)) {
 		case 1: puts(MM_VERSION); ret = 0; goto _final;
-		case 2: mm_print_help(&opt); ret = 0; goto _final;
+		case 2: mm_print_help(opt); ret = 0; goto _final;
 	}
-	if (v.n == 0) { mm_print_help(&opt); ret = 1; goto _final; }
-	if (opt.w >= 16) opt.w = (int)(.6666667 * opt.k + .499);
-	if ((err = mm_mapopt_check(&opt))) {
+	if (v.n == 0) { mm_print_help(opt); ret = 1; goto _final; }
+	if (opt->w >= 16) opt->w = (int)(.6666667 * opt->k + .499);
+	if ((err = mm_mapopt_check(opt))) {
 		fprintf(stderr, "[M::%s] ERROR: %s\n", __func__, err);
 		ret = 1; goto _final;
 	}
 
 	if (fnr) fpr = fopen(fnr, "rb");
 	if (fnw) fpw = fopen(fnw, "wb");
-	for (uint64_t i = 0; i < (fpr? 0x7fffffff : (((opt.flag&MM_AVA) || fpw)? v.n : 1)); ++i) {
+	for (uint64_t i = 0; i < (fpr? 0x7fffffff : (((opt->flag&MM_AVA) || fpw)? v.n : 1)); ++i) {
 		uint32_t qid = base_qid;
 		mm_idx_t *mi = 0;
 		mm_align_t *aln = 0;
 		if (fpr) mi = mm_idx_load(fpr);
-		else mi = mm_idx_gen(&opt, (fp = bseq_open((const char *)v.a[i], base_rid, 0, 0))), base_rid = bseq_close(fp);
+		else mi = mm_idx_gen(opt, (fp = bseq_open((const char *)v.a[i], base_rid, 0, 0))), base_rid = bseq_close(fp);
 		if (mi == 0) {
 			if (fpr && i > 0) break;
 			fprintf(stderr, "[M::%s] ERROR: failed to %s `%s'. Please check %s.\n", __func__, fpr? "load index file" : "open sequence file", fpr? fnr : (const char*)v.a[i], fpr? "file path, format and its version" : "file path and format");
@@ -1684,8 +1651,8 @@ int main(int argc, char *argv[])
 		}
 		if (mm_verbose >= 3) fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %lu target sequence(s)\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->s.n);
 		if (fpw) mm_idx_dump(fpw, mi);
-		else aln = mm_align_init(&opt, mi);
-		for (uint64_t j = (!fpr && !(opt.flag&MM_AVA)); j < (fpw? 0 : v.n); ++j) mm_align_file(aln, (fp = bseq_open((const char*)v.a[j], qid, (opt.flag&MM_KEEP_QUAL)!=0, opt.tags.n!=0))), qid = bseq_close(fp);
+		else aln = mm_align_init(opt, mi);
+		for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < (fpw? 0 : v.n); ++j) mm_align_file(aln, (fp = bseq_open((const char*)v.a[j], qid, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n!=0))), qid = bseq_close(fp);
 		if (!fpw) mm_align_destroy(aln);
 		mm_idx_destroy(mi);
 	}
@@ -1695,7 +1662,7 @@ int main(int argc, char *argv[])
 	fprintf(stderr, "\n[M::%s] Real time: %.3f sec; CPU: %.3f sec\n", __func__, realtime() - mm_realtime0, cputime());
 	ret = 0;
 _final:
-	free(v.a); free(opt.rg_line); free(opt.rg_id);
+	free(v.a); mm_mapopt_destroy(opt);
 	if (fpr) fclose(fpr);
 	if (fpw) fclose(fpw);
 	return ret;
