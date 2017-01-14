@@ -88,14 +88,13 @@ int main(int argc, char *argv[])
 
 		while((c = getc(fp)) != EOF) {
 			putc(arr & 0xff, o);
-			if((arr = (arr>>8) | ((uint32_t)c<<24)) == 0x09444840) { fprintf(stderr, "split\n"); break; }	/* "@HD\t" */
+			if((arr = (arr>>8) | ((uint32_t)c<<24)) == 0x09444840) { break; }	/* "@HD\t" */
 		}
 		if(c == EOF) {
 			while(arr != 0) { putc(arr & 0xff, o); arr >>= 8; }	/* flush */
 		}
 		fclose(o);
 	} while(c != EOF);
-	fprintf(stderr, "finished\n");
 	return 0;
 }
 
