@@ -102,6 +102,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 
 ## Updates
 
+* 2016/1/15 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags).
 * 2016/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.
 * 2016/12/6 (0.4.2) Add splitted alignment rescuing algorithm.
 * 2016/12/1 (0.4.1) Fix bug in sam output (broken CIGAR with both reverse-complemented and secondary flags).
