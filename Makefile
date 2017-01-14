@@ -25,8 +25,13 @@ install:
 	mkdir -p $(PREFIX)/bin
 	cp minialign $(PREFIX)/bin/minialign
 
+install.all:
+	mkdir -p $(PREFIX)/bin
+	cp minialign $(PREFIX)/bin/minialign
+	cp samsplit $(PREFIX)/bin/samsplit
+
 uninstall:
-	rm $(PREFIX)/bin/minialign
+	rm $(PREFIX)/bin/minialign $(PREFIX)/bin/samsplit
 
 minialign.c: kvec.h ptask.h gaba.h
 ptask.c: ptask.h queue.h unittest.h sassert.h
