@@ -9,6 +9,7 @@
  * @license MIT
  */
 #include <getopt.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,7 +83,7 @@ int main(int argc, char *argv[])
 	do {
 		char filename[256];
 		FILE *o = NULL;
-		sprintf(filename, "%s%s%04lu.sam", strlen(prefix) > 0 ? prefix : "", strlen(prefix) > 0 ? "." : "", cnt++);
+		sprintf(filename, "%s%s%04" PRIu64 ".sam", strlen(prefix) > 0 ? prefix : "", strlen(prefix) > 0 ? "." : "", cnt++);
 		if((o = fopen(filename, "w")) == NULL) {
 			fprintf(stderr, "[ERROR] failed to open output file `%s'.\n", filename);
 			return(-1);
