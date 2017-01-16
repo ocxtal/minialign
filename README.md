@@ -90,6 +90,36 @@ Collected seeds (minimizers) were first sorted by its (rpos - 2*qpos) value, res
 
 The second head seed of each chain is extended upward (3' on the reference side) then downward from the maximum score position found. If the resulted path is shorter than the seed chain span, similar extension is repeatedly performed on the next one (three times at the maximum). Each extension is carried out by the [GABA library](https://github.com/ocxtal/libgaba), which implements the adaptive-banded semi-global Smith-Waterman-Gotoh algorithm with difference recurrences.
 
+## FAQs and recipes
+
+### Is the minialign applicable to Illumina datasets?
+
+Generally, no. The seed-chaining algorithm is not good at detecting dense, clustered seed chain caused by short and high-identity Illumina reads.
+
+### Mapped read ratio is slightly low
+
+First of all, check the post-filter thresholds `-s`: minimum score and `-m`: report threshold to the highest scoring alignment. The default values `-s50` and `-m0.3` is roughly works well on typical PacBio long reads and ONT 1D/2D reads whose read lengths range above 300 bases but sometimes not being suitable for specific datasets.
+
+If the result did not improve after adjusting (generally lowering) `-s` and `-m` values, try smaller k-mer lengths (`-k`) and minimizer window sizes (`-w`). Smaller values like `-k14` and `-w5` will slightly improve sensitivity (especially on the all-versus-all alignment tasks) but significantly increase calculation time.
+
+Adjusting alignment scoring parameters `-a`, `-b`, `-p` and `-q` (match award, mismatch penalty, gap open penalty and gap extension penalty) is also preferable if you are aware of identity between read sets and reference sequences. Increasing `-b` and `-p` by one or two (like `-a1 -b2 -p2 -q1`) may perform better detecting correct mapping position on relatively high-identity (90 to 95% between reads and references) read sets.
+
+### Quality string is missing in the output sam
+
+Pass `-Q` flag.
+
+### @RG tag is missing in the header
+
+Passing `-TRG` flag adds the default `@RG	ID:1` line and the corresponding `RG:Z:1` tag in each alignment record. If you need more specific line, pass `-R` flag, which is the same as the BWA-MEM's `-R` option, like `-R"@RG\tID:foo\tSM:bar"`.
+
+### Keeping comments in the input fasta/q files
+
+Pass `-M` flag. Note that each tab (`\t`) in the lines will be replaced by a space.
+
+### Keeping optional tags in the input bam files
+
+Passing `-U` flag with a list of tags to be transferred, for example, `-UAX,XS`.
+
 ## Notes, issues and limitations
 
 * Quality strings are discarded by default, please pass `-Q` flag to keep quality string in the input fastq/bam files.
