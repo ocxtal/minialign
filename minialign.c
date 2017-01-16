@@ -16,6 +16,8 @@
 #include "ptask.h"
 #include "gaba.h"
 #include "sassert.h"
+#include "arch/arch.h"
+
 
 #define MM_VERSION "0.4.4"
 
@@ -161,11 +163,13 @@ _bam_read_header_fail:
 
 /* bseq.c */
 typedef struct {
-	uint32_t is_eof, base_rid, keep_qual, keep_tag;
 	gzFile fp;
 	kseq_t *ks;
 	bam_header_t *bh;
 	uint8_v buf;
+	uint16_t *tags;
+	uint32_t l_tags, base_rid;
+	uint8_t is_eof, keep_qual, keep_comment;
 } bseq_file_t;
 
 // sam optional tags
@@ -191,7 +195,16 @@ static unsigned char seq_nt4_table_4bit[32] = {
 	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
 };
 
-static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_qual, uint32_t keep_tag)
+static uint64_t bseq_search_tag(uint32_t l_tags, const uint16_t *tags, uint16_t t1, uint16_t t2)
+{
+	v32i16_t tv = _set_v32i16((t2<<8) | t1);
+	for (uint64_t i = 0; i < ((l_tags + 0x1f) & ~0x1f); i+=0x20) {
+		if (((v32_masku_t){ .mask = _mask_v32i16(_eq_v32i16(_load_v32i16(&tags[i]), tv)) }).all != 0) return 1;
+	}
+	return 0;
+}
+
+static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_qual, uint32_t l_tags, const uint16_t *tags)
 {
 	int c;
 	bseq_file_t *fp;
@@ -199,13 +212,17 @@ static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_q
 	f = fn && strcmp(fn, "-")? gzopen(fn, "r") : gzdopen(fileno(stdin), "r");
 	if (f == 0) return 0;
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
-	fp->base_rid = base_rid; fp->keep_qual = keep_qual; fp->keep_tag = keep_tag;
+	fp->base_rid = base_rid; fp->keep_qual = keep_qual;
 	fp->fp = f;
 	if ((c = gzgetc(fp->fp)) == 'B')	// test bam signature
 		gzungetc(c, fp->fp), fp->bh = bam_read_header(fp->fp);
 	else if (c == '>' || c == '@')
 		gzungetc(c, fp->fp), fp->ks = kseq_init(fp->fp);
 	else free(fp), fp = 0;
+
+	fp->tags = calloc(((fp->l_tags = l_tags) + 0x1f) & ~0x1f, sizeof(uint16_t));
+	memcpy(fp->tags, tags, l_tags * sizeof(uint16_t));
+	fp->keep_comment = bseq_search_tag(fp->l_tags, fp->tags, 'C', 'O');
 	return fp;
 }
 
@@ -217,6 +234,27 @@ static uint32_t bseq_close(bseq_file_t *fp)
 	gzclose(fp->fp);
 	free(fp);
 	return base_rid;
+}
+
+static uint64_t bseq_save_tags(uint32_t l_tags, const uint16_t *tags, uint32_t l_arr, uint8_t *arr, uint8_t *q)
+{
+	static const uint8_t tag_size[32] = {
+		0, 1, 0xfe, 1,  0, 0, 4, 0,  0xfe, 4, 0, 0,  0, 0, 0, 0,
+		0, 0, 0, 2,     0, 0, 0, 0,  0, 0, 0xff, 0,  0, 0, 0, 0,
+	};
+	const uint8_t *p = arr, *tail = arr + l_arr;
+	while (p < tail) {
+		uint64_t keep = bseq_search_tag(l_tags, tags, p[0], p[1]), size;
+		if ((size = tag_size[p[2]&0x1f]) == 0xff) {
+			if (keep) while ((*q++ = *p++)) {}				
+			else while (*p++) {}
+		} else {
+			uint64_t len =  (size == 0xfe)? 8 + tag_size[p[3]&0x1f] * *((uint32_t*)&p[4]) : 3 + size;
+			if (keep) { memcpy(q, p, len); q += len; }
+			p += len;
+		}
+	}
+	return p - arr;
 }
 
 static void bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *mem)
@@ -236,11 +274,11 @@ static void bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *
 	stag = squal + c->l_qseq; l_tag = ((uint8_t*)fp->buf.a + size) - stag;
 
 	kv_pushp(bseq_t, *seq, &s);
-	kv_reserve(uint8_t, *mem, mem->n + c->l_qname + c->l_qseq + ((fp->keep_qual && *squal != 0xff)? c->l_qseq : 0) + (fp->keep_tag? l_tag : 0) + 3);
+	kv_reserve(uint8_t, *mem, mem->n + c->l_qname + c->l_qseq + ((fp->keep_qual && *squal != 0xff)? c->l_qseq : 0) + (fp->l_tags? l_tag : 0) + 3);
 	s->l_seq = c->l_qseq;
 	s->rid = seq->n + fp->base_rid - 1;
 	s->l_name = c->l_qname - 1;		// remove tail '\0'
-	s->l_tag = fp->keep_tag? l_tag : 0;
+	s->l_tag = fp->l_tags? l_tag : 0;
 
 	s->name = (char *)mem->n;
 	memcpy(mem->a + mem->n, sname, c->l_qname); mem->n += c->l_qname;
@@ -255,16 +293,14 @@ static void bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *
 
 	s->qual = (uint8_t *)mem->n;
 	if (fp->keep_qual && *squal != 0xff) {
-		if (c->flag&0x10) {
-			for (int64_t i = c->l_qseq-1; i >= 0; --i) mem->a[mem->n++] = squal[i] + 33;
-		} else {
-			for (int64_t i = 0; i < c->l_qseq; ++i) mem->a[mem->n++] = squal[i] + 33;
-		}
+		if (c->flag&0x10) { for (int64_t i = c->l_qseq-1; i >= 0; --i) mem->a[mem->n++] = squal[i] + 33; }
+		else { for (int64_t i = 0; i < c->l_qseq; ++i) mem->a[mem->n++] = squal[i] + 33; }
 	}
 	mem->a[mem->n++] = '\0';
 
 	s->tag = (uint8_t *)mem->n;
-	if (fp->keep_tag && l_tag) { memcpy(mem->a + mem->n, stag, l_tag); mem->n += l_tag; }
+	// if (fp->l_tags && l_tag) { memcpy(mem->a + mem->n, stag, l_tag); mem->n += l_tag; }
+	if (fp->l_tags && l_tag) mem->n += bseq_save_tags(fp->l_tags, fp->tags, l_tag, stag, mem->a + mem->n);
 	mem->a[mem->n++] = '\0';
 	return;
 }
@@ -275,7 +311,7 @@ static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	kseq_t *ks = fp->ks;
 
 	kv_pushp(bseq_t, *seq, &s);
-	kv_reserve(uint8_t, *mem, mem->n + ks->name.l + ks->seq.l + ((fp->keep_qual && ks->qual.l)? ks->seq.l : 0) + 4);
+	kv_reserve(uint8_t, *mem, mem->n + ks->name.l + ks->seq.l + ((fp->keep_qual && ks->qual.l)? ks->seq.l : 0) + ((fp->keep_comment && ks->comment.l)? ks->comment.l+3 : 0) + 4);
 	s->l_seq = ks->seq.l;
 	s->rid = seq->n + fp->base_rid - 1;
 	s->l_name = ks->name.l;
@@ -285,15 +321,19 @@ static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	memcpy(mem->a + mem->n, ks->name.s, ks->name.l); mem->n += ks->name.l;
 	mem->a[mem->n++] = '\0';
 
+	s->tag = (uint8_t *)mem->n;
+	if (fp->keep_comment && ks->comment.l) {
+		mem->a[mem->n++] = 'C'; mem->a[mem->n++] = 'O'; mem->a[mem->n++] = 'Z';
+		memcpy(mem->a + mem->n, ks->comment.s, ks->comment.l); mem->n += ks->comment.l;
+	}
+	mem->a[mem->n++] = '\0';
+
 	s->seq = (uint8_t *)mem->n;
 	for (uint64_t i = 0; i < ks->seq.l; ++i) mem->a[mem->n++] = seq_nt4_table_4bit[0x1f&ks->seq.s[i]];
 	mem->a[mem->n++] = '\0';
 
 	s->qual = (uint8_t *)mem->n;
 	if (fp->keep_qual && ks->qual.l) { memcpy(mem->a + mem->n, ks->qual.s, ks->qual.l); mem->n += ks->qual.l; }
-	mem->a[mem->n++] = '\0';
-
-	s->tag = (uint8_t *)mem->n;
 	mem->a[mem->n++] = '\0';
 	return;
 }
@@ -428,6 +468,7 @@ static void mm_sketch(const uint8_t *seq4, uint32_t len, uint32_t w, uint32_t k,
 #define MM_XS			( 2 )
 #define MM_SA			( 3 )
 #define MM_MD			( 4 )
+#define MM_CO			( 5 )
 
 #define MM_AVA			( 0x01ULL<<56 )
 #define MM_KEEP_QUAL	( 0x02ULL<<56 )
@@ -1218,6 +1259,7 @@ static void mm_print_tags(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16
 	return;
 }
 
+/*
 static int32_t mm_search_tag(mm_align_t *b, char tag1, char tag2)
 {
 	uint16_t tag = (uint16_t)tag1 | ((uint16_t)tag2<<8);
@@ -1226,6 +1268,7 @@ static int32_t mm_search_tag(mm_align_t *b, char tag1, char tag2)
 	}
 	return -1;
 }
+*/
 
 static const uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 {
@@ -1250,15 +1293,17 @@ static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
 		0, 1, 0xfe, 1,  0, 0, 4, 0,  0xfe, 4, 0, 0,  0, 0, 0, 0,
 		0, 0, 0, 2,     0, 0, 0, 0,  0, 0, 0xff, 0,  0, 0, 0, 0,
 	};
-	uint8_t size;
+	// uint8_t size;
 	const uint8_t *p = t->tag, *tail = p + t->l_tag;
 	while (p < tail) {
+		/*
 		if (mm_search_tag(b, p[0], p[1]) < 0) {	// skip
 			if ((size = tag_size[p[2]&0x1f]) < 0x10) p += 3 + size;
 			else if(size == 0xfe) p += 4 + tag_size[p[3]&0x1f] * *((uint32_t*)&p[4]);
 			else while (*p++) {}
 			continue;
 		}
+		*/
 		_put(b, '\t'); _put(b, p[0]); _put(b, p[1]); _put(b, ':'); _put(b, p[2]); _put(b, ':');
 		if (p[2] == 'Z') {
 			p += 3; while(*p) { _put(b, *p); p++; } p++;
@@ -1519,6 +1564,7 @@ static uint64_t mm_mapopt_parse_tags(const char *p, uint16_v *buf)
 			else if (strncmp(p, "XS", 2) == 0) flag |= 0x01ULL<<MM_XS;
 			else if (strncmp(p, "SA", 2) == 0) flag |= 0x01ULL<<MM_SA;
 			else if (strncmp(p, "MD", 2) == 0) flag |= 0x01ULL<<MM_MD;
+			else if (strncmp(p, "CO", 2) == 0) flag |= 0x01ULL<<MM_CO;
 		}
 		if (*q == '\0') break;
 		p = q + 1;
@@ -1643,7 +1689,7 @@ int main(int argc, char *argv[])
 		mm_idx_t *mi = 0;
 		mm_align_t *aln = 0;
 		if (fpr) mi = mm_idx_load(fpr);
-		else mi = mm_idx_gen(opt, (fp = bseq_open((const char *)v.a[i], base_rid, 0, 0))), base_rid = bseq_close(fp);
+		else mi = mm_idx_gen(opt, (fp = bseq_open((const char *)v.a[i], base_rid, 0, 0, NULL))), base_rid = bseq_close(fp);
 		if (mi == 0) {
 			if (fpr && i > 0) break;
 			fprintf(stderr, "[M::%s] ERROR: failed to %s `%s'. Please check %s.\n", __func__, fpr? "load index file" : "open sequence file", fpr? fnr : (const char*)v.a[i], fpr? "file path, format and its version" : "file path and format");
@@ -1652,7 +1698,7 @@ int main(int argc, char *argv[])
 		if (mm_verbose >= 3) fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %lu target sequence(s)\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->s.n);
 		if (fpw) mm_idx_dump(fpw, mi);
 		else aln = mm_align_init(opt, mi);
-		for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < (fpw? 0 : v.n); ++j) mm_align_file(aln, (fp = bseq_open((const char*)v.a[j], qid, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n!=0))), qid = bseq_close(fp);
+		for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < (fpw? 0 : v.n); ++j) mm_align_file(aln, (fp = bseq_open((const char*)v.a[j], qid, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n, opt->tags.a))), qid = bseq_close(fp);
 		if (!fpw) mm_align_destroy(aln);
 		mm_idx_destroy(mi);
 	}
