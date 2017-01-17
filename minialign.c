@@ -44,7 +44,8 @@ static void oom_abort(const char *name)
 }
 
 #define mm_malloc(x) ({ \
-	void *_ptr = malloc((size_t)(x)); \
+	size_t _x = (size_t)(x); \
+	void *_ptr = malloc(_x); \
 	if (_ptr == NULL) { oom_abort(__func__); } \
 	_ptr; \
 })
@@ -63,6 +64,22 @@ static void oom_abort(const char *name)
 	_ptr; \
 })
 #define calloc(x, y)	mm_calloc(x, y)
+
+#define _pnum(type, _buf, _n) ({ \
+	uint8_t _b[16] = {0}; \
+	type _m = (type)(_n); int64_t _i = 0; \
+	while (_m) _b[_i++] = _m % 10, _m /= 10; \
+	uint64_t _len = _i + (_i == 0); \
+	for (int64_t _j = 0; _j < _len; _j++) { _buf[_j] = _b[_len - _j - 1] + '0'; } \
+	_len; \
+})
+
+#define _pstr(_buf, _str) ({ \
+	const char *_p = (_str); \
+	char *_q = (_buf); \
+	while ((*_q++ = *_p++)) {} \
+	_q - _buf - 1; \
+})
 
 /* end of misc.c */
 
@@ -702,7 +719,9 @@ static void *mm_idx_worker(void *arg, void *item)
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
 
-	set_info("[mm_idx_worker] collect minimizers");
+	char buf[128], *p = buf;
+	p += _pstr(p, "[mm_idx_worker] bin id "); p += _pnum(uint32_t, p, s->seq[0].rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->seq[s->n_seq-1].rid);
+	set_info(buf);
 	for (uint64_t i = 0; i < s->n_seq; ++i)
 		mm_sketch(s->seq[i].seq, s->seq[i].l_seq, q->mi->w, q->mi->k, s->seq[i].rid, &s->a);
 	return s;
@@ -1095,11 +1114,12 @@ static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm1
 		qs = _m(qs); qs = rev? (int32_t)(qf->len-qs+k-1) : qs;
 		// upward extension
 		gaba_fill_t *f = gaba_dp_fill_root(dp, r = &rr, ref->l_seq-rs-1, q = qu, qu->len-qs-1), *m = f;
+		if (f == NULL) goto _abort;
 		uint32_t flag = GABA_STATUS_TERM;
 		do {
 			if (f->status & GABA_STATUS_UPDATE_A) flag |= GABA_STATUS_UPDATE_A, r = t;
 			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
-			f = gaba_dp_fill(dp, f, r, q);
+			if ((f = gaba_dp_fill(dp, f, r, q) ) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
 		} while(!(flag & f->status));
 		// find max
@@ -1108,16 +1128,16 @@ static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm1
 		if ((itr = kh_get(pos, pos, ((uint64_t)ref->rid<<32) | p.apos)) != kh_end(pos) && (uint32_t)kh_val(pos, itr) == p.bpos) return 0;
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
-		m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1);
+		if ((m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1)) == NULL) goto _abort;
 		flag = GABA_STATUS_TERM;
 		do {
 			if (f->status & GABA_STATUS_UPDATE_A) flag |= GABA_STATUS_UPDATE_A, r = t;
 			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
-			f = gaba_dp_fill(dp, f, r, q);
+			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
 		} while(!(flag & f->status));
 		// convert alignment to cigar
-		a[j++] = gaba_dp_trace(dp, NULL, m, NULL);
+		if ((a[j++] = gaba_dp_trace(dp, NULL, m, NULL)) == NULL) goto _abort;
 		if (a[j-1]->score < min) continue;	// search again
 		break;
 	}
@@ -1131,6 +1151,10 @@ static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm1
 	}
 	*pitr = itr;
 	return a[0];	// one alignment is returned regardless of the score
+
+_abort:;
+	oom_abort(__func__);
+	return 0;
 }
 
 static void mm_record(const bseq_t *ref, uint32_t l_seq, const gaba_alignment_t *a, poshash_t *pos, khint_t itr, mm128_v *reg)
@@ -1304,7 +1328,7 @@ static int32_t mm_search_tag(mm_align_t *b, char tag1, char tag2)
 }
 */
 
-static const uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
+static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 {
 	if (type == 'a') { _put(b, *p); return 1; }
 	else if (type == 'c') { _puti(int8_t, b, (int8_t)*p); return 1; }
@@ -1394,6 +1418,7 @@ static void mm_print_mapped(mm_align_t *b, const bseq_t *t, const reg_t *a, uint
 
 static void *mm_align_source(void *arg)
 {
+	set_info("[mm_align_source] fetch sequence block");
 	mm_align_t *b = (mm_align_t*)arg;
 	mm_align_step_t *s = (mm_align_step_t*)calloc(1, sizeof(mm_align_step_t));
 	s->seq = bseq_read(b->fp, b->opt->batch_size, &s->n_seq, &s->base, &s->size);
@@ -1405,6 +1430,11 @@ static void *mm_align_worker(void *arg, void *item)
 {
 	mm_tbuf_t *t = (mm_tbuf_t*)arg;
 	mm_align_step_t *s = (mm_align_step_t*)item;
+
+	char buf[128], *p = buf;
+	p += _pstr(p, "[mm_align_worker] bin id "); p += _pnum(uint32_t, p, s->seq[0].rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->seq[s->n_seq-1].rid);
+	set_info(buf);
+
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
 		mm128_t *r;
 		kv_pushp(mm128_t, s->reg, &r);
@@ -1418,6 +1448,7 @@ static void mm_align_drain(void *arg, void *item)
 	mm_align_t *b = (mm_align_t*)arg;
 	mm_align_step_t *s = (mm_align_step_t*)item;
 
+	set_info("[mm_align_drain] dump alignments to sam records");
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
 		mm128_t *r = (mm128_t*)s->reg.a[i].u64[0];
 		uint32_t n_reg = s->reg.a[i].u64[1];
