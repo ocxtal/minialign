@@ -310,12 +310,13 @@ static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	bseq_t *s;
 	kseq_t *ks = fp->ks;
 
+	uint64_t l_tag = (fp->keep_comment && ks->comment.l)? ks->comment.l+3 : 0;
 	kv_pushp(bseq_t, *seq, &s);
-	kv_reserve(uint8_t, *mem, mem->n + ks->name.l + ks->seq.l + ((fp->keep_qual && ks->qual.l)? ks->seq.l : 0) + ((fp->keep_comment && ks->comment.l)? ks->comment.l+3 : 0) + 4);
+	kv_reserve(uint8_t, *mem, mem->n + ks->name.l + ks->seq.l + ((fp->keep_qual && ks->qual.l)? ks->seq.l : 0) + l_tag + 4);
 	s->l_seq = ks->seq.l;
 	s->rid = seq->n + fp->base_rid - 1;
 	s->l_name = ks->name.l;
-	s->l_tag = 0;	// no tags available in fasta/q
+	s->l_tag = l_tag;	// comment is transferred to CO:Z: tag if bseq_open is initialized with "CO" tag option
 
 	s->name = (char *)mem->n;
 	memcpy(mem->a + mem->n, ks->name.s, ks->name.l); mem->n += ks->name.l;
