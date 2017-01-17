@@ -12,18 +12,66 @@
 #include <sys/time.h>
 #include <sys/types.h>
 
+/* misc.c */
+#define MM_VERSION "0.4.4"
+
+#define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
+#define MIN2(x,y) 		( (x) < (y) ? (x) : (y) )
+
+int mm_verbose = 3;
+double mm_realtime0;
+
+static double cputime()
+{
+	struct rusage r;
+	getrusage(RUSAGE_SELF, &r);
+	return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
+}
+
+static double realtime()
+{
+	struct timeval tp;
+	gettimeofday(&tp, NULL);
+	return tp.tv_sec + tp.tv_usec * 1e-6;
+}
+
+_Thread_local const char *info;	// thread-local comment on the current tasks
+#define set_info(x)		( info = (const char *)(x), 0 )
+static void oom_abort(const char *name)
+{
+	fprintf(stderr, "[M::%s] ERROR: Out of memory. (%s)\n", name, info == NULL? "No additional information available" : info);
+	exit(128);	// 128 reserved for out of memory
+}
+
+#define mm_malloc(x) ({ \
+	void *_ptr = malloc((size_t)(x)); \
+	if (_ptr == NULL) { oom_abort(__func__); } \
+	_ptr; \
+})
+#define malloc(x)		mm_malloc(x)
+
+#define mm_realloc(x, y) ({ \
+	void *_ptr = realloc((void *)(x), (size_t)(y)); \
+	if (_ptr == NULL) { oom_abort(__func__); } \
+	_ptr; \
+})
+#define realloc(x, y)	mm_realloc(x, y)
+
+#define mm_calloc(x, y) ({ \
+	void *_ptr = calloc((size_t)(x), (size_t)(y)); \
+	if (_ptr == NULL) { oom_abort(__func__); } \
+	_ptr; \
+})
+#define calloc(x, y)	mm_calloc(x, y)
+
+/* end of misc.c */
+
+
 #include "kvec.h"
 #include "ptask.h"
 #include "gaba.h"
 #include "sassert.h"
 #include "arch/arch.h"
-
-
-#define MM_VERSION "0.4.4"
-
-
-#define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
-#define MIN2(x,y) 		( (x) < (y) ? (x) : (y) )
 
 #include "kseq.h"
 KSEQ_INIT(gzFile, gzread)
@@ -68,27 +116,6 @@ typedef khash_t(idx) idxhash_t;
 #define pos_eq(a, b)	((a)==(b))
 KHASH_INIT(pos, uint64_t, uint64_t, 1, pos_hash, pos_eq)
 typedef khash_t(pos) poshash_t;
-
-/* misc.c */
-
-int mm_verbose = 3;
-double mm_realtime0;
-
-static double cputime()
-{
-	struct rusage r;
-	getrusage(RUSAGE_SELF, &r);
-	return r.ru_utime.tv_sec + r.ru_stime.tv_sec + 1e-6 * (r.ru_utime.tv_usec + r.ru_stime.tv_usec);
-}
-
-static double realtime()
-{
-	struct timeval tp;
-	gettimeofday(&tp, NULL);
-	return tp.tv_sec + tp.tv_usec * 1e-6;
-}
-
-/* end of misc.c */
 
 /* bamlite.c in bwa */
 typedef struct {
@@ -209,6 +236,8 @@ static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_q
 	int c;
 	bseq_file_t *fp;
 	gzFile f;
+
+	set_info("[bseq_open] initialize bseq object");
 	f = fn && strcmp(fn, "-")? gzopen(fn, "r") : gzdopen(fileno(stdin), "r");
 	if (f == 0) return 0;
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
@@ -345,6 +374,7 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n, void
 	bseq_v seq = {0};
 	static const uint8_t margin[64] = {0};
 
+	set_info("[bseq_read] read sequence block from file");
 	kv_reserve(uint8_t, mem, chunk_size + 128);
 	kv_pushm(uint8_t, mem, margin, 64);
 	if (fp->bh) {
@@ -494,36 +524,28 @@ static void mm_mapopt_destroy(mm_mapopt_t *opt)
 
 static mm_mapopt_t *mm_mapopt_init(void)
 {
+	set_info("[mm_mapopt_init] initialize mapopt object");
 	mm_mapopt_t *opt = calloc(1, sizeof(mm_mapopt_t));
-	opt->k = 15;
-	opt->w = 16;
-	opt->b = 14;
-	opt->flag = 0;
-	opt->sidx = 0;
-	opt->eidx = 3;
-	opt->hlim = 5000;
-	opt->llim = 5000;
-	opt->blim = 0;
-	opt->elim = 200;
-	opt->m = 1;
-	opt->x = 1;
-	opt->gi = 1;
-	opt->ge = 1;
-	opt->xdrop = 50;
-	opt->min = 50;
-	opt->min_ratio = 0.3;
-	opt->frq[0] = 0.05, opt->frq[1] = 0.01, opt->frq[2] = 0.001;
-	opt->n_frq = 3;
-	opt->n_threads = 1;
-	opt->batch_size = 1024 * 1024;
-	opt->outbuf_size = 512 * 1024;
-	opt->rg_line = opt->rg_id = NULL;
+	*opt = (mm_mapopt_t){
+		/* -f, -k, -w, -b, -T */ .k = 15, .w = 16, .b = 14, .flag = 0,
+		/* -a, -b, -p, -q */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
+		/* -s, -m */ .min = 50, .min_ratio = 0.3,
+		/* -f */ .n_frq = 3, .frq[0] = 0.05, .frq[1] = 0.01, .frq[2] = 0.001,
+		/* -t */ .n_threads = 1,
+		/* -R */ .rg_line = NULL, .rg_id = NULL,
+
+		/* -S, -E */.sidx = 0, .eidx = 3,
+		.hlim = 5000, .llim = 5000, .blim = 0, .elim = 200,
+		.batch_size = 1024 * 1024,
+		.outbuf_size = 512 * 1024
+	};
 	return opt;
 }
 
 static const char *mm_mapopt_check(mm_mapopt_t *opt)
 {
 	uint64_t i;
+	set_info("[mm_mapopt_check] check params");
 	if (opt->w >= 16) return "w must be inside [1,16).";
 	if (opt->k >= 32) return "k must be inside [1,32).";
 	if (opt->sidx >= 16) return "sidx must be inside [0,16).";
@@ -622,6 +644,8 @@ static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
 	uint64_t n = 0;
 	uint32_t thres;
 	khint_t *a, k;
+
+	set_info("[mm_idx_cal_max_occ] calculate occurrence thresholds");
 	if (f <= 0.) return UINT32_MAX;
 	for (uint64_t i = (n = 0); i < 1ULL<<mi->b; ++i)
 		if (mi->B[i].h) n += kh_size((idxhash_t*)mi->B[i].h);
@@ -663,6 +687,8 @@ static void *mm_idx_source(void *arg)
 	mm_idx_step_t *s = (mm_idx_step_t*)calloc(1, sizeof(mm_idx_step_t));
 	uint64_t size;
 	void *base;
+
+	set_info("[mm_idx_source] fetch sequence block");
 	s->seq = bseq_read(q->fp, q->batch_size, &s->n_seq, &base, &size);
 	if (s->seq == 0) { free(s), s = 0; return 0; }
 
@@ -676,6 +702,7 @@ static void *mm_idx_worker(void *arg, void *item)
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
 
+	set_info("[mm_idx_worker] collect minimizers");
 	for (uint64_t i = 0; i < s->n_seq; ++i)
 		mm_sketch(s->seq[i].seq, s->seq[i].l_seq, q->mi->w, q->mi->k, s->seq[i].rid, &s->a);
 	return s;
@@ -683,6 +710,7 @@ static void *mm_idx_worker(void *arg, void *item)
 
 static void mm_idx_drain(void *arg, void *item)
 {
+	set_info("[mm_idx_drain] dump minimizers to pool");
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
 	uint64_t mask = (1<<q->mi->b) - 1;
@@ -706,6 +734,7 @@ typedef struct {
 
 static void *mm_idx_post(void *arg, void *item)
 {
+	set_info("[mm_idx_post] indexing postprocess");
 	mm_idx_post_t *q = (mm_idx_post_t*)arg;
 	mm_idx_t *mi = q->mi;
 
@@ -763,6 +792,8 @@ static void *mm_idx_post(void *arg, void *item)
 static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 {
 	mm_idx_pipeline_t pl = {0}, **p;
+
+	set_info("[mm_idx_gen] initialize index object");
 	pl.batch_size = opt->batch_size;
 	pl.fp = fp;
 	if (pl.fp == 0) return 0;
@@ -805,6 +836,7 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 {
 	uint32_t x[3];
 	uint64_t size = 0, y[2];
+	set_info("[mm_idx_dump] dump index to file");
 	for (uint64_t i = (size = 0); i < mi->size.n; ++i) size += mi->size.a[i];
 	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
 	fwrite(MM_IDX_MAGIC, 1, 4, fp);
@@ -853,6 +885,7 @@ static mm_idx_t *mm_idx_load(FILE *fp)
 	uint64_t bsize, y[2];
 
 	mm_idx_t *mi;
+	set_info("[mm_idx_load] load index from file");
 	if (fread(magic, 1, 4, fp) != 4) return 0;
 	if (strncmp(magic, MM_IDX_MAGIC, 4) != 0) return 0;
 	if (fread(x, 4, 3, fp) != 3) return 0;
@@ -1669,6 +1702,7 @@ int main(int argc, char *argv[])
 	ptr_v v = {0};
 	FILE *fpr = 0, *fpw = 0;
 
+	set_info("[main] parsing arguments");
 	liftrlimit(); posixly_correct();
 	mm_realtime0 = realtime();
 	mm_mapopt_t *opt = mm_mapopt_init();
@@ -1683,6 +1717,7 @@ int main(int argc, char *argv[])
 		ret = 1; goto _final;
 	}
 
+	set_info("[main] open index file");
 	if (fnr) fpr = fopen(fnr, "rb");
 	if (fnw) fpw = fopen(fnw, "wb");
 	for (uint64_t i = 0; i < (fpr? 0x7fffffff : (((opt->flag&MM_AVA) || fpw)? v.n : 1)); ++i) {
