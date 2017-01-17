@@ -36,7 +36,7 @@ static double realtime()
 }
 
 _Thread_local const char *info;	// thread-local comment on the current tasks
-#define set_info(x)		( info = (const char *)(x), 0 )
+#define set_info(x)		( info = (const char *)(x) )
 static void oom_abort(const char *name)
 {
 	fprintf(stderr, "[M::%s] ERROR: Out of memory. (%s)\n", name, info == NULL? "No additional information available" : info);
