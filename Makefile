@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99 -D_POSIX_C_SOURCE=200112L
+CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c11 -D_POSIX_C_SOURCE=201112L
 LIBS = -lm -lz -lpthread
 SRCS = minialign.c ptask.c queue.c queue_internal.c gaba_wrap.c
 PREFIX = /usr/local
@@ -7,7 +7,7 @@ PREFIX = /usr/local
 all: minialign samsplit
 
 minialign: $(SRCS) gaba_linear.o gaba_affine.o
-	$(CC) -o minialign $(CFLAGS) $^ $(LIBS)
+	$(CC) -o minialign $(CFLAGS) $(CFLAGS_MALLOC) $^ $(LIBS)
 
 gaba_linear.o: gaba.c gaba.h unittest.h sassert.h
 	$(CC) -c -o gaba_linear.o $(CFLAGS) -DMODEL=LINEAR -DSUFFIX gaba.c
