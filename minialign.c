@@ -275,7 +275,7 @@ static uint64_t bseq_save_tags(uint32_t l_tags, const uint16_t *tags, uint32_t l
 	while (p < tail) {
 		uint64_t keep = bseq_search_tag(l_tags, tags, p[0], p[1]), size;
 		if ((size = tag_size[p[2]&0x1f]) == 0xff) {
-			if (keep) while ((*q++ = *p++)) {}				
+			if (keep) while ((*q++ = *p++)) {}
 			else while (*p++) {}
 		} else {
 			uint64_t len =  (size == 0xfe)? 8 + tag_size[p[3]&0x1f] * *((uint32_t*)&p[4]) : 3 + size;
