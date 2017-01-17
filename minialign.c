@@ -1227,7 +1227,7 @@ static int32_t mm_search_tag(mm_align_t *b, char tag1, char tag2)
 	return -1;
 }
 
-static const uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
+static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 {
 	if (type == 'a') { _put(b, *p); return 1; }
 	else if (type == 'c') { _puti(int8_t, b, (int8_t)*p); return 1; }
