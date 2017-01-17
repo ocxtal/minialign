@@ -112,13 +112,13 @@ Pass `-Q` flag.
 
 Passing `-TRG` flag adds the default `@RG	ID:1` line and the corresponding `RG:Z:1` tag in each alignment record. If you need more specific line, pass `-R` flag, which is the same as the BWA-MEM's `-R` option, like `-R"@RG\tID:foo\tSM:bar"`.
 
-### Keeping comments in the input fasta/q files
-
-Pass `-M` flag. Note that each tab (`\t`) in the lines will be replaced by a space.
-
 ### Keeping optional tags in the input bam files
 
-Passing `-U` flag with a list of tags to be transferred, for example, `-UAX,XS`.
+Pass `-U` flag with a list of tags to be transferred, for example, `-UAX,XS`.
+
+### Keeping comments in the input fasta/q files
+
+Passing `-UCO` flag makes comments line in input fasta/q files (remaining strings after the first space in name lines) transferred to output sam as `CO:Z:` tags. Note that each tab (`\t`) in the comments will be replaced by a space.
 
 ## Notes, issues and limitations
 
