@@ -44,8 +44,7 @@ static void oom_abort(const char *name)
 }
 
 #define mm_malloc(x) ({ \
-	size_t _x = (size_t)(x); \
-	void *_ptr = malloc(_x); \
+	void *_ptr = malloc((size_t)(x)); \
 	if (_ptr == NULL) { oom_abort(__func__); } \
 	_ptr; \
 })
@@ -258,16 +257,18 @@ static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_q
 	f = fn && strcmp(fn, "-")? gzopen(fn, "r") : gzdopen(fileno(stdin), "r");
 	if (f == 0) return 0;
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
-	fp->base_rid = base_rid; fp->keep_qual = keep_qual;
-	fp->fp = f;
-	if ((c = gzgetc(fp->fp)) == 'B')	// test bam signature
-		gzungetc(c, fp->fp), fp->bh = bam_read_header(fp->fp);
-	else if (c == '>' || c == '@')
-		gzungetc(c, fp->fp), fp->ks = kseq_init(fp->fp);
-	else free(fp), fp = 0;
+	fp->base_rid = base_rid; fp->keep_qual = keep_qual; fp->fp = f;
+	for (uint64_t i = 0; i < 4; i++) {	// allow some invalid spaces at the head
+		if ((c = gzgetc(fp->fp)) == 'B') {	// test bam signature
+			gzungetc(c, fp->fp), fp->bh = bam_read_header(fp->fp); break;
+		} else if (c == '>' || c == '@') {
+			gzungetc(c, fp->fp), fp->ks = kseq_init(fp->fp); break;
+		}
+	}
+	if (!fp->bh && !fp->ks) { free(fp); return 0; }
 
 	fp->tags = calloc(((fp->l_tags = l_tags) + 0x1f) & ~0x1f, sizeof(uint16_t));
-	memcpy(fp->tags, tags, l_tags * sizeof(uint16_t));
+	if (l_tags && tags) memcpy(fp->tags, tags, l_tags * sizeof(uint16_t));
 	fp->keep_comment = bseq_search_tag(fp->l_tags, fp->tags, 'C', 'O');
 	return fp;
 }
@@ -618,8 +619,9 @@ typedef struct {
 static mm_idx_t *mm_idx_init(uint32_t w, uint32_t k, uint32_t b)
 {
 	mm_idx_t *mi = (mm_idx_t*)calloc(1, sizeof(mm_idx_t));
+	if (mi == 0) return 0;
 	mi->w = w<1? 1 : w, mi->k = k; mi->b = MIN2(k*2, b);
-	mi->B = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t));
+	if ((mi->B = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t))) == 0) free(mi), mi = 0;
 	return mi;
 }
 
