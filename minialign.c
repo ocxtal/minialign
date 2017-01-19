@@ -560,30 +560,32 @@ static mm_mapopt_t *mm_mapopt_init(void)
 	return opt;
 }
 
-static const char *mm_mapopt_check(mm_mapopt_t *opt)
+static int mm_mapopt_check(mm_mapopt_t *opt, int (*_fprintf)(FILE*,const char*,...), FILE *_fp)
 {
-	uint64_t i;
+	int ret = 0;
 	set_info("[mm_mapopt_check] check params");
-	if (opt->w >= 16) return "w must be inside [1,16).";
-	if (opt->k >= 32) return "k must be inside [1,32).";
-	if (opt->sidx >= 16) return "sidx must be inside [0,16).";
-	if (opt->eidx >= 16) return "eidx must be inside [0,16).";
-	if (opt->hlim < 100 || opt->hlim >= 100000) return "hlim must be inside [100,100000).";
-	if (opt->llim < 100 || opt->llim >= 100000) return "llim must be inside [100,100000).";
-	if (opt->blim >= 10000) return "blim must be inside [0,10000).";
-	if (opt->elim >= 10000) return "elim must be inside [0,10000).";
-	if (opt->m < 1 || opt->m > 5) return "Match award must be inside [1,5].";
-	if (opt->x < 1 || opt->x > 5) return "Mismatch penalty must be inside [1,5].";
-	if (opt->gi < 1 || opt->gi > 5) return "Gap open penalty must be inside [1,5].";
-	if (opt->ge < 1 || opt->ge > 5) return "Gap extension penalty must be inside [1,5].";
-	if (opt->xdrop < 10 || opt->xdrop > 100) return "Xdrop cutoff must be inside [10,100].";
-	if (opt->min > INT32_MAX) return  "Minimum alignment score must be > 0.";
-	if (opt->min_ratio < 0.0 || opt->min_ratio > 1.0) return  "Minimum alignment score ratio must be inside [0.0,1.0].";
-	if (opt->n_frq >= 16) return "Frequency thresholds must be fewer than 16.";
-	for (i = 0; i < opt->n_frq; ++i) if (opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i])) return "Frequency thresholds must be inside [0.0,1.0] and descending.";
-	if (opt->n_threads < 1) return "Thread counts must be > 0.";
-	if (opt->batch_size < 64 * 1024) return "Batch size must be > 64k.";
-	if (opt->outbuf_size < 64 * 1024) return "Output buffer size must be > 64k.";
+	if (opt->w >= 16) _fprintf(_fp, "[M::%s] ERROR: w must be inside [1,16).", __func__), ret = 1;
+	if (opt->k >= 32) _fprintf(_fp, "[M::%s] ERROR: k must be inside [1,32).", __func__), ret = 1;
+	if (opt->sidx >= 16) _fprintf(_fp, "[M::%s] ERROR: sidx must be inside [0,16).", __func__), ret = 1;
+	if (opt->eidx >= 16) _fprintf(_fp, "[M::%s] ERROR: eidx must be inside [0,16).", __func__), ret = 1;
+	if (opt->hlim < 100 || opt->hlim >= 100000) _fprintf(_fp, "[M::%s] ERROR: hlim must be inside [100,100000).", __func__), ret = 1;
+	if (opt->llim < 100 || opt->llim >= 100000) _fprintf(_fp, "[M::%s] ERROR: llim must be inside [100,100000).", __func__), ret = 1;
+	if (opt->blim >= 10000) _fprintf(_fp, "[M::%s] ERROR: blim must be inside [0,10000).", __func__), ret = 1;
+	if (opt->elim >= 10000) _fprintf(_fp, "[M::%s] ERROR: elim must be inside [0,10000).", __func__), ret = 1;
+	if (opt->m < 1 || opt->m > 5) _fprintf(_fp, "[M::%s] ERROR: Match award must be inside [1,5].", __func__), ret = 1;
+	if (opt->x < 1 || opt->x > 5) _fprintf(_fp, "[M::%s] ERROR: Mismatch penalty must be inside [1,5].", __func__), ret = 1;
+	if (opt->gi < 1 || opt->gi > 5) _fprintf(_fp, "[M::%s] ERROR: Gap open penalty must be inside [1,5].", __func__), ret = 1;
+	if (opt->ge < 1 || opt->ge > 5) _fprintf(_fp, "[M::%s] ERROR: Gap extension penalty must be inside [1,5].", __func__), ret = 1;
+	if (opt->m + 2*(opt->gi + opt->ge) > 10) _fprintf(_fp, "[M::%s] info: Large match award or large gap open/extend penalty may cause SEGV. [Issue #7]");
+	if (opt->x > (opt->gi + opt->ge)) _fprintf(_fp, "[M::%s] info: Large mismatch penalty with respect to the gap open/extend penalty may cause broken CIGAR. [Issue #2]");
+	if (opt->xdrop < 10 || opt->xdrop > 100) _fprintf(_fp, "[M::%s] ERROR: Xdrop cutoff must be inside [10,100].", __func__), ret = 1;
+	if (opt->min > INT32_MAX) _fprintf(_fp, "[M::%s] ERROR: Minimum alignment score must be > 0.", __func__), ret = 1;
+	if (opt->min_ratio < 0.0 || opt->min_ratio > 1.0) _fprintf(_fp, "[M::%s] ERROR: Minimum alignment score ratio must be inside [0.0,1.0].", __func__), ret = 1;
+	if (opt->n_frq >= 16) _fprintf(_fp, "[M::%s] ERROR: Frequency thresholds must be fewer than 16.", __func__), ret = 1;
+	for (uint64_t i = 0; i < opt->n_frq; ++i) if (opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i])) _fprintf(_fp, "[M::%s] ERROR: Frequency thresholds must be inside [0.0,1.0] and descending.", __func__), ret = 1;
+	if (opt->n_threads < 1) _fprintf(_fp, "[M::%s] ERROR: Thread counts must be > 0.", __func__), ret = 1;
+	if (opt->batch_size < 64 * 1024) _fprintf(_fp, "[M::%s] ERROR: Batch size must be > 64k.", __func__), ret = 1;
+	if (opt->outbuf_size < 64 * 1024) _fprintf(_fp, "[M::%s] ERROR: Output buffer size must be > 64k.", __func__), ret = 1;
 
 	#define _dup(x)	({ char *_p = malloc(strlen(x)+1); memcpy(_p, (x), strlen(x)); _p[strlen(x)] = '\0'; _p; })
 	if (opt->flag&(0x01ULL<<MM_RG)) {
@@ -592,7 +594,7 @@ static const char *mm_mapopt_check(mm_mapopt_t *opt)
 		}
 	}
 	#undef _dup
-	return 0;
+	return ret;
 }
 
 /* end of map.c, options */
@@ -1730,7 +1732,7 @@ int main(int argc, char *argv[])
 {
 	int ret = 1;
 	uint32_t base_rid = 0, base_qid = 0;
-	const char *err, *fnr = 0, *fnw = 0;
+	const char *fnr = 0, *fnw = 0;
 	bseq_file_t *fp = 0;
 	ptr_v v = {0};
 	FILE *fpr = 0, *fpw = 0;
@@ -1745,8 +1747,7 @@ int main(int argc, char *argv[])
 	}
 	if (v.n == 0) { mm_print_help(opt); ret = 1; goto _final; }
 	if (opt->w >= 16) opt->w = (int)(.6666667 * opt->k + .499);
-	if ((err = mm_mapopt_check(opt))) {
-		fprintf(stderr, "[M::%s] ERROR: %s\n", __func__, err);
+	if (mm_mapopt_check(opt, fprintf, stderr)) {
 		ret = 1; goto _final;
 	}
 
