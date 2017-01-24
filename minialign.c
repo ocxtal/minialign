@@ -1584,7 +1584,9 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 			}
 		}
 		else if (ch == 'x') {
-			if (strcmp(optarg, "pacbio") == 0 || strcmp(optarg, "ont") == 0) {	// two options are equivalent
+			if (strcmp(optarg, "pacbio") == 0) {
+				o->k = 15; o->w = 10; o->m = 1; o->x = 2; o->gi = 2; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
+			} else if (strcmp(optarg, "ont") == 0) {
 				o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
 			} else if (strcmp(optarg, "ava") == 0) {
 				o->k = 14; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.3; o->flag |= MM_AVA;
