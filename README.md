@@ -5,18 +5,19 @@ Minialign is a little bit fast and moderately accurate nucleotide sequence align
 
 ## Getting started
 
-C99 compiler (gcc / clang / icc) is required to build the program.
+C11 compiler (gcc / clang / icc) is required to build the program.
 
 ```
 $ make && make install	# PREFIX=/usr/local by default
-$ minialign <reference.fa> <reads.[fa,fq,bam]> > out.sam		# read-to-ref alignment
+$ minialign -xont reference.fa reads.[fa,fq,bam] > read_to_ref.sam
+$ minialign -X -xava reads.[fa,fq,bam] > all_versus_all.sam
 ```
 
 Reference sequence index can be stored in separate. Using prebuilt index saves around a minute per run for a human haploid (~3G) genome.
 
 ```
-$ minialign -d index.mai <reference.fa>	# build index
-$ minialign -l index.mai <reads.[fa,fq,bam]> > out.sam	# mapping on prebuilt index
+$ minialign -d index.mai reference.fa	# build index
+$ minialign -l index.mai reads.[fa,fq,bam] > out.sam	# mapping on prebuilt index
 ```
 
 Frequently used options are: scoring parameters, minimum score cut-offs, and number of threads.
@@ -30,7 +31,7 @@ $ minialign -t10	# minialign is now 10x faster!!!
 
 ## Benchmarks
 
-All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) with 32GB (DDR4, 2133MHz) RAM.
+All the following benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) with 32GB (DDR4, 2133MHz) RAM.
 
 ### Speed
 
@@ -41,60 +42,91 @@ All the benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz, 4MBL3) wi
 | D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |         140 |           - |       31924 |
 | Human (hg38) x3 sim. (9.2Gb) to ref.                 |        1074 |           - |           - |
 
-Notes: Execution time was measured with the unix `time` command, shown in seconds. Dashes denote untested conditions. Program version information: minialign-0.4.0, DALIGNER-ca167d3 (commit on 2016/9/27), and BWA-MEM-0.7.15-r1142-dirty. All the programs were compiled with gcc/g++-5.4.0 providing the optimization flag `-O3`. PBSIM (PacBio long-read simulator), [modified version based on 1.0.3](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Minialign and DALIGNER were run with default parameters except for the thread count flags, `-t4` and `-T4` respectively. BWA-MEM was run with `-t4 -A1 -B2 -O2 -E1 -L0`, where scoring (mismatch and gap-open) parameters were equalized to the defaults of the minialign. Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from the measurements. Peak RAM usage of minialign was around 12GB in human read-to-ref mapping with four threads. Starred sample, S.cerevisiae on DALIGNER, was splitted into five subsamples since the whole concatenated fastq resulted in an out-of-memory error. Calculation time of the subsamples were 61.6, 914.2, 56.8, 50.3, and 51.5 seconds, where the second trial behaved a bit strangely with too long calculation on one (out of four) threads.
+Notes: Execution time was measured with the unix `time` command, shown in seconds. Dashes denote untested conditions. Program version information: minialign-0.4.0, DALIGNER-ca167d3 (commit on 2016/9/27), and BWA-MEM-0.7.15-r1142-dirty. All the programs were compiled with gcc/g++-5.4.0 providing the optimization flag `-O3`. PBSIM (PacBio long-read simulator), [modified version based on 1.0.3 (1.0.3-nfree)](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Simulation parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Arguments passed to the programs; minialign: `-t4 -xpacbio`, DALIGNER: `-T4`, and BWA-MEM: `-t4 -xpacbio -A1 -B2 -O2 -E1` (overriding scoring parameters, based on the PacBio defaults). Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from the measurements. Peak RAM usage of minialign was around 12GB in human read-to-ref mapping with four threads. Starred sample, S.cerevisiae on DALIGNER, was splitted into five subsamples since the whole concatenated fastq resulted in an out-of-memory error. Calculation time of the subsamples were 61.6, 914.2, 56.8, 50.3, and 51.5 seconds, where the second trial behaved a bit strangely with too long calculation on one (out of four) threads.
 
-### Sensitivity-specificity trend (ROC curve)
+### Recall-accuracy trend
 
-![ROC curve (D.melanogaster)](https://github.com/ocxtal/minialign/blob/master/fig/roc.dm6.png)
+![Recall-accuracy trend (D.melanogaster)](https://github.com/ocxtal/minialign/blob/master/fig/rec_acc.dm6.png)
 
-(a) D.melanogaster (dm6) x10 (1.4Gb)
+(a). D.melanogaster (dm6) x10 (1.4Gb)
 
-![ROC curve (Human)](https://github.com/ocxtal/minialign/blob/master/fig/roc.hg38.png)
+![Recall-accuracy trend (Human)](https://github.com/ocxtal/minialign/blob/master/fig/rec_acc.hg38.png)
 
-(b) Human (hg38) x0.3 (1Gb)
+(b). Human (hg38) x0.3 (1Gb)
 
-Notes: Sensitivity is defined as: the number of reads whose originating locations are correctly identified (**including secondary mappings**) / the total number of reads. Specificity is: the number of correct alignments / the total number of alignments. The sensitivity and specificity pairs were calculated from the output sam files, filtered with different mapping quality thresholds between 0 and 60. Program version information: minialign-0.4.0, GraphMap-v0.3.1 with [a patch](https://github.com/ocxtal/graphmap/tree/edlib_segv_patch), BLASR-0014a57 (the last commit with the SAM output), and BWA-MEM-0.7.15-r1142-dirty. Read set was generated by PBSIM with the parameters (len-mean, len-SD, acc-mean, acc-SD) set to (10k, 10k, 0.8, 0.2) without ALT / random contigs. Reads were mapped onto the corresponding reference genomes including ALT / random contigs with the default parameters for the BLASR and GraphMap, `-a1 -b1 -p1 -q1` for the minialign, and `-xpacbio` for the BWA-MEM, and the additional four-thread multithreading directions. Calculation time and peak RAM usages are shown in the table below.
+Notes: Recall is defined as: a proportion of reads whose originating region, represented by (spos, epos) coordinate pair on the reference, has at least one intersection with its alignments. Accuracy is defined as: a proportion of alignment records which has an intersection with its originating region. The recall and accuracy pairs were calculated from the output sam files, filtered with different mapping quality thresholds between 0 and 60. Duplicate alignments were not filtered out from the output sam files. Program version information: minialign-0.4.4, GraphMap-0.4.0, BLASR-0014a57 (the last commit with the SAM output), and BWA-MEM-0.7.15-r1142-dirty. Read set was generated by the PBSIM-1.0.3-nfree with the parameters (len-mean, len-SD, acc-mean, acc-SD) set to (10k, 10k, 0.8, 0.2) without ALT / random contigs. Reads were mapped onto the corresponding reference genomes including ALT / random contigs. Arguments passed to the programs; minialign: `-t4 -xpacbio`, GraphMap: `-t 4`, BLASR: `--nproc 4`, and BWA-MEM: `-t4 -xpacbio`. Calculation time and peak RAM usages are shown in the table below.
 
 |     Time (sec.) / Peak RAM (GB)       |  minialign  |   GraphMap  |    BLASR    |   BWA-MEM   |
 |:-------------------------------------:|:-----------:|:-----------:|:-----------:|:-----------:|
 | D.melanogaster (dm6) x10 sim. (1.4Gb) |  68.8 / 2.2 |  6460 / 4.3 | 30081 / 1.0 | 37292 / 0.5 |
 | Human (hg38) x0.3 sim. (1Gb)          |    119 / 12 |           - |           - | 34529 / 5.5 |
 
-### Effect of read length and identity on recall
+### Effect of read length and score threshold on recall
 
-Since the minimizer-based seeding and the rough chaining algorithm of the software affects on its recall ratio (sensitivity) when the query sequences are short and errorneous. The experiment, estimating recall ratio on the PacBio simulated read sets, showed that the software tends to fail recovering the correct locations at a relatively high rate when the query length is shorter than 1000 bases and the identity is less than 0.75.
+![`-s`-recall trend (Human)](https://github.com/ocxtal/minialign/blob/master/fig/rec_acc.hg38.png)
 
-|  Recall |     500 |    1000 |    2000 |    5000 |   10000 |   20000 |   50000 |  100000 |
-|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|:-------:|
-|    0.65 |   0.070 |   0.195 |   0.471 |   0.871 |   0.965 |   0.980 |   0.985 |   0.986 |
-|    0.70 |   0.191 |   0.447 |   0.776 |   0.963 |   0.979 |   0.983 |   0.987 |   0.989 |
-|    0.75 |   0.433 |   0.754 |   0.939 |   0.977 |   0.984 |   0.987 |   0.991 |   0.993 |
-|    0.80 |   0.732 |   0.930 |   0.973 |   0.983 |   0.988 |   0.993 |   0.997 |   0.997 |
-|    0.85 |   0.913 |   0.972 |   0.981 |   0.988 |   0.994 |   0.997 |   0.999 |   0.999 |
-|    0.90 |   0.963 |   0.983 |   0.988 |   0.994 |   0.998 |   0.999 |   1.000 |   0.999 |
-|    0.95 |   0.978 |   0.991 |   0.994 |   0.998 |   0.999 |   0.999 |   1.000 |   1.000 |
-
-Notes: Row: identity, column: length in bases. Sensitivity (recall) is defined as above. Reads are generated from hg38 without ALT / random contigs using PBSIM with the (len-SD, acc-SD) pairs set to (len-mean / 10, 0.01). Reads were mapped onto the reference with ALT / random contigs included. Minialign was run with the same parameters as in the speed benchmark except for the score filter ratio `-r` set at 0.5.
+Notes: The solid lines in the figure shows the proportions of mapped reads. The dashed lines shows the recalls, defined as above. The minimum alignment score threshold (`-s`) was differed among 50, 100, 200, and 400. Reads were generated from hg38 without ALT / random contigs using PBSIM-1.0.3-nfree with the (len-mean, len-SD, acc-mean, acc-SD) parameters set to (2000, 2000, 0.88, 0.07). Reads were mapped onto the reference with ALT / random contigs included. Minialign-0.4.4 was run with the `-t4 -xpacbio` and the additional `-s` parameters.
 
 ## Algorithm overview
 
+The algorithm is roughly based on the seed-and-extend strategy with additional seed filtering and chaining stages. The seed filtering and chaining stages are essential to filter out futile or redundant extension trials, where long and erroneous query sequences resulting in numerous false positives and a small amount of consecutive correct hits. The effectiveness of the seed chaining is first shown by Chaisson and Tessler in the BLASR algorithm [1], and also in the BWA-MEM [2]. The additional filtering stage is introduced by the GraphMap [3], improved overall computational performance combined with the chaining algorithm. The minimap algorithm [4] adopted the minimizer [5] and an invertible hash function [6] to reduce seeds to be enumerated at the indexing stage.
+
 ### Minimizer-based index structure
 
-Indexing routines: minimizer calculation, hash table construction, and hash table retrieval are roughly diverted from the original minimap program except that the position of sequence direction flag in hash table is moved from the least significant bit to the int32_t sign bit. See descriptions in the minimap [repository](https://github.com/lh3/minimap) and [paper](http://bioinformatics.oxfordjournals.org/content/32/14/2103) for the details of the invertible hash function used to generate minimizers.
+Minialign also adopted the invetible hash function [6] and the minimizer-based seed filtering [4] of the minimap. The same indexing parameters, the k-mer length and the window size, are adopted as the default value, sustaining the equivalent information as the minimap program. Some modifications were applied to improve simplicity and support a reference subsequence retrieval query.
 
-### Seed chaining
+### Array-based seed chaining
 
-Collected seeds (minimizers) were first sorted by its (rpos - 2*qpos) value, resulting in lining up along with 15-degree leaned lines from the diagonal. Then (rpos - qpos/2) values are evaluated from head to tail on the sorted elements, and chained when the current seed is inside a 30-degree-angled parallelogram window at the right-bottom direction of the previous one. Chaining is iteratively performed on the remaining seed array and terminated when no seed is left in it. Finally, collected chains are sorted by their rough path lengths: (re - rs + qe - qs).
+An improved, array-based seed chaining algorithm was introduced to efficiently detect a stream of seeds without capturing large insertions and deletions. In each chain extension trial, the downstream seeds are filterd with a "chainable window", which is a 30-degree-angled parallelogram placed at the right-bottom direction of the tailmost seed, preventing it from introducing unrealistically large gaps in the chain.
+
+The whole chaining algorithm with an incremental repetitive-seed filtering was implemented as follows;
+
+```
+0.  occ[] is a precalculated array of occurrences correspond to the top [5%, 1%, 0.1%]
+    minimizers on the reference.
+1.  Collect minimizers on the query to a seed bin.
+2.  for (i = 0; there remains elements in the seed bin; i++) {
+3.    Clear a result bin.
+4.    Move seeds which occurs less than a threshold, occ[i], to a chain array.
+5.    Sort the elements in the chain array by their `rpos - 2*qpos` values.
+      Mark them as unchained.
+6.    while (there remains unchained elements in the chain array) {
+7.      Mark the first unchained seed as a root of a chain.
+        Initialize a tail-of-chain pointer to point at the root.
+8.      if (the next seed in the chain array is inside the chainable window of the tail) {
+9.        Mark it as chained and move the tail pointer to it.
+10.     } else if (there is no seed in the chainable window) {
+11.       Terminate the extension and save the resulting chain in the result bin, continue to 6.
+        }
+      }
+12.   if (there is no meaningful chain in the result bin) { Then continue to 2. }
+13.   Return the result bin;
+    }
+```
+
+The rectangular-inclusion test on the line 8 is implemented with comparisons of `rpos - qpos/2` values of the two adjacent seeds, which are ordered by `rpos - 2*qpos` in the previous sort.
 
 ### Smith-Waterman-Gotoh extension
 
-The second head seed of each chain is extended upward (3' on the reference side) then downward from the maximum score position found. If the resulted path is shorter than the seed chain span, similar extension is repeatedly performed on the next one (three times at the maximum). Each extension is carried out by the [GABA library](https://github.com/ocxtal/libgaba), which implements the adaptive-banded semi-global Smith-Waterman-Gotoh algorithm with difference recurrences.
+The second head seed of each chain is extended upward (3' on the reference side) then downward from the maximum score position found. If the resulted path is shorter than the seed chain span, similar extension is repeatedly performed on the next neighboring seed of the tail of the obtained alignment path. Each extension is carried out by the GABA library [7], which implements the adaptive-banded semi-global Smith-Waterman-Gotoh algorithm [8] with the difference recurrence relations [9].
+
+### References
+
+1. Mark J Chaisson and Glenn Tesler (2012). Mapping single molecule sequencing reads using basic local alignment with successive refinement (BLASR): application and theory. *BMC bioinformatics*, 13(1), 238.
+2. Heng Li (2013). Aligning sequence reads, clone sequences and assembly contigs with BWA-MEM. *arXiv preprint* arXiv:1303.3997.
+3. Ivan Sović, et.al. (2016). Fast and sensitive mapping of nanopore sequencing reads with GraphMap. *Nature communications*, 7.
+4. Heng Li (2016). Minimap and miniasm: fast mapping and de novo assembly for noisy long sequences. *Bioinformatics*, btw152.
+5. Michael Roberts, et. al. (2004). Reducing storage requirements for biological sequence comparison. *Bioinformatics*, 20(18), 3363-3369.
+6. Heng Li (2014). Invertible integer hash functions. *GitHub Gist*, [https://gist.github.com/lh3/974ced188be2f90422cc](https://gist.github.com/lh3/974ced188be2f90422cc)
+7. Hajime Suzuki (2016). libgaba: Adaptive semi-global banded alignment on string graphs. *GitHub*, [https://github.com/ocxtal/libgaba](https://github.com/ocxtal/libgaba)
+8. Hajime Suzuki (2016). Assessment on adaptive-banded dynamic programming algorithm for the nucleotide semi-global alignment. *GitHub*, [https://github.com/ocxtal/adaptivebandbench](https://github.com/ocxtal/adaptivebandbench)
+9. Hajime Suzuki (2016). Benchmark on difference recurrence relation. *GitHub*, [https://github.com/ocxtal/diffbench](https://github.com/ocxtal/diffbench)
 
 ## FAQs and recipes
 
 ### Is the minialign applicable to Illumina datasets?
 
-Generally, no. The seed-chaining algorithm is not good at detecting dense, clustered seed chain caused by short and high-identity Illumina reads.
+Generally, no. The seed-chaining algorithm is not good at detecting dense, clustered seed chain caused by short and high-identity Illumina reads. The read length-recall trend (the red and green lines in the figure in the third benchmark) shows that the minialign tends to fail collecting alignments when the read lengths are shorter than 1000 bases regardless the score thresholds.
 
 ### Mapped read ratio is slightly low
 
@@ -132,7 +164,7 @@ Passing `-U` flag with a list of tags to be transferred, for example, `-UAX,XS`.
 
 ## Updates
 
-* 2016/1/15 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags).
+* 2016/1/24 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags).
 * 2016/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.
 * 2016/12/6 (0.4.2) Add splitted alignment rescuing algorithm.
 * 2016/12/1 (0.4.1) Fix bug in sam output (broken CIGAR with both reverse-complemented and secondary flags).
@@ -149,6 +181,10 @@ Passing `-U` flag with a list of tags to be transferred, for example, `-UAX,XS`.
 #### *Fast and Accurate* logo
 
 ![metcha hayaiyo](https://github.com/ocxtal/minialign/blob/master/pic/hayai.png)
+
+#### *Kakizome*, Happy New Year 2017
+
+![kakizome](https://github.com/ocxtal/minialign/blob/master/pic/kakizome.png)
 
 #### Intel nuc, my main development machine
 
