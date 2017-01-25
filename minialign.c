@@ -1097,7 +1097,7 @@ static void mm_record(const bseq_t *ref, uint32_t l_seq, const gaba_alignment_t 
 }
 
 #define _reg(x)		( (reg_t*)(x).u64[1] )
-static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	uint64_t i;
 	const reg_t *preg = _reg(reg[0]);
@@ -1109,7 +1109,7 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 	reg[0].u32[0] |= _clip(-10.0 * log10(pe));
 	for (i = 1; i < n_reg; ++i)
 		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * log10(1.0 - pe * (double)(_reg(reg[i])->score - bsc + 1) / (double)tsc));
-	return;
+	return n_reg;
 }
 
 static uint64_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
@@ -1177,7 +1177,7 @@ static const mm128_t *mm_align_seq(mm_tbuf_t *b, const mm_mapopt_t *opt, const m
 	*n_reg = reg.n;
 	if (reg.n == 0) return 0;
 	radix_sort_128x(reg.a, reg.a + reg.n);
-	((opt->flag & MM_AVA)? mm_post_ava : mm_post_ava)(opt, reg.n, reg.a);
+	((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
 	return reg.a;
 }
 
