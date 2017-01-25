@@ -1114,13 +1114,13 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 
 static uint64_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
-	int32_t score, min = (int32_t)(_reg(reg[0])->score * opt->min_ratio);
-	uint64_t i = 0; for (; i < n_reg && (score = _reg(reg[i])->score) >= min; ++i) {
+	for (uint64_t i = 0; i < n_reg; ++i) {
+		int32_t score = _reg(reg[i])->score;
 		double elen = (double)_len((reg_t*)reg[i].u64[1]) / 2.0, pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
 		double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * score, pe = 1.0 / (ulen + 1);
 		reg[i].u32[0] |= _clip(-10.0 * log10(pe)) | ((i == 0? 0 : 0x800)<<16);
 	}
-	return i;
+	return n_reg;
 }
 #undef _reg
 
