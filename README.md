@@ -164,7 +164,7 @@ Passing `-U` flag with a list of tags to be transferred, for example, `-UAX,XS`.
 
 ## Updates
 
-* 2016/1/24 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags).
+* 2016/1/25 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags), change -xpacbio scoring params to -a1 -b2 -p2 -q1 (performed better on recent PacBio reads)
 * 2016/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.
 * 2016/12/6 (0.4.2) Add splitted alignment rescuing algorithm.
 * 2016/12/1 (0.4.1) Fix bug in sam output (broken CIGAR with both reverse-complemented and secondary flags).
