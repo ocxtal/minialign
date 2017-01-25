@@ -58,7 +58,7 @@ Notes: Recall is defined as: a proportion of reads whose originating region, rep
 
 |     Time (sec.) / Peak RAM (GB)       |  minialign  |   GraphMap  |    BLASR    |   BWA-MEM   |
 |:-------------------------------------:|:-----------:|:-----------:|:-----------:|:-----------:|
-| D.melanogaster (dm6) x10 sim. (1.4Gb) |  60.9 / 2.2 | (6460)/ 4.3 | 30081 / 1.0 | 37292 / 0.5 |
+| D.melanogaster (dm6) x10 sim. (1.4Gb) |  60.9 / 2.2 |  6482 / 4.3 | 30081 / 1.0 | 37292 / 0.5 |
 | Human (hg38) x0.3 sim. (1Gb)          |   98.4 / 12 |           - |           - | 34529 / 5.5 |
 
 ### Effect of read length and score threshold on recall
