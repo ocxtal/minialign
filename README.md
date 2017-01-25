@@ -63,7 +63,7 @@ Notes: Recall is defined as: a proportion of reads whose originating region, rep
 
 ### Effect of read length and score threshold on recall
 
-![readlength-recall trend (Human)](https://github.com/ocxtal/minialign/blob/master/fig/rec_acc.hg38.png)
+![readlength-recall trend (Human)](https://github.com/ocxtal/minialign/blob/master/fig/rec_len.hg38.png)
 
 Notes: The solid lines in the figure shows the proportions of mapped reads. The dashed lines shows the recalls, defined as above. The minimum alignment score threshold (`-s`) was differed among 50, 100, 200, and 400. Reads were generated from hg38 without ALT / random contigs using PBSIM-1.0.3-nfree with the (len-mean, len-SD, acc-mean, acc-SD) parameters set to (2000, 2000, 0.88, 0.07). Reads were mapped onto the reference with ALT / random contigs included. Minialign-0.4.4 was run with the `-t4 -xpacbio` flags and the additional `-s` parameters.
 
