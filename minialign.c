@@ -1177,7 +1177,7 @@ static const mm128_t *mm_align_seq(mm_tbuf_t *b, const mm_mapopt_t *opt, const m
 	*n_reg = reg.n;
 	if (reg.n == 0) return 0;
 	radix_sort_128x(reg.a, reg.a + reg.n);
-	((opt->flag & MM_AVA)? mm_post_ava : mm_post_ava)(opt, reg.n, reg.a);
+	((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
 	return reg.a;
 }
 
