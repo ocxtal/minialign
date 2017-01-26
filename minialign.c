@@ -1017,10 +1017,10 @@ static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm1
 	int absent;
 	const uint32_t mask = 0x7fffffff;
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
-	gaba_section_t rf, rr, *qu, *qd, *r, *q;
+	gaba_section_t *qu, *qd, *r, *q;
+	gaba_section_t rf = { .id = 2, .len = ref->l_seq, .base = (const uint8_t*)ref->seq };
+	gaba_section_t rr = { .id = 3, .len = ref->l_seq, .base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim) };
 	gaba_pos_pair_t p = {0};
-	rf.id = 2; rf.len = ref->l_seq; rf.base = (const uint8_t*)ref->seq;
-	rr.id = 3; rr.len = ref->l_seq; rr.base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim);
 	gaba_dp_flush(dp, lim, lim);
 	uint64_t j = 0;
 	gaba_alignment_t *a[16] = {0};
