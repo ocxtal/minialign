@@ -1603,7 +1603,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 's') o->min = atoi(optarg);
 		else if (ch == 'm') o->min_ratio = atof(optarg);
 		else if (ch == 'r') {
-			if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Minimum length threshold option is deprecated in version 0.4.0 and later, interpreted as score ratio.).\n", __func__);
+			if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Minimum length threshold option is deprecated in version 0.4.0 and later, interpreted as score ratio.\n", __func__);
 			o->min_ratio = atof(optarg);
 		}
 		else if (ch == 'a') o->m = atoi(optarg);
