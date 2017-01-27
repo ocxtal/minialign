@@ -1496,6 +1496,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -X           switch to all-versus-all alignment mode\n");
 	fprintf(stderr, "    -v           show version number [%s]\n", MM_VERSION);
 	fprintf(stderr, "  Indexing:\n");
+	fprintf(stderr, "    -c STR,...   treat specified sequences as circular []\n");
 	fprintf(stderr, "    -k INT       k-mer size [%d]\n", opt->k);
 	fprintf(stderr, "    -w INT       minimizer window size [{-k}*2/3]\n");
 	fprintf(stderr, "    -d FILE      dump index to FILE []\n");
@@ -1568,7 +1569,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 {
 	while (optind < argc) {
 		int ch;
-		if ((ch = getopt(argc, argv, "k:w:f:x:B:t:V:d:l:Xs:m:r:a:b:p:q:L:H:I:J:S:E:Y:QR:T:U:vh")) < 0) {
+		if ((ch = getopt(argc, argv, "k:w:f:c:x:B:t:V:d:l:Xs:m:r:a:b:p:q:L:H:I:J:S:E:Y:QR:T:U:vh")) < 0) {
 			kv_push(void*, *v, argv[optind]); optind++; continue;
 		}
 
