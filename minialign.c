@@ -183,6 +183,7 @@ typedef struct {
 	char *name;
 	uint8_t *seq, *qual, *tag;
 } bseq_t;
+_static_assert(sizeof(bseq_t) == 48);
 typedef struct { size_t n, m; bseq_t *a; } bseq_v;
 
 // ascii to 4bit conversion
@@ -529,6 +530,16 @@ static int mm_mapopt_check(mm_mapopt_t *opt, int (*_fprintf)(FILE*,const char*,.
 
 /* index.c */
 typedef struct {
+	// lengths and flag
+	uint32_t l_seq, rid, l_name, flag;
+	// pointers
+	char *name;
+	uint8_t *seq;
+} mm_idx_seq_t;
+_static_assert(sizeof(mm_idx_seq_t) == 32);
+typedef struct { size_t n, m; mm_idx_seq_t *a; } mm_idx_seq_v;
+
+typedef struct {
 	mm128_v a;   // (minimizer, position) array
 	int32_t n;   // size of the _p_ array
 	uint64_t *p; // position array for minimizers appearing >1 times
@@ -538,7 +549,7 @@ typedef struct {
 typedef struct {
 	uint32_t w, k, b, base_rid;
 	mm_idx_bucket_t *B;
-	bseq_v s;
+	mm_idx_seq_v s;
 
 	// work
 	mm128_v a;
@@ -651,6 +662,11 @@ static void *mm_idx_worker(void *arg, void *item)
 	return s;
 }
 
+	uint32_t l_seq, rid, l_name, flag;
+	// pointers
+	char *name;
+	uint8_t *seq;
+
 static void mm_idx_drain(void *arg, void *item)
 {
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
@@ -658,8 +674,13 @@ static void mm_idx_drain(void *arg, void *item)
 	uint64_t mask = (1<<q->mi->b) - 1;
 	q->mi->s.n = MAX2(q->mi->s.n, s->seq[s->n_seq-1].rid+1-q->mi->base_rid);
 	kv_reserve(bseq_t, q->mi->s, q->mi->s.n);
-	for (uint64_t i = 0; i < s->n_seq; ++i) q->mi->s.a[s->seq[i].rid-q->mi->base_rid] = s->seq[i];
-
+	for (uint64_t i = 0; i < s->n_seq; ++i) {
+		const bseq_t *p = &s->seq[i];
+		q->mi->s.a[s->seq[i].rid-q->mi->base_rid] = (mm_idx_seq_t){
+			.l_seq = p->l_seq, .rid = p->rid, .l_name = p->l_name, .flag = 0,
+			.name = p->name, .seq = p->seq
+		};
+	}
 	for (uint64_t i = 0; i < s->a.n; ++i) {
 		mm128_v *p = &q->mi->B[s->a.a[i].u64[0]&mask].a;
 		kv_push(mm128_t, *p, s->a.a[i]);
@@ -997,7 +1018,7 @@ static uint64_t mm_short_chain(uint64_t l_coef, mm128_t *coef, uint32_t llim, ui
 	return MIN2(j, k);
 }
 
-static uint64_t mm_rescue(const bseq_t *ref, uint64_t l_coef, mm128_t *coef, mm128_t *r, uint32_t llim, uint32_t hlim, uint32_t elim, uint32_t blim, uint32_t eidx)
+static uint64_t mm_rescue(const mm_idx_seq_t *ref, uint64_t l_coef, mm128_t *coef, mm128_t *r, uint32_t llim, uint32_t hlim, uint32_t elim, uint32_t blim, uint32_t eidx)
 {
 	const int32_t ofs = 0x40000000, mask = 0x7fffffff;
 	int32_t re = r->u32[2], qe = r->u32[3], l, h;
@@ -1011,7 +1032,7 @@ static uint64_t mm_rescue(const bseq_t *ref, uint64_t l_coef, mm128_t *coef, mm1
 	return 1;
 }
 
-static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm128_t *coef, uint32_t k, uint32_t min, uint32_t sidx, uint32_t eidx, gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, poshash_t *pos, khint_t *pitr)
+static const gaba_alignment_t *mm_extend(const mm_idx_seq_t *ref, uint32_t l_coef, mm128_t *coef, uint32_t k, uint32_t min, uint32_t sidx, uint32_t eidx, gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, poshash_t *pos, khint_t *pitr)
 {
 	khint_t itr;
 	int absent;
@@ -1070,7 +1091,7 @@ static const gaba_alignment_t *mm_extend(const bseq_t *ref, uint32_t l_coef, mm1
 	return a[0];	// one alignment is returned regardless of the score
 }
 
-static void mm_record(const bseq_t *ref, uint32_t l_seq, const gaba_alignment_t *a, poshash_t *pos, khint_t itr, mm128_v *reg)
+static void mm_record(const mm_idx_seq_t *ref, uint32_t l_seq, const gaba_alignment_t *a, poshash_t *pos, khint_t itr, mm128_v *reg)
 {
 	uint64_t size;
 	mm128_t *s;
@@ -1158,7 +1179,7 @@ static const mm128_t *mm_align_seq(mm_tbuf_t *b, const mm_mapopt_t *opt, const m
 			const gaba_alignment_t *a = 0;
 			mm128_t *t = &b->coef.a[b->coef.n], r;
 			uint64_t p = b->coef.n-b->intv.a[k].x[1], q = p, l = 0, m = ofs - b->intv.a[k].x[0];
-			bseq_t *ref = &mi->s.a[(t-p)->u32[1]-mi->base_rid];
+			mm_idx_seq_t *ref = &mi->s.a[(t-p)->u32[1]-mi->base_rid];
 			do {
 				khint_t itr;
 				a = mm_extend(ref, q, t-q, mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &mg, b->pos, &itr);
