@@ -1336,7 +1336,7 @@ static void mm_print_mapped(mm_align_t *b, const bseq_t *t, const gaba_alignment
 	const mm_idx_t *mi = b->mi;
 	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 	const gaba_path_section_t *s = &a->sec[0];
-	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = t->l_seq-s->bpos;
+	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
 	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
 
 	_puts(b, t->name); _put(b, '\t'); _putn(b, flag); _put(b, '\t'); _puts(b, r->name); _put(b, '\t');
