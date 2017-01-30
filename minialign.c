@@ -1666,7 +1666,7 @@ int main(int argc, char *argv[])
 		case 2: mm_print_help(opt); ret = 0; goto _final;
 	}
 	if (!fnr && v.n == 0) { mm_print_help(opt); ret = 1; goto _final; }
-	if ((fnr && v.n == 0) || (!fpr && v.n == 1 && !(opt->flag&MM_AVA))) {
+	if ((fnr && v.n == 0) || (!fnr && v.n == 1 && !(opt->flag&MM_AVA))) {
 		fprintf(stderr, "[M::%s] query-side input redirected to stdin.\n", __func__);
 		kv_push(void*, v, "-");
 	}
