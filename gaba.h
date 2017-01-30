@@ -380,12 +380,13 @@ void gaba_dp_res_free(
  *
  * @brief convert path string to cigar.
  * @detail
- * fprintf must accept ("%" PRId64 "M") and ("%" PRId64 "%c") format string
- * otherwise can be ignored.
+ * printer(void *fp, int64_t len, char c); will be called with a pair;
+ * cigar operation (c) and its length (len).
+ * void *fp is an opaque pointer to the context of the printer.
  */
-typedef int (*gaba_dp_fprintf_t)(void *, char const *, ...);
+typedef int (*gaba_dp_printer_t)(void *, int64_t, char);
 uint64_t gaba_dp_print_cigar_forward(
-	gaba_dp_fprintf_t fprintf,
+	gaba_dp_printer_t printer,
 	void *fp,
 	uint32_t const *path,
 	uint32_t offset,
@@ -397,7 +398,7 @@ uint64_t gaba_dp_print_cigar_forward(
  * @brief convert path string to cigar in reverse direction
  */
 uint64_t gaba_dp_print_cigar_reverse(
-	gaba_dp_fprintf_t fprintf,
+	gaba_dp_printer_t printer,
 	void *fp,
 	uint32_t const *path,
 	uint32_t offset,
