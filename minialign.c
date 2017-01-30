@@ -788,7 +788,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
  * index I/O *
  *************/
 
-#define MM_IDX_MAGIC "MAI\4"		/* minialign index version 4, differs from minimap index signature */
+#define MM_IDX_MAGIC "MAI\5"		/* minialign index version 5, differs from minimap index signature */
 
 static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 {
@@ -825,7 +825,7 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 		mi->s.a[i].name -= (ptrdiff_t)mi->base.a[j], mi->s.a[i].seq -= (ptrdiff_t)mi->base.a[j];
 		mi->s.a[i].name += (ptrdiff_t)s, mi->s.a[i].seq += (ptrdiff_t)s;
 	}
-	fwrite(mi->s.a, sizeof(bseq_t), mi->s.n, fp);
+	fwrite(mi->s.a, sizeof(mm_idx_seq_t), mi->s.n, fp);
 	// restore pointers
 	for (uint64_t i = 0, j = 0, s = 0; i < mi->s.n; ++i) {
 		mi->s.a[i].name -= (ptrdiff_t)s, mi->s.a[i].seq -= (ptrdiff_t)s;
@@ -875,8 +875,8 @@ static mm_idx_t *mm_idx_load(FILE *fp)
 	mi->base.a[0] = malloc(sizeof(char) * bsize);
 	mi->size.a[0] = bsize;
 	if (fread(mi->base.a[0], sizeof(char), mi->size.a[0], fp) != mi->size.a[0]) goto _mm_idx_load_fail;
-	mi->s.a = malloc(sizeof(bseq_t) * mi->s.n);
-	if (fread(mi->s.a, sizeof(bseq_t), mi->s.n, fp) != mi->s.n) goto _mm_idx_load_fail;
+	mi->s.a = malloc(sizeof(mm_idx_seq_t) * mi->s.n);
+	if (fread(mi->s.a, sizeof(mm_idx_seq_t), mi->s.n, fp) != mi->s.n) goto _mm_idx_load_fail;
 	for (uint64_t i = 0; i < mi->s.n; ++i) mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
 	mi->base_rid = mi->s.a[0].rid;
 	return mi;
