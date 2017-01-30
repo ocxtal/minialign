@@ -662,11 +662,6 @@ static void *mm_idx_worker(void *arg, void *item)
 	return s;
 }
 
-	uint32_t l_seq, rid, l_name, flag;
-	// pointers
-	char *name;
-	uint8_t *seq;
-
 static void mm_idx_drain(void *arg, void *item)
 {
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
