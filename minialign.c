@@ -1644,7 +1644,10 @@ int main(int argc, char *argv[])
 		case 2: mm_print_help(opt); ret = 0; goto _final;
 	}
 	if (!fnr && v.n == 0) { mm_print_help(opt); ret = 1; goto _final; }
-	if ((fnr && v.n == 0) || (!fpr && v.n == 1 && !(opt->flag&MM_AVA))) { kv_push(void*, v, "-"); }
+	if ((fnr && v.n == 0) || (!fpr && v.n == 1 && !(opt->flag&MM_AVA))) {
+		fprintf(stderr, "[M::%s] query-side input redirected to stdin.\n", __func__);
+		kv_push(void*, v, "-");
+	}
 	if (opt->w >= 16) opt->w = (int)(.6666667 * opt->k + .499);
 	if (mm_mapopt_check(opt, fprintf, stderr)) {
 		ret = 1; goto _final;
