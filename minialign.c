@@ -1086,40 +1086,6 @@ static const gaba_alignment_t *mm_extend(
 	return a;
 }
 
-#if 0
-static void mm_record(const mm_idx_seq_t *ref, uint32_t l_seq, const gaba_alignment_t *a, poshash_t *pos, khint_t itr, mm128_v *reg)
-{
-	uint64_t size;
-	mm128_t *s;
-	reg_t *r;
-	const int32_t ofs = 0x40000000;
-	if ((int64_t)kh_val(pos, itr) < 0) {
-		kh_val(pos, itr) = (reg->n<<32) | (0xffffffff & kh_val(pos, itr));
-		kv_pushp(mm128_t, *reg, &s);
-	} else {
-		s = &reg->a[kh_val(pos, itr)>>32];
-		// free((void*)s->u64[1]);
-	}
-	/*
-	r = (reg_t*)malloc((size = a->path->len < 512 ? 1024 : 2*a->path->len) + a->slen*sizeof(reg_t));
-	char *cigar = 
-	for (const gaba_section_t *s = a; s < a->sec+a->slen; s++, r++) {
-		r->rs = ref->l_seq-s->apos-s->alen; r->re = ref->l_seq-s->apos;
-		r->qs = l_seq-s->bpos-s->blen; r->qe = l_seq-s->bpos;
-		r->rid = ref->rid; r->score = a->score;
-		r->l_cigar = gaba_dp_dump_cigar_reverse((char*)r->cigar, size, a->path->array, s->ppos, gaba_plen(s));
-		// r->l_cigar = gaba_dp_dump_cigar_reverse((char*)r->cigar, size - sizeof(reg_t), a->path->array, 0, a->path->len);
-	}
-	*/
-	s->u32[0] = (a->sec->bid&0x01? 0 : 0x10)<<16;
-	s->u32[1] = ofs - a->score;
-	s->u64[1] = (uintptr_t)a;
-	// s->u32[1] = ofs - r->score;
-	// s->u64[1] = (uintptr_t)r;
-	return;
-}
-#endif 
-
 #define _reg(x)		( (reg_t*)(x).u64[1] )
 static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
@@ -1342,7 +1308,7 @@ static void mm_print_mapped(mm_align_t *b, const bseq_t *t, const gaba_alignment
 	_puts(b, t->name); _put(b, '\t'); _putn(b, flag); _put(b, '\t'); _puts(b, r->name); _put(b, '\t');
 	_putn(b, rs+1); _put(b, '\t'); _putn(b, mapq); _put(b, '\t');
 	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
-	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);//s->ppos, gaba_plen(s));
+	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
 	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	_puts(b, "\t*\t0\t0\t");
 	if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
