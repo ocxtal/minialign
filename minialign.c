@@ -18,7 +18,7 @@
 #include "lmm.h"
 #include "sassert.h"
 
-#define MM_VERSION "0.4.4"
+#define MM_VERSION "0.4.4-circular"
 
 
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
