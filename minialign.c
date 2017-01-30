@@ -18,7 +18,7 @@
 #include "lmm.h"
 #include "sassert.h"
 
-#define MM_VERSION "0.4.4-circular"
+#define MM_VERSION "0.4.5-dev"
 
 
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
@@ -1507,7 +1507,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -X           switch to all-versus-all alignment mode\n");
 	fprintf(stderr, "    -v           show version number [%s]\n", MM_VERSION);
 	fprintf(stderr, "  Indexing:\n");
-	fprintf(stderr, "    -c STR,...   treat specified sequences as circular []\n");
+	// fprintf(stderr, "    -c STR,...   treat specified sequences as circular []\n");
 	fprintf(stderr, "    -k INT       k-mer size [%d]\n", opt->k);
 	fprintf(stderr, "    -w INT       minimizer window size [{-k}*2/3]\n");
 	fprintf(stderr, "    -d FILE      dump index to FILE []\n");
