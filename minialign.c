@@ -1336,14 +1336,14 @@ static void mm_print_mapped(mm_align_t *b, const bseq_t *t, const gaba_alignment
 	const mm_idx_t *mi = b->mi;
 	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 	const gaba_path_section_t *s = &a->sec[0];
-	uint32_t rs = r->l_seq - s->apos - s->alen;
-	uint32_t qs = (flag&0x900)? t->l_seq-s->bpos-s->blen : 0, qe = (flag&0x900)? t->l_seq-s->bpos : t->l_seq;
+	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = t->l_seq-s->bpos;
+	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
 
 	_puts(b, t->name); _put(b, '\t'); _putn(b, flag); _put(b, '\t'); _puts(b, r->name); _put(b, '\t');
 	_putn(b, rs+1); _put(b, '\t'); _putn(b, mapq); _put(b, '\t');
-	if (qs) { _putn(b, qs); _put(b, (flag&0x900)? 'H' : 'S'); }
+	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);//s->ppos, gaba_plen(s));
-	if (t->l_seq-qe) { _putn(b, t->l_seq-qe); _put(b, (flag&0x900)? 'H' : 'S'); }
+	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	_puts(b, "\t*\t0\t0\t");
 	if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
 	else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
