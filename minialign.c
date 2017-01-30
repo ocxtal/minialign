@@ -496,13 +496,17 @@ static int mm_mapopt_check(mm_mapopt_t *opt, int (*_fprintf)(FILE*,const char*,.
 	if (opt->ge < 1 || opt->ge > 5) _fprintf(_fp, "[M::%s] ERROR: Gap extension penalty must be inside [1,5].\n", __func__), ret = 1;
 	if (ret) return(ret);
 
-	if (opt->x >= (opt->gi + opt->ge)) _fprintf(_fp, "[M::%s] info: Large mismatch penalty with respect to the gap open/extend penalty may cause SEGV or broken CIGAR. [issue #2]\n", __func__);
-	if (opt->m + 2*(opt->gi + opt->ge) > 10) _fprintf(_fp, "[M::%s] info: Large match award or large gap open/extend penalty may cause SEGV or broken CIGAR. [issue #7]\n", __func__);
+	if (opt->x >= (opt->gi + opt->ge))
+		_fprintf(_fp, "[M::%s] info: Large mismatch penalty with respect to the gap open/extend penalty may cause SEGV or broken CIGAR. [issue #2]\n", __func__);
+	if (opt->m + 2*(opt->gi + opt->ge) > 10)
+		_fprintf(_fp, "[M::%s] info: Large match award or large gap open/extend penalty may cause SEGV or broken CIGAR. [issue #7]\n", __func__);
 	if (opt->xdrop < 10 || opt->xdrop > 100) _fprintf(_fp, "[M::%s] ERROR: Xdrop cutoff must be inside [10,100].\n", __func__), ret = 1;
 	if (opt->min > INT32_MAX) _fprintf(_fp, "[M::%s] ERROR: Minimum alignment score must be > 0.\n", __func__), ret = 1;
 	if (opt->min_ratio < 0.0 || opt->min_ratio > 1.0) _fprintf(_fp, "[M::%s] ERROR: Minimum alignment score ratio must be inside [0.0,1.0].\n", __func__), ret = 1;
 	if (opt->n_frq >= 16) _fprintf(_fp, "[M::%s] ERROR: Frequency thresholds must be fewer than 16.\n", __func__), ret = 1;
-	for (uint64_t i = 0; i < opt->n_frq; ++i) if (opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i])) _fprintf(_fp, "[M::%s] ERROR: Frequency thresholds must be inside [0.0,1.0] and descending.\n", __func__), ret = 1;
+	for (uint64_t i = 0; i < opt->n_frq; ++i)
+		if (opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i]))
+			_fprintf(_fp, "[M::%s] ERROR: Frequency thresholds must be inside [0.0,1.0] and descending.\n", __func__), ret = 1;
 	if (ret) return(ret);
 
 	if (opt->n_threads < 1) _fprintf(_fp, "[M::%s] ERROR: Thread counts must be > 0.\n", __func__), ret = 1;
@@ -1114,7 +1118,9 @@ static uint64_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg
 }
 #undef _reg
 
-static const mm128_t *mm_align_seq(mm_tbuf_t *b, const mm_mapopt_t *opt, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t qid, uint32_t n_occ, uint64_t *occ, lmm_t *lmm, uint64_t *n_reg)
+static const mm128_t *mm_align_seq(
+	mm_tbuf_t *b, const mm_mapopt_t *opt, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t qid,
+	uint32_t n_occ, uint64_t *occ, lmm_t *lmm, uint64_t *n_reg)
 {
 	int32_t min = opt->min;
 	const int32_t ofs = 0x40000000;
@@ -1332,7 +1338,7 @@ static void *mm_align_source(void *arg)
 {
 	mm_align_t *b = (mm_align_t*)arg;
 	mm_align_step_t *s = (mm_align_step_t*)calloc(1, sizeof(mm_align_step_t));
-	s->lmm = lmm_init(NULL, 1024 * 1024);
+	s->lmm = lmm_init(NULL, 512 * 1024);
 	if (s->lmm == 0) return 0;
 	s->seq = bseq_read(b->fp, b->opt->batch_size, &s->n_seq, &s->base, &s->size);
 	if (s->seq == 0) lmm_clean(s->lmm), free(s), s = 0;
@@ -1611,7 +1617,8 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 's') o->min = atoi(optarg);
 		else if (ch == 'm') o->min_ratio = atof(optarg);
 		else if (ch == 'r') {
-			if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Minimum length threshold option is deprecated in version 0.4.0 and later, interpreted as score ratio.\n", __func__);
+			if (mm_verbose >= 3)
+				fprintf(stderr, "[M::%s] Warning: Minimum length threshold option is deprecated in version 0.4.0 and later, interpreted as score ratio.\n", __func__);
 			o->min_ratio = atof(optarg);
 		}
 		else if (ch == 'a') o->m = atoi(optarg);
@@ -1671,13 +1678,17 @@ int main(int argc, char *argv[])
 		else mi = mm_idx_gen(opt, (fp = bseq_open((const char *)v.a[i], base_rid, 0, 0))), base_rid = bseq_close(fp);
 		if (mi == 0) {
 			if (fpr && i > 0) break;
-			fprintf(stderr, "[M::%s] ERROR: failed to %s `%s'. Please check %s.\n", __func__, fpr? "load index file" : "open sequence file", fpr? fnr : (const char*)v.a[i], fpr? "file path, format and its version" : "file path and format");
+			fprintf(stderr, "[M::%s] ERROR: failed to %s `%s'. Please check %s.\n", __func__,
+				fpr? "load index file" : "open sequence file",
+				fpr? fnr : (const char*)v.a[i], fpr? "file path, format and its version" : "file path and format");
 			ret = 1; goto _final;
 		}
-		if (mm_verbose >= 3) fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %lu target sequence(s)\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->s.n);
+		if (mm_verbose >= 3) fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %lu target sequence(s)\n", __func__,
+			realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->s.n);
 		if (fpw) mm_idx_dump(fpw, mi);
 		else aln = mm_align_init(opt, mi);
-		for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < (fpw? 0 : v.n); ++j) mm_align_file(aln, (fp = bseq_open((const char*)v.a[j], qid, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n!=0))), qid = bseq_close(fp);
+		for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < (fpw? 0 : v.n); ++j)
+			mm_align_file(aln, (fp = bseq_open((const char*)v.a[j], qid, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n!=0))), qid = bseq_close(fp);
 		if (!fpw) mm_align_destroy(aln);
 		mm_idx_destroy(mi);
 	}
