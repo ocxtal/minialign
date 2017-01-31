@@ -50,8 +50,6 @@ typedef struct { size_t n, m; uint8_t *a; } uint8_v;
 typedef struct { size_t n, m; void **a; } ptr_v;
 
 #include "ksort.h"
-#define sort_key_64(a) ((a))
-KRADIX_SORT_INIT(64, uint64_t, sort_key_64, 4)
 #define sort_key_64x(a) ((a).x[0])
 KRADIX_SORT_INIT(64x, v2u32_t, sort_key_64x, 4)
 #define sort_key_128x(a) ((a).u64[0])
