@@ -56,6 +56,7 @@ KRADIX_SORT_INIT(64x, v2u32_t, sort_key_64x, 4)
 KRADIX_SORT_INIT(128x, mm128_t, sort_key_128x, 8) 
 KSORT_INIT_GENERIC(uint32_t)
 
+/*
 #include "khash.h"
 #define idx_hash(a) ((a)>>1)
 #define idx_eq(a, b) ((a)>>1 == (b)>>1)
@@ -65,6 +66,129 @@ typedef khash_t(idx) idxhash_t;
 #define pos_eq(a, b)	((a)==(b))
 KHASH_INIT(pos, uint64_t, uint64_t, 1, pos_hash, pos_eq)
 typedef khash_t(pos) poshash_t;
+*/
+
+/* hash.c */
+typedef struct kh_s {
+	uint32_t mask, max, cnt, ub;		// size of the array, element count, upper bound
+	mm128_t *a;
+} kh_t;
+#define KH_SIZE		( 16 )
+#define kh_size(h)		( (h)->mask + 1 )
+#define kh_cnt(h)		( (h)->cnt )
+#define kh_exist(h, i)	( (h)->a[i].u64[0] + 2 >= 2 )
+#define kh_key(h, i)	( (h)->a[i].u64[0] )
+#define kh_val(h, i)	( (h)->a[i].u64[1] )
+
+static kh_t *kh_init(uint64_t size)
+{
+	kh_t *h = calloc(1, sizeof(kh_t));
+	// roundup
+	size |= size>>1; size |= size>>2; size |= size>>4;
+	size |= size>>8; size |= size>>16; size |= size>>32;
+
+	h->mask = KH_SIZE - 1; h->max = KH_SIZE; h->cnt = 0; h->ub = KH_SIZE * 0.8;
+	h->a = malloc(sizeof(mm128_t) * KH_SIZE);
+	for (uint64_t i = 0; i < KH_SIZE; ++i) h->a[i].u64[0] = (int64_t)-2, h->a[i].u64[1] = 0;
+	return h;
+}
+
+static void kh_destroy(kh_t *h)
+{
+	if (h == NULL) { return; }
+	free(h->a); free(h);
+	return;
+}
+
+static void kh_dump(kh_t *h, FILE *fp)
+{
+	uint32_t x[2] = {0};
+	if (h == 0) { fwrite(x, sizeof(uint32_t), 2, fp); return; }
+	x[0] = h->mask + 1; x[1] = h->cnt;
+	fwrite(x, sizeof(uint32_t), 2, fp);
+	fwrite(h->a, sizeof(mm128_t), x[0], fp);
+	return;
+}
+
+static kh_t *kh_load(FILE *fp)
+{
+	uint32_t x[2] = {0};
+	if ((fread(x, sizeof(uint32_t), 2, fp)) != 2 || x[0] == 0) return NULL;
+	kh_t *h = calloc(1, sizeof(kh_t));
+	h->mask = x[0] - 1; h->max = x[0]; h->cnt = x[1]; h->ub = h->max * 0.8;
+	h->a = malloc(sizeof(mm128_t) * x[0]);
+	if ((fread(h->a, sizeof(mm128_t), x[0], fp)) != x[0]) { free(h->a); free(h); return NULL; }
+	return h;
+}
+
+static void kh_clear(kh_t *h)
+{
+	if (h == 0) { return; }
+	h->mask = KH_SIZE - 1; h->cnt = 0; h->ub = KH_SIZE * 0.8;
+	for (uint64_t i = 0; i < KH_SIZE; ++i) h->a[i].u64[0] = (int64_t)-2, h->a[i].u64[1] = 0;
+	return;
+}
+
+static uint64_t kh_put_intl(mm128_t *a, uint64_t k, uint64_t v, uint64_t mask)
+{
+	uint64_t kc = k, pos = k & mask;
+	while (1) {
+		uint64_t kt = a[pos].u64[0];
+		if (kc <= kt) {				// k < kt || is_empty(kt) || is_moved(kt)
+			uint64_t vt = a[pos].u64[1];
+			a[pos] = (mm128_t){ .u64 = { k, v } };
+			if (kt + 2 < 2) return 1;// is_empty(kt) || is_moved(kt)
+			if (k == kt) return 0;	// k == kt, replaced
+			k = kc = kt; v = vt;	// robinhood swap
+		}
+		kc -= (mask + 1) & (pos + 1); pos = mask & (pos + 1);
+	}
+	return 0;
+}
+
+static void kh_extend(kh_t *h)
+{
+	uint64_t prev_size = h->mask + 1, size = 2 * prev_size, mask = size - 1;
+	h->mask = mask; h->ub = size * 0.8;
+	if (size > h->max) { h->a = realloc(h->a, sizeof(mm128_t) * size); h->max = size; }
+	for (uint64_t i = 0; i < prev_size; ++i) h->a[i + prev_size].u64[0] = (int64_t)-2, h->a[i + prev_size].u64[1] = 0;
+	for (uint64_t i = 0; i < size; ++i) {
+		uint64_t k = h->a[i].u64[0];	// key
+		if (k + 2 < 2 || (k & mask) == i) continue;
+		uint64_t v = h->a[i].u64[1]; h->a[i].u64[0] = (int64_t)-1;	// moved
+		kh_put_intl(h->a, k, v, mask);
+	}
+	return;
+}
+
+static void kh_put(kh_t *h, uint64_t key, uint64_t val)
+{
+	uint64_t mask = h->mask;
+	if (h->cnt >= h->ub) kh_extend(h);
+	h->cnt += kh_put_intl(h->a, key, val, mask);
+	return;
+}
+
+static uint64_t kh_get(kh_t *h, uint64_t key)
+{
+	uint64_t mask = h->mask, pos = key & mask, k;
+	do {
+		if ((k = h->a[pos].u64[0]) == key) return h->a[pos].u64[1];
+		pos = mask & (pos + 1);
+	} while (k + 1 < (int64_t)-1);	// !is_empty(k) || is_moved(k)
+	return (int64_t)-1;
+}
+
+static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
+{
+	uint64_t mask = h->mask, pos = key & mask, k;
+	do {
+		if ((k = h->a[pos].u64[0]) == key) return &h->a[pos].u64[1];
+		pos = mask & (pos + 1);
+	} while (k + 1 < (int64_t)-1);	// !is_empty(k) || is_moved(k)
+	return NULL;
+}
+/* end of hash.c */
 
 /* misc.c */
 
@@ -551,10 +675,11 @@ typedef struct {
 } mm_idx_bucket_t;
 
 typedef struct {
-	uint8_t w, k, b, circular;
-	uint32_t base_rid;
+	uint64_t mask;
 	mm_idx_bucket_t *B;
 	mm_idx_seq_v s;
+	uint8_t b, w, k, circular;
+	uint32_t base_rid;
 
 	// work
 	mm128_v a;
@@ -562,10 +687,11 @@ typedef struct {
 	ptr_v base;
 } mm_idx_t;
 
+#if 0
 static mm_idx_t *mm_idx_init(uint32_t w, uint32_t k, uint32_t b)
 {
 	mm_idx_t *mi = (mm_idx_t*)calloc(1, sizeof(mm_idx_t));
-	mi->w = w<1? 1 : w, mi->k = k; mi->b = MIN2(k*2, b);
+	mi->w = w<1? 1 : w, mi->k = k; mi->b = MIN2(k*2, b); mi->mask = (1<<mi->b) - 1;
 	mi->B = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t));
 	return mi;
 }
@@ -624,6 +750,68 @@ static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
 	free(a);
 	return thres;
 }
+#else
+static mm_idx_t *mm_idx_init(uint32_t w, uint32_t k, uint32_t b)
+{
+	mm_idx_t *mi = (mm_idx_t*)calloc(1, sizeof(mm_idx_t));
+	mi->w = w<1? 1 : w, mi->k = k; mi->b = MIN2(k*2, b); mi->mask = (1<<mi->b) - 1;
+	mi->B = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t));
+	return mi;
+}
+
+static void mm_idx_destroy(mm_idx_t *mi)
+{
+	if (mi == 0) return;
+	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
+		free(mi->B[i].p);
+		free(mi->B[i].a.a);
+		kh_destroy((kh_t*)mi->B[i].h);
+	}
+	free(mi->B);
+	for (uint64_t i = 0; i < mi->base.n; ++i) free(mi->base.a[i]);
+	free(mi->base.a); free(mi->size.a);
+	free(mi->s.a); free(mi->a.a); free(mi);
+}
+
+static const v2u32_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, uint64_t *n)
+{
+	mm_idx_bucket_t *b = &mi->B[minier & mi->mask];
+	kh_t *h = (kh_t*)b->h;
+	const uint64_t *p;
+	if (h == NULL || (p = kh_get_ptr(h, minier>>mi->b)) == NULL) {
+		*n = 0; return NULL;
+	}
+	if ((int64_t)*p >= 0) {
+		*n = 1;
+		return (const v2u32_t*)p;
+	} else {
+		*n = (uint32_t)*p;
+		return (const v2u32_t*)&b->p[(*p>>32) & 0x7fffffff];
+	}
+}
+
+static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
+{
+	uint64_t n = 0;
+	uint32_t thres;
+	if (f <= 0.) return UINT32_MAX;
+	for (uint64_t i = (n = 0); i < 1ULL<<mi->b; ++i)
+		if (mi->B[i].h) n += kh_cnt((kh_t*)mi->B[i].h);
+	
+	uint32_t *a = (uint32_t*)malloc(n * sizeof(uint32_t));
+	for (uint64_t i = (n = 0); i < 1ULL<<mi->b; ++i) {
+		kh_t *h = (kh_t*)mi->B[i].h;
+		if (h == 0) continue;
+		for (uint64_t k = 0; k < kh_size(h); ++k) {
+			if (!kh_exist(h, k)) continue;
+			a[n++] = ((int64_t)kh_val(h, k))>=0? 1 : (uint32_t)kh_val(h, k);
+		}
+	}
+	thres = ks_ksmall_uint32_t(n, a, (uint32_t)((1. - f) * n)) + 1;
+	free(a);
+	return thres;
+}
+#endif
 
 /******************
  * Generate index *
@@ -667,13 +855,14 @@ static void *mm_idx_worker(void *arg, void *item)
 	return s;
 }
 
+#if 0
 static void mm_idx_drain(void *arg, void *item)
 {
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
 	uint64_t mask = (1<<q->mi->b) - 1;
 	q->mi->s.n = MAX2(q->mi->s.n, s->seq[s->n_seq-1].rid+1-q->mi->base_rid);
-	kv_reserve(bseq_t, q->mi->s, q->mi->s.n);
+	kv_reserve(mm_idx_seq_t, q->mi->s, q->mi->s.n);
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
 		const bseq_t *p = &s->seq[i];
 		q->mi->s.a[s->seq[i].rid-q->mi->base_rid] = (mm_idx_seq_t){
@@ -689,12 +878,37 @@ static void mm_idx_drain(void *arg, void *item)
 	free((void*)s->seq); free(s->a.a); free(s);
 	return;
 }
+#else
+static void mm_idx_drain(void *arg, void *item)
+{
+	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
+	mm_idx_step_t *s = (mm_idx_step_t*)item;
+	q->mi->s.n = MAX2(q->mi->s.n, s->seq[s->n_seq-1].rid+1-q->mi->base_rid);
+	kv_reserve(mm_idx_seq_t, q->mi->s, q->mi->s.n);
+	for (uint64_t i = 0; i < s->n_seq; ++i) {
+		const bseq_t *p = &s->seq[i];
+		q->mi->s.a[s->seq[i].rid-q->mi->base_rid] = (mm_idx_seq_t){
+			.l_seq = p->l_seq, .rid = p->rid, .l_name = p->l_name, .circular = q->mi->circular,
+			.name = p->name, .seq = p->seq
+		};
+	}
+	uint64_t mask = q->mi->mask;
+	for (uint64_t i = 0; i < s->a.n; ++i) {
+		mm128_v *p = &q->mi->B[s->a.a[i].u64[0]&mask].a;
+		kv_push(mm128_t, *p, s->a.a[i]);
+	}
+
+	free((void*)s->seq); free(s->a.a); free(s);
+	return;
+}
+#endif
 
 typedef struct {
 	mm_idx_t *mi;
 	uint32_t from, to;
 } mm_idx_post_t;
 
+#if 0
 static void *mm_idx_post(void *arg, void *item)
 {
 	mm_idx_post_t *q = (mm_idx_post_t*)arg;
@@ -750,6 +964,52 @@ static void *mm_idx_post(void *arg, void *item)
 	}
 	return 0;
 }
+#else
+static void *mm_idx_post(void *arg, void *item)
+{
+	mm_idx_post_t *q = (mm_idx_post_t*)arg;
+	mm_idx_t *mi = q->mi;
+
+	for (uint64_t i = q->from; i < q->to; ++i) {
+		mm_idx_bucket_t *b = &mi->B[i];
+		if (b->a.n == 0) continue;
+
+		// sort by minimizer
+		radix_sort_128x(b->a.a, b->a.a + b->a.n);
+
+		// count and preallocate
+		uint64_t n_keys = 0; b->n = 0;
+		for (uint64_t j = 1, n = 1; j <= b->a.n; ++j, ++n) {
+			if (b->a.a[j].u64[0] != b->a.a[j-1].u64[0] || j == b->a.n) {
+				b->n += (n > 1)? n : 0; ++n_keys; n = 0;
+			}
+		}
+		kh_t *h = kh_init(n_keys);
+		b->p = (uint64_t*)malloc(sizeof(uint64_t) * b->n);
+
+		// create the hash table
+		for (uint64_t j = 1, n = 1, sp = 0; j <= b->a.n; ++j, ++n) {
+			if (b->a.a[j].u64[0] != b->a.a[j-1].u64[0] || j == b->a.n) {
+				mm128_t *p = &b->a.a[j-n];
+				uint64_t key = p->u64[0]>>mi->b, val = p->u64[1];
+				if (n != 1) {
+					b->p[sp] = val;	// k = 0
+					for (uint64_t k = 1; k < n; ++k) b->p[sp+k] = b->a.a[j-n+k].u64[1];
+					val = sp<<32 | n | 0x01ULL<<63;
+				}
+				kh_put(h, key, val); n = 0;
+			}
+		}
+		b->h = h;
+		// assert(b->n == start_p);
+
+		// deallocate and clear b->a
+		free(b->a.a);
+		b->a.n = b->a.m = 0, b->a.a = 0;
+	}
+	return 0;
+}
+#endif
 
 static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 {
@@ -792,6 +1052,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 
 #define MM_IDX_MAGIC "MAI\5"		/* minialign index version 5, differs from minimap index signature */
 
+#if 0
 static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
 {
 	uint32_t x[3];
@@ -886,7 +1147,78 @@ _mm_idx_load_fail:
 	mm_idx_destroy(mi);
 	return 0;
 }
+#else
 
+static void mm_idx_dump(FILE *fp, const mm_idx_t *mi)
+{
+	uint32_t x[3];
+	uint64_t size = 0, y[2];
+	for (uint64_t i = (size = 0); i < mi->size.n; ++i) size += mi->size.a[i];
+	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
+	fwrite(MM_IDX_MAGIC, sizeof(char), 4, fp);
+	fwrite(x, sizeof(uint32_t), 3, fp);
+	fwrite(y, sizeof(uint64_t), 2, fp);
+	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
+		mm_idx_bucket_t *b = &mi->B[i];
+		fwrite(&b->n, sizeof(uint32_t), 1, fp);
+		fwrite(b->p, sizeof(uint64_t), b->n, fp);
+		kh_dump((kh_t*)b->h, fp);
+	}
+	for (uint64_t i = 0; i < mi->base.n; ++i)
+		fwrite(mi->base.a[i], sizeof(char), mi->size.a[i], fp);
+	for (uint64_t i = 0, j = 0, s = 0; i < mi->s.n; ++i) {
+		if ((uintptr_t)mi->s.a[i].seq < (uintptr_t)mi->base.a[j]
+		|| (uintptr_t)mi->s.a[i].seq >= (uintptr_t)mi->base.a[j] + (ptrdiff_t)mi->size.a[j]) {
+			s += mi->size.a[j++];
+		}
+		mi->s.a[i].name -= (ptrdiff_t)mi->base.a[j], mi->s.a[i].seq -= (ptrdiff_t)mi->base.a[j];
+		mi->s.a[i].name += (ptrdiff_t)s, mi->s.a[i].seq += (ptrdiff_t)s;
+	}
+	fwrite(mi->s.a, sizeof(mm_idx_seq_t), mi->s.n, fp);
+	// restore pointers
+	for (uint64_t i = 0, j = 0, s = 0; i < mi->s.n; ++i) {
+		mi->s.a[i].name -= (ptrdiff_t)s, mi->s.a[i].seq -= (ptrdiff_t)s;
+		mi->s.a[i].name += (ptrdiff_t)mi->base.a[j], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[j];
+		if ((uintptr_t)mi->s.a[i].name > s + mi->size.a[j]) s += mi->size.a[j++];
+	}
+	return;
+}
+
+static mm_idx_t *mm_idx_load(FILE *fp)
+{
+	char magic[4];
+	uint32_t x[3];
+	uint64_t bsize, y[2];
+
+	mm_idx_t *mi;
+	if (fread(magic, sizeof(char), 4, fp) != 4) return 0;
+	if (strncmp(magic, MM_IDX_MAGIC, 4) != 0) return 0;
+	if (fread(x, sizeof(uint32_t), 3, fp) != 3) return 0;
+	if (fread(y, sizeof(uint64_t), 2, fp) != 2) return 0;
+	mi = mm_idx_init(x[0], x[1], x[2]); mi->s.n = y[0]; bsize = y[1];
+	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
+		mm_idx_bucket_t *b = &mi->B[i];
+		if (fread(&b->n, sizeof(uint32_t), 1, fp) != 1) { fprintf(stderr, "failed to restore n, i(%llu)\n", i); goto _mm_idx_load_fail; }
+		b->p = (uint64_t*)malloc(b->n * sizeof(uint64_t));
+		if (fread(b->p, sizeof(uint64_t), b->n, fp) != (size_t)b->n) { fprintf(stderr, "failed to restore p, i(%llu)\n", i); goto _mm_idx_load_fail; }
+		b->h = kh_load(fp);
+	}
+	mi->base.n = mi->size.n = 1;
+	mi->base.a = malloc(sizeof(void*) * mi->base.n);
+	mi->size.a = malloc(sizeof(uint64_t) * mi->size.n);
+	mi->base.a[0] = malloc(sizeof(char) * bsize);
+	mi->size.a[0] = bsize;
+	if (fread(mi->base.a[0], sizeof(char), mi->size.a[0], fp) != mi->size.a[0]) goto _mm_idx_load_fail;
+	mi->s.a = malloc(sizeof(mm_idx_seq_t) * mi->s.n);
+	if (fread(mi->s.a, sizeof(mm_idx_seq_t), mi->s.n, fp) != mi->s.n) goto _mm_idx_load_fail;
+	for (uint64_t i = 0; i < mi->s.n; ++i) mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
+	mi->base_rid = mi->s.a[0].rid;
+	return mi;
+_mm_idx_load_fail:
+	mm_idx_destroy(mi);
+	return 0;
+}
+#endif
 /* end of index.c */
 
 /* map.c */
@@ -929,7 +1261,8 @@ typedef struct mm_tbuf_s { // per-thread buffer
 	mm128_v resc; // also used as query minimizer vector
 	mm128_v coef; // Hough transform coefficient
 	v2u32_v intv; // intervals on sorted coef
-	poshash_t *pos;
+	// poshash_t *pos;
+	kh_t *pos;
 	gaba_dp_t *dp;	// alignment work
 } mm_tbuf_t;
 
@@ -1034,10 +1367,10 @@ static uint64_t mm_rescue(const mm_idx_seq_t *ref, uint64_t l_coef, mm128_t *coe
 
 static const gaba_alignment_t *mm_extend(
 	const mm_idx_seq_t *ref, uint32_t l_coef, mm128_t *coef, uint32_t k, uint32_t min, uint32_t sidx, uint32_t eidx,
-	gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, poshash_t *pos, lmm_t *lmm)
+	gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, kh_t *pos/*poshash_t *pos*/, lmm_t *lmm)
 {
-	khint_t itr;
-	int absent;
+	// khint_t itr;
+	// int absent;
 	const uint32_t mask = 0x7fffffff;
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
 	gaba_section_t *qu, *qd, *r, *q;
@@ -1045,7 +1378,7 @@ static const gaba_alignment_t *mm_extend(
 	gaba_section_t rr = { .id = (ref->rid<<1)+1, .len = ref->l_seq, .base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim) };
 	gaba_pos_pair_t p = {0};
 	gaba_dp_flush(dp, lim, lim);
-	uint64_t key = (uint64_t)ref->rid<<32;
+	uint64_t key = (uint64_t)ref->rid<<32, *pval;
 	gaba_alignment_t *a = NULL;
 	for (uint64_t i = sidx; i < eidx && i < l_coef; ++i) {
 		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) continue;	// skip head
@@ -1066,7 +1399,8 @@ static const gaba_alignment_t *mm_extend(
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
 		key |= p.apos - (p.bpos>>1);
-		if ((itr = kh_get(pos, pos, key)) != kh_end(pos)) { return 0; }	// already evaluated
+		// if ((itr = kh_get(pos, pos, key)) != kh_end(pos)) { return 0; }	// already evaluated
+		if ((pval = kh_get_ptr(pos, key)) != NULL) { return 0; }
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
 		m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1);
@@ -1083,8 +1417,9 @@ static const gaba_alignment_t *mm_extend(
 		break;
 	}
 	// record head
-	itr = kh_put(pos, pos, key, &absent);
-	kh_val(pos, itr) = (uintptr_t)a;
+	// itr = kh_put(pos, pos, key, &absent);
+	// kh_val(pos, itr) = (uintptr_t)a;
+	kh_put(pos, key, (uintptr_t)a);
 	return a;
 }
 
@@ -1134,7 +1469,7 @@ static const mm128_t *mm_align_seq(
 	qf.id = 0; qf.len = l_seq; qf.base = (const uint8_t*)seq;
 	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev((const uint8_t*)seq+l_seq-1, lim);
 	mg.id = 4; mg.len = 32; mg.base = tail+32;
-	b->coef.n = b->resc.n = b->intv.n = 0; kh_clear(pos, b->pos);
+	b->coef.n = b->resc.n = b->intv.n = 0; kh_clear(b->pos);	// kh_clear(pos, b->pos);
 	for (uint64_t i = 0, j = 0; reg.n == 0 && i < n_occ; ++i) {
 		if (i == 0) {
 			mm_collect(mi, l_seq, seq, qid, occ[n_occ-1], occ[0], thresh, &b->resc, &b->coef);
@@ -1383,7 +1718,7 @@ static void mm_tbuf_destroy(mm_tbuf_t *b)
 {
 	if (b == 0) return;
 	free(b->resc.a); free(b->coef.a); free(b->intv.a);
-	kh_destroy(pos, b->pos); gaba_dp_clean(b->dp);
+	kh_destroy(b->pos); /*kh_destroy(pos, b->pos);*/ gaba_dp_clean(b->dp);
 	free(b);
 }
 
@@ -1393,7 +1728,8 @@ static mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 	if (t == 0) return 0;
 	const uint8_t *lim = (const uint8_t *)0x800000000000;
 	t->b = b;
-	if ((t->pos = kh_init(pos)) == 0) goto _fail;
+	// if ((t->pos = kh_init(pos)) == 0) goto _fail;
+	if ((t->pos = kh_init(0)) == 0) goto _fail;
 	if ((t->dp = gaba_dp_init(b->gaba, lim, lim)) == 0) goto _fail;
 	return t;
 _fail:
