@@ -31,7 +31,7 @@ install.all:
 	cp samsplit $(PREFIX)/bin/samsplit
 
 uninstall:
-	rm $(PREFIX)/bin/minialign $(PREFIX)/bin/samsplit
+	rm -f $(PREFIX)/bin/minialign $(PREFIX)/bin/samsplit
 
 minialign.c: kvec.h ptask.h gaba.h
 ptask.c: ptask.h queue.h unittest.h sassert.h
