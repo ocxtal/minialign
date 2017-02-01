@@ -1405,17 +1405,6 @@ static void mm_print_tags(mm_align_t *b, const bseq_t *t, const gaba_alignment_t
 	return;
 }
 
-/*
-static int32_t mm_search_tag(mm_align_t *b, char tag1, char tag2)
-{
-	uint16_t tag = (uint16_t)tag1 | ((uint16_t)tag2<<8);
-	for (uint64_t i = 0; i < b->opt->tags.n; ++i) {
-		if (b->opt->tags.a[i] == tag) return i;
-	}
-	return -1;
-}
-*/
-
 static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 {
 	if (type == 'a') { _put(b, *p); return 1; }
@@ -1439,17 +1428,8 @@ static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
 		0, 1, 0xfe, 1,  0, 0, 4, 0,  0xfe, 4, 0, 0,  0, 0, 0, 0,
 		0, 0, 0, 2,     0, 0, 0, 0,  0, 0, 0xff, 0,  0, 0, 0, 0,
 	};
-	// uint8_t size;
 	const uint8_t *p = t->tag, *tail = p + t->l_tag;
 	while (p < tail) {
-		/*
-		if (mm_search_tag(b, p[0], p[1]) < 0) {	// skip
-			if ((size = tag_size[p[2]&0x1f]) < 0x10) p += 3 + size;
-			else if(size == 0xfe) p += 4 + tag_size[p[3]&0x1f] * *((uint32_t*)&p[4]);
-			else while (*p++) {}
-			continue;
-		}
-		*/
 		_put(b, '\t'); _put(b, p[0]); _put(b, p[1]); _put(b, ':'); _put(b, p[2]); _put(b, ':');
 		if (p[2] == 'Z') {
 			p += 3; while(*p) { _put(b, *p); p++; } p++;
