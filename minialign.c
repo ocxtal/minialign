@@ -8,15 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <pthread.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/types.h>
 
-#include "kvec.h"
-#include "ptask.h"
-#include "gaba.h"
-#include "lmm.h"
-#include "sassert.h"
 
 #define MM_VERSION "0.4.5-dev"
 
@@ -87,10 +83,9 @@ static void oom_abort(const char *name)
 
 /* end of misc.c */
 
-
 #include "kvec.h"
-#include "ptask.h"
 #include "gaba.h"
+#include "lmm.h"
 #include "sassert.h"
 #include "arch/arch.h"
 
@@ -249,6 +244,141 @@ static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 	return NULL;
 }
 /* end of hash.c */
+
+/* queue.c */
+#define _cas(ptr, cmp, val) __atomic_compare_exchange_n(ptr, cmp, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
+typedef void *(*pt_source_t)(void *arg);
+typedef void *(*pt_worker_t)(void *arg, void *item);
+typedef void (*pt_drain_t)(void *arg, void *item);
+
+typedef struct pt_q_s {
+	uint64_t lock, head, tail, size;
+	void **elems;
+	uint64_t _pad1[3];
+} pt_q_t;
+_static_assert(sizeof(pt_q_t) == 64);
+
+typedef struct pt_thread_s {
+	pthread_t th;
+	uint64_t tid;
+	pt_q_t *in, *out;
+	pt_worker_t wfp;
+	void *warg;
+} pt_thread_t;
+
+typedef struct pt_s {
+	pt_q_t in, out;
+	uint32_t nth;
+	pt_thread_t c[];	// [0] is reserved for master
+} pt_t;
+
+#define PT_EMPTY		( (void *)((int64_t)-1) )
+#define PT_EXIT		( (void *)((int64_t)-2) )
+_static_assert(PT_EMPTY != NULL);
+_static_assert(PT_EXIT != NULL);
+_static_assert(PT_EXIT != PT_EMPTY);
+
+uint64_t pt_enq(pt_q_t *q, uint64_t tid, void *elem)
+{
+	uint64_t z, ret = (int64_t)-1;
+	do { z = 0xffffffff; } while (!_cas(&q->lock, &z, tid));
+	uint64_t head = q->head, tail = q->tail, mask = q->size - 1;
+	if (((head + 1) & mask) != tail) {
+		q->elems[head] = elem; q->head = (head + 1) & mask; ret = 0;
+	}
+	do { z = tid; } while (!_cas(&q->lock, &z, 0xffffffff));
+	return ret;
+}
+
+void *pt_deq(pt_q_t *q, uint64_t tid)
+{
+	void *elem = PT_EMPTY;
+	uint64_t z;
+	do { z = 0xffffffff; } while (!_cas(&q->lock, &z, tid));
+	uint64_t head = q->head, tail = q->tail, mask = q->size - 1;
+	if (head != tail) {
+		elem = q->elems[tail]; q->tail = (tail + 1) & mask;
+	}
+	do { z = tid; } while (!_cas(&q->lock, &z, 0xffffffff));
+	return elem;
+}
+
+static void *pt_dispatch(void *s)
+{
+	pt_thread_t *c = (pt_thread_t *)s;
+	while(1) {
+		void *item = pt_deq(c->in, c->tid);
+		if(item == PT_EXIT) { return NULL; }
+		if(item == PT_EMPTY) { continue; }
+		pt_enq(c->out, c->tid, c->wfp(c->warg, item));
+	}
+	return NULL;
+}
+
+static void pt_destoroy(pt_t *pt)
+{
+	void *status;
+	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, PT_EXIT);
+	for (uint64_t i = 1; i < pt->nth; ++i) pthread_join(pt->c[i].th, &status);
+	while (pt_deq(pt->c->in, pt->c->tid) != PT_EMPTY) {}
+	while (pt_deq(pt->c->out, pt->c->tid) != PT_EMPTY) {}
+	free(pt->in.elems); free(pt->out.elems); free(pt);
+}
+
+static pt_t *pt_init(uint32_t nth)
+{
+	nth = (nth == 0)? 1 : nth;
+	pt_t *pt = calloc(1, sizeof(pt_t) + sizeof(pt_thread_t) * nth);
+	pt->in = (pt_q_t){ .lock = 0xffffffff, .elems = calloc(8 * nth, sizeof(void*)), .size = 8 * nth };
+	pt->out = (pt_q_t){ .lock = 0xffffffff, .elems = calloc(8 * nth, sizeof(void*)), .size = 8 * nth };
+
+	pt->nth = nth; pt->c[0].tid = 0; pt->c[0].in = &pt->in; pt->c[0].out = &pt->out;
+	for (uint64_t i = 1; i < nth; ++i) {
+		pt->c[i].tid = i; pt->c[i].in = &pt->in; pt->c[i].out = &pt->out;
+		pthread_create(&pt->c[i].th, NULL, pt_dispatch, (void *)&pt->c[i]);
+	}
+	return pt;
+}
+
+static int pt_set_worker(pt_t *pt, pt_worker_t wfp, void **warg)
+{
+	void *item;
+	if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) { pt_enq(pt->c->in, pt->c->tid, item); return -1; }
+	for (uint64_t i = 0; i < pt->nth; ++i) pt->c[i].wfp = wfp, pt->c[i].warg = warg[i];
+	return 0;
+}
+
+static int pt_stream(pt_t *pt, pt_source_t sfp, void *sarg, pt_worker_t wfp, void **warg, pt_drain_t dfp, void *darg)
+{
+	if (pt_set_worker(pt, wfp, warg)) return -1;
+	uint64_t bal = 0, lb = pt->nth, ub = 2 * pt->nth;
+	void *item, *arr[ub];
+	while ((item = sfp(sarg)) != NULL) {
+		pt_enq(pt->c->in, pt->c->tid, item);
+		if (++bal < ub) continue;
+		while (bal > lb) {
+			if ((arr[ub - bal] = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) bal--;
+			if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) arr[ub - bal--] = wfp(*warg, item);
+		}
+		for (uint64_t i = ub; i > bal; --i) dfp(darg, arr[ub - i]);
+	}
+	while ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) pt_enq(pt->c->out, pt->c->tid, wfp(*warg, item));
+	while (bal > 0) if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(darg, item), bal--;
+	return 0;
+}
+
+static int pt_parallel(pt_t *pt, pt_worker_t wfp, void **warg, void **src, void **dst)
+{
+	if (pt_set_worker(pt, wfp, warg)) return -1;
+	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, src? src[i] : NULL);
+	void *res = wfp(*warg, src? src[0] : NULL); if (dst && dst[0]) dst[0] = res;
+	for (uint64_t i = 1; i < pt->nth; ++i) {
+		while ((res = pt_deq(pt->c->out, pt->c->tid)) == PT_EMPTY) {}
+		if (dst && dst[i]) dst[i] = res;
+	}
+	return 0;
+}
+/* end of queue.c */
 
 /* bamlite.c in bwa */
 typedef struct {
@@ -959,10 +1089,14 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 
 	p = (mm_idx_pipeline_t**)calloc(opt->n_threads, sizeof(mm_idx_pipeline_t*));
 	for (uint64_t i = 0; i < opt->n_threads; ++i) p[i] = &pl;
-	ptask_t *pt = ptask_init(mm_idx_worker, (void**)p, opt->n_threads, 64);
-	ptask_stream(pt, mm_idx_source, &pl, mm_idx_drain, &pl, 8*opt->n_threads);
-	ptask_clean(pt);
-	free(p);
+
+	pt_t *pt = pt_init(opt->n_threads);
+	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
+
+	// ptask_t *pt = ptask_init(mm_idx_worker, (void**)p, opt->n_threads, 64);
+	// ptask_stream(pt, mm_idx_source, &pl, mm_idx_drain, &pl, 8*opt->n_threads);
+	// ptask_clean(pt);
+	// free(p);
 	
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
@@ -975,9 +1109,12 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->n_threads;
 		qq[i] = &q[i];
 	}
-	pt = ptask_init(mm_idx_post, (void**)qq, opt->n_threads, 64);
-	ptask_parallel(pt, NULL, NULL);
-	ptask_clean(pt);
+	// pt = ptask_init(mm_idx_post, (void**)qq, opt->n_threads, 64);
+	// ptask_parallel(pt, NULL, NULL);
+	// ptask_clean(pt);
+	pt_parallel(pt, mm_idx_post, (void**)qq, NULL, NULL);
+	pt_destoroy(pt);
+
 	free(q); free(qq);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
@@ -1083,7 +1220,8 @@ typedef struct {
 	uint32_t n_occ;
 	gaba_t *gaba;
 	void **t;	// mm_tbuf_t **
-	ptask_t *pt;
+	// ptask_t *pt;
+	pt_t *pt;
 	bseq_file_t *fp;
 } mm_align_t;
 
@@ -1574,7 +1712,7 @@ static void mm_align_destroy(mm_align_t *b)
 	assert(b != 0);
 	fwrite(b->base, sizeof(uint8_t), b->p - b->base, stdout);
 	for (uint64_t i = 0; i < b->opt->n_threads; ++i) mm_tbuf_destroy((mm_tbuf_t*)b->t[i]);
-	free(b->base); free(b->occ); free(b->t); gaba_clean(b->gaba); ptask_clean(b->pt);
+	free(b->base); free(b->occ); free(b->t); gaba_clean(b->gaba); pt_destoroy(b->pt); // ptask_clean(b->pt);
 	free(b);
 	return;
 }
@@ -1607,7 +1745,8 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 	// initialize threads
 	if ((b->t = (void**)calloc(b->opt->n_threads, sizeof(mm_tbuf_t*))) == 0) goto _fail;
 	for (uint64_t i = 0; i < b->opt->n_threads; ++i) { if ((b->t[i] = (void*)mm_tbuf_init(b)) == 0) goto _fail; }
-	if ((b->pt = ptask_init(mm_align_worker, (void**)b->t, b->opt->n_threads, 64)) == 0) goto _fail;
+	// if ((b->pt = ptask_init(mm_align_worker, (void**)b->t, b->opt->n_threads, 64)) == 0) goto _fail;
+	if ((b->pt = pt_init(b->opt->n_threads)) == 0) goto _fail;
 
 	// print sam header
 	mm_print_header(b);
@@ -1622,7 +1761,8 @@ static int mm_align_file(mm_align_t *b, bseq_file_t *fp)
 	assert(b != 0);
 	if (fp == 0) return -1;
 	b->fp = fp;
-	return ptask_stream(b->pt, mm_align_source, b, mm_align_drain, b, 8*b->opt->n_threads);
+	// return ptask_stream(b->pt, mm_align_source, b, mm_align_drain, b, 8*b->opt->n_threads);
+	return pt_stream(b->pt, mm_align_source, b, mm_align_worker, (void**)b->t, mm_align_drain, b);
 }
 
 /* end of map.c */
