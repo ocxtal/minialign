@@ -272,11 +272,8 @@ typedef struct pt_s {
 	pt_thread_t c[];	// [0] is reserved for master
 } pt_t;
 
-#define PT_EMPTY		( (void *)((int64_t)-1) )
+#define PT_EMPTY	( (void *)((int64_t)-1) )
 #define PT_EXIT		( (void *)((int64_t)-2) )
-_static_assert(PT_EMPTY != NULL);
-_static_assert(PT_EXIT != NULL);
-_static_assert(PT_EXIT != PT_EMPTY);
 
 uint64_t pt_enq(pt_q_t *q, uint64_t tid, void *elem)
 {
