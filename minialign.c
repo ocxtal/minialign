@@ -128,7 +128,7 @@ typedef struct kh_s {
 	mm128_t *a;
 } kh_t;
 #define KH_SIZE			( 16 )
-#define KH_THRESH		( 0.8 )
+#define KH_THRESH		( 0.4 )
 #define kh_size(h)		( (h)->mask + 1 )
 #define kh_cnt(h)		( (h)->cnt )
 #define kh_exist(h, i)	( (h)->a[i].u64[0] + 2 >= 2 )
@@ -306,11 +306,16 @@ void *pt_deq(pt_q_t *q, uint64_t tid)
 static void *pt_dispatch(void *s)
 {
 	pt_thread_t *c = (pt_thread_t *)s;
+	void *ping = PT_EMPTY, *pong = PT_EMPTY;
 	while(1) {
-		void *item = pt_deq(c->in, c->tid);
-		if(item == PT_EXIT) { return NULL; }
-		if(item == PT_EMPTY) { continue; }
-		pt_enq(c->out, c->tid, c->wfp(c->warg, item));
+		ping = pt_deq(c->in, c->tid);
+		if (ping == PT_EMPTY && pong == PT_EMPTY) sched_yield();
+		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->warg, pong));
+		if (ping == PT_EXIT) break;
+		pong = pt_deq(c->in, c->tid);
+		if (ping == PT_EMPTY && pong == PT_EMPTY) sched_yield();
+		if (ping != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->warg, ping));
+		if (pong == PT_EXIT) break;
 	}
 	return NULL;
 }
@@ -351,7 +356,7 @@ static int pt_set_worker(pt_t *pt, pt_worker_t wfp, void **warg)
 static int pt_stream(pt_t *pt, pt_source_t sfp, void *sarg, pt_worker_t wfp, void **warg, pt_drain_t dfp, void *darg)
 {
 	if (pt_set_worker(pt, wfp, warg)) return -1;
-	uint64_t bal = 0, lb = pt->nth, ub = 2 * pt->nth;
+	uint64_t bal = 0, lb = pt->nth, ub = 4 * pt->nth;
 	void *item, *arr[ub];
 	while ((item = sfp(sarg)) != NULL) {
 		pt_enq(pt->c->in, pt->c->tid, item);
