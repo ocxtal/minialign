@@ -708,6 +708,7 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
  *               and strand indicates whether the minimizer comes from the top or the bottom strand.
  *               Callers may want to set "p->n = 0"; otherwise results are appended to p
  */
+#if 0
 static void mm_sketch(const uint8_t *seq4, uint32_t len, uint32_t w, uint32_t k, uint32_t rid, mm128_v *p)
 {
 	uint64_t shift1 = 2 * (k - 1), mask = (1ULL<<2*k) - 1, k0 = 0, k1 = 0;
@@ -758,7 +759,65 @@ static void mm_sketch(const uint8_t *seq4, uint32_t len, uint32_t w, uint32_t k,
 	if (min.u64[0] != UINT64_MAX)
 		kv_push(mm128_t, *p, min);
 }
+#else
+static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k, uint32_t rid, mm128_v *p)
+{
+	const uint64_t kk = k - 1, shift1 = 2*kk, mask = (1ULL<<2*k) - 1, len = ((uint64_t)rid<<32) | _len;
+	mm128_t buf[16];	// w < 16 must be guaranteed
+	#define _push_kmer(_c) { \
+		uint64_t _t = 0x03 & (((_c)>>1) - ((_c)>>3)); \
+		k0 = (k0 << 2 | _t) & mask; \
+		k1 = (k1 >> 2) | ((3ULL^_t) << shift1); \
+	}
 
+	uint64_t i = (uint64_t)rid<<32; seq4 -= (ptrdiff_t)i; i--;
+	mm128_t *q = p->a+p->n, *t = p->a+p->m;
+	do {
+		if (q+64 > t) { p->n = q-p->a; p->m = MAX2(128, p->m*2); p->a = realloc(p->a, p->m*sizeof(mm128_t)); q = p->a+p->n; t = p->a+p->m; }
+		uint64_t l = 0, k0 = 0, k1 = 0, min = UINT64_MAX, min_pos = 0;
+		while (l < kk) {
+			uint64_t c;
+			if ((c = seq4[++i]) == 0) goto _loop_tail;
+			_push_kmer(c); if (k0 == k1) continue;
+			buf[l&0x0f] = (mm128_t){ .u64 = { UINT64_MAX, 0 } };
+			l++;
+		}
+		while (l < kk + w) {
+			uint64_t c, h;
+			if ((c = seq4[++i]) == 0) goto _loop_tail;
+			_push_kmer(c); if (k0 == k1) continue;
+			buf[l&0x0f] = (mm128_t){ .u64 = { h = hash64(k0 < k1? k0 : k1, mask), (k0 < k1? 0 : 0xffffffff) ^ i } };
+			if (h <= min) min = h, min_pos = l & 0x0f;
+			l++;
+		}
+		for (uint64_t j = kk; j < kk + w; ++j) if (buf[j&0x0f].u64[0] == min) *q++ = buf[j&0x0f];
+		q--;
+		while (1) {
+			uint64_t c, h;
+			if ((c = seq4[++i]) == 0) goto _loop_tail;
+			_push_kmer(c); if (k0 == k1) continue;
+			buf[l&0x0f] = (mm128_t){ .u64 = { h = hash64(k0 < k1? k0 : k1, mask), (k0 < k1? 0 : 0xffffffff) ^ i } };
+
+			if (h <= min) {
+				*q++ = buf[min_pos], min = h, min_pos = l&0x0f;
+			} else if (min_pos == ((l-w)&0x0f)) {
+				*q++ = buf[min_pos]; min = UINT64_MAX;
+				for (uint64_t j = l-w+1; j <= l; ++j) if (buf[j&0x0f].u64[0] <= min) min = buf[j&0x0f].u64[0], min_pos = j&0x0f;
+				for (uint64_t j = l-w+1; j <= l; ++j) if (buf[j&0x0f].u64[0] == min) *q++ = buf[j&0x0f];
+				q--;
+			}
+			l++;
+			if (q+64 <= t) continue;
+			p->n = q-p->a; p->m = MAX2(128, p->m*2); p->a = realloc(p->a, p->m*sizeof(mm128_t)); q = p->a+p->n; t = p->a+p->m;
+		}
+	_loop_tail:
+		if (min != UINT64_MAX) *q++ = buf[min_pos];
+	} while (i < len);
+	p->n = q-p->a;
+	#undef _push_kmer
+	return;
+}
+#endif
 /* end of sketch.c */
 
 /* map.c, options */
