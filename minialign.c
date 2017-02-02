@@ -354,15 +354,14 @@ static int pt_stream(pt_t *pt, pt_source_t sfp, void *sarg, pt_worker_t wfp, voi
 {
 	if (pt_set_worker(pt, wfp, warg)) return -1;
 	uint64_t bal = 0, lb = 2 * pt->nth, ub = 4 * pt->nth;
-	void *item, *arr[ub];
+	void *item;
 	while ((item = sfp(sarg)) != NULL) {
 		pt_enq(pt->c->in, pt->c->tid, item);
 		if (++bal < ub) continue;
 		while (bal > lb) {
-			if ((arr[ub - bal] = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) bal--;
-			if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) arr[ub - bal--] = wfp(*warg, item);
+			if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(darg, item), bal--;
+			if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) dfp(darg, wfp(*warg, item)), bal--;
 		}
-		for (uint64_t i = ub; i > bal; --i) dfp(darg, arr[ub - i]);
 	}
 	while ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) pt_enq(pt->c->out, pt->c->tid, wfp(*warg, item));
 	while (bal > 0) if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(darg, item), bal--;
