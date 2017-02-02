@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c11 -D_POSIX_C_SOURCE=201112L
 LIBS = -lm -lz -lpthread
-SRCS = minialign.c ptask.c queue.c queue_internal.c gaba_wrap.c
+SRCS = minialign.c gaba_wrap.c
 PREFIX = /usr/local
 
 all: minialign samsplit
@@ -33,7 +33,5 @@ install.all:
 uninstall:
 	rm -f $(PREFIX)/bin/minialign $(PREFIX)/bin/samsplit
 
-minialign.c: kvec.h ptask.h gaba.h
-ptask.c: ptask.h queue.h unittest.h sassert.h
-queue.c: queue.h queue_internal.h
+minialign.c: kvec.h kseq.h ksort.h gaba.h lmm.h sassert.h
 gaba_wrap.c: gaba.h unittest.h sassert.h
