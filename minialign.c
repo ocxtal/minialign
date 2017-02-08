@@ -429,8 +429,12 @@ static void mm_sketch(const uint8_t *seq4, uint32_t len, uint32_t w, uint32_t k,
 #define MM_SA			( 3 )
 #define MM_MD			( 4 )
 
-#define MM_AVA			( 0x01ULL<<56 )
-#define MM_KEEP_QUAL	( 0x02ULL<<56 )
+#define MM_AVA			( 0x01ULL<<48 )
+#define MM_KEEP_QUAL	( 0x02ULL<<48 )
+
+#define MM_BLAST6		( 0x01ULL<<56 )
+#define MM_BLASR4		( 0x02ULL<<56 )
+#define MM_PAF			( 0x04ULL<<56 )
 
 typedef struct {
 	uint32_t sidx, eidx, n_threads, min, k, w, b;
@@ -872,6 +876,7 @@ _mm_idx_load_fail:
 /**************************
  * Multi-threaded mapping *
  **************************/
+
 typedef struct {
 	int32_t rs, re, qs, qe;
 	int32_t rid, score;
@@ -879,17 +884,25 @@ typedef struct {
 	uint8_t cigar[];
 } reg_t;
 
+typedef struct mm_align_s mm_align_t;
 typedef struct {
+	void (*header)(mm_align_t*);
+	void (*unmapped)(mm_align_t*, const bseq_t*);
+	void (*mapped)(mm_align_t*, const bseq_t*, const reg_t*, uint16_t, uint16_t);
+} mm_printer_t;
+
+struct mm_align_s {
 	uint8_t *base, *tail, *p;
 	const mm_idx_t *mi;
 	const mm_mapopt_t *opt;
 	uint64_t *occ;
 	uint32_t n_occ;
+	bseq_file_t *fp;
+	mm_printer_t printer;
 	gaba_t *gaba;
 	void **t;	// mm_tbuf_t **
 	ptask_t *pt;
-	bseq_file_t *fp;
-} mm_align_t;
+};
 
 typedef struct {
 	// query sequences
@@ -1206,20 +1219,6 @@ static const mm128_t *mm_align_seq(mm_tbuf_t *b, const mm_mapopt_t *opt, const m
 	for (const uint8_t *_q = (const uint8_t*)(_s); *_q; _q++) { _put(_buf, *_q); } \
 }
 
-static void mm_print_header(mm_align_t *b)
-{
-	const mm_idx_t *mi = b->mi;
-	_puts(b, "@HD\tVN:1.0\tSO:unsorted\n");
-	for (uint64_t i = 0; i < mi->s.n; ++i) {
-		_puts(b, "@SQ\tSN:"); _puts(b, mi->s.a[i].name);
-		_puts(b, "\tLN:"); _putn(b, mi->s.a[i].l_seq);
-		_put(b, '\n');
-	}
-	if (b->opt->flag & 0x01ULL<<MM_RG) { _puts(b, b->opt->rg_line); _put(b, '\n'); }
-	_puts(b, "@PG\tID:minialign\tPN:minialign\n");
-	return;
-}
-
 static void mm_print_tags(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t flag)
 {
 	uint64_t f = b->opt->flag;
@@ -1285,7 +1284,21 @@ static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
 	return;
 }
 
-static void mm_print_unmapped(mm_align_t *b, const bseq_t *t)
+static void mm_print_header_sam(mm_align_t *b)
+{
+	const mm_idx_t *mi = b->mi;
+	_puts(b, "@HD\tVN:1.0\tSO:unsorted\n");
+	for (uint64_t i = 0; i < mi->s.n; ++i) {
+		_puts(b, "@SQ\tSN:"); _puts(b, mi->s.a[i].name);
+		_puts(b, "\tLN:"); _putn(b, mi->s.a[i].l_seq);
+		_put(b, '\n');
+	}
+	if (b->opt->flag & 0x01ULL<<MM_RG) { _puts(b, b->opt->rg_line); _put(b, '\n'); }
+	_puts(b, "@PG\tID:minialign\tPN:minialign\n");
+	return;
+}
+
+static void mm_print_unmapped_sam(mm_align_t *b, const bseq_t *t)
 {
 	_puts(b, t->name); _puts(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");
 	for (uint64_t k = 0; k < t->l_seq; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]);
@@ -1296,7 +1309,7 @@ static void mm_print_unmapped(mm_align_t *b, const bseq_t *t)
 	return;
 }
 
-static void mm_print_mapped(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t mapq, uint16_t flag)
+static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t mapq, uint16_t flag)
 {
 	const mm_idx_t *mi = b->mi;
 	int qs = (flag&0x900)? a->qs : 0, qe = (flag&0x900)? a->qe : (int32_t)t->l_seq;
@@ -1318,6 +1331,22 @@ static void mm_print_mapped(mm_align_t *b, const bseq_t *t, const reg_t *a, uint
 		_put(b, '*');
 	}
 	mm_print_tags(b, t, a, flag); mm_restore_tags(b, t); _put(b, '\n');
+	return;
+}
+
+static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t mapq, uint16_t flag)
+{
+	_puts(b, "aaaaaa");
+	return;
+}
+
+static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t mapq, uint16_t flag)
+{
+	return;
+}
+
+static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t mapq, uint16_t flag)
+{
 	return;
 }
 
@@ -1355,13 +1384,13 @@ static void mm_align_drain(void *arg, void *item)
 		mm128_t *r = (mm128_t*)s->reg.a[i].u64[0];
 		uint32_t n_reg = s->reg.a[i].u64[1];
 		if (r == 0) {
-			mm_print_unmapped(b, &s->seq[i]);
+			if (b->printer.unmapped) b->printer.unmapped(b, &s->seq[i]);
 			continue;
 		}
 		reg_t *reg;
 		int32_t min = ((reg_t*)r[0].u64[1])->score * b->opt->min_ratio;
 		for (uint64_t j = 0; j < n_reg && (reg = (reg_t*)r[j].u64[1])->score >= min; ++j) {
-			mm_print_mapped(b, &s->seq[i], reg, r[j].u32[0] & 0xffff, r[j].u32[0]>>16);
+			b->printer.mapped(b, &s->seq[i], reg, r[j].u32[0] & 0xffff, r[j].u32[0]>>16);
 			free(reg);
 		}
 		free(r);
@@ -1407,11 +1436,20 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 	assert(mi != 0);
 	assert(opt != 0);
 
-	// init output buf
+	static const mm_printer_t printer[] = {
+		[0] = { .header = mm_print_header_sam, .unmapped = mm_print_unmapped_sam, .mapped = mm_print_mapped_sam },
+		[MM_BLAST6>>56] = { .mapped = mm_print_mapped_blast6 },
+		[MM_BLASR4>>56] = { .mapped = mm_print_mapped_blasr4 },
+		[MM_PAF>>56] = { .mapped = mm_print_mapped_paf }
+	};
+
+	// init output buf and printer
 	mm_align_t *b = calloc(1, sizeof(mm_align_t));
 	if (b == 0) return 0;
 	b->tail = (b->base = b->p = malloc(sizeof(uint8_t) * opt->outbuf_size)) + opt->outbuf_size;
 	if (b->base == 0) goto _fail;
+	b->printer = printer[opt->flag>>56];
+	if (!b->printer.mapped) goto _fail;
 
 	// set consts
 	b->mi = mi, b->opt = opt;
@@ -1433,7 +1471,7 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 	if ((b->pt = ptask_init(mm_align_worker, (void**)b->t, b->opt->n_threads, 64)) == 0) goto _fail;
 
 	// print sam header
-	mm_print_header(b);
+	if (b->printer.header) b->printer.header(b);
 	return b;
 _fail:
 	mm_align_destroy(b);
@@ -1491,7 +1529,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 					"\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  Global:\n");
-	fprintf(stderr, "    -x STR       load preset params {pacbio, ont, ava} [ont]\n");
+	fprintf(stderr, "    -x STR       load preset params {pacbio,ont,ava} [ont]\n");
 	fprintf(stderr, "    -t INT       number of threads [%d]\n", opt->n_threads);
 	fprintf(stderr, "    -X           switch to all-versus-all alignment mode\n");
 	fprintf(stderr, "    -v           show version number [%s]\n", MM_VERSION);
@@ -1509,13 +1547,40 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -s INT       minimum alignment score [%d]\n", opt->min);
 	fprintf(stderr, "    -m INT       minimum alignment score ratio [%1.2f]\n", opt->min_ratio);
 	fprintf(stderr, "  Output:\n");
+	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr4,paf} [sam]\n");
 	fprintf(stderr, "    -Q           include quality string\n");
 	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" []\n");
-	fprintf(stderr, "    -T STR,...   list of optional tags: {RG, AS} []\n");
+	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS} []\n");
 	fprintf(stderr, "                   (RG is also inferred from -R)\n");
 	fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
 	fprintf(stderr, "\n");
 	return;
+}
+
+static int mm_mapopt_load_preset(mm_mapopt_t *o, const char *arg)
+{
+	if (strcmp(arg, "pacbio") == 0) {
+		o->k = 15; o->w = 10; o->m = 1; o->x = 2; o->gi = 2; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
+	} else if (strcmp(arg, "ont") == 0) {
+		o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
+	} else if (strcmp(arg, "ava") == 0) {
+		o->k = 14; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.3; o->flag |= MM_AVA;
+	} else {
+		return 1;
+	}
+	return 0;
+}
+
+static int mm_mapopt_parse_threshs(mm_mapopt_t *o, const char *arg)
+{
+	const char *p = optarg; o->n_frq = 0;
+	while (*p) {
+		o->frq[o->n_frq++] = atof(p);
+		while (*p && *p != ',') p++;
+		if (!*p || o->n_frq >= 16) break;
+		p++;
+	}
+	return 0;
 }
 
 static uint64_t mm_mapopt_parse_tags(const char *p, uint16_v *buf)
@@ -1564,35 +1629,32 @@ static void mm_mapopt_parse_rg(mm_mapopt_t *o, const char *arg)
 	return;
 }
 
+static uint64_t mm_mapopt_parse_format(const char *arg)
+{
+	if (strcmp(arg, "sam") == 0) return 0;
+	else if (strcmp(arg, "blast6") == 0) return MM_BLAST6;
+	else if (strcmp(arg, "blasr4") == 0) return MM_BLASR4;
+	else if (strcmp(arg, "paf") == 0) return MM_PAF;
+	return 0;
+}
+
 static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **fnr, const char **fnw, ptr_v *v)
 {
 	while (optind < argc) {
 		int ch;
-		if ((ch = getopt(argc, argv, "k:w:f:x:B:t:V:d:l:Xs:m:r:a:b:p:q:L:H:I:J:S:E:Y:QR:T:U:vh")) < 0) {
+		if ((ch = getopt(argc, argv, "k:w:f:x:B:t:V:d:l:Xs:m:r:a:b:p:q:L:H:I:J:S:E:Y:O:QR:T:U:vh")) < 0) {
 			kv_push(void*, *v, argv[optind]); optind++; continue;
 		}
 
 		if (ch == 'k') o->k = atoi(optarg);
 		else if (ch == 'w') o->w = atoi(optarg);
 		else if (ch == 'f') {
-			const char *p = optarg; o->n_frq = 0;
-			while (*p) {
-				o->frq[o->n_frq++] = atof(p);
-				while (*p && *p != ',') p++;
-				if (!*p || o->n_frq >= 16) break;
-				p++;
-			}
+			if (mm_mapopt_parse_threshs(o, optarg) && mm_verbose >= 3)
+				fprintf(stderr, "[M::%s] Warning: Invalid thresholds: `%s'.\n", __func__, optarg);
 		}
 		else if (ch == 'x') {
-			if (strcmp(optarg, "pacbio") == 0) {
-				o->k = 15; o->w = 10; o->m = 1; o->x = 2; o->gi = 2; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
-			} else if (strcmp(optarg, "ont") == 0) {
-				o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
-			} else if (strcmp(optarg, "ava") == 0) {
-				o->k = 14; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.3; o->flag |= MM_AVA;
-			} else {
-				if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, optarg);
-			}
+			if (mm_mapopt_load_preset(o, optarg) && mm_verbose >= 3)
+				fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, optarg);
 		}
 		else if (ch == 'B') o->b = atoi(optarg);
 		else if (ch == 't') o->n_threads = atoi(optarg);
@@ -1603,7 +1665,8 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 's') o->min = atoi(optarg);
 		else if (ch == 'm') o->min_ratio = atof(optarg);
 		else if (ch == 'r') {
-			if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Minimum length threshold option is deprecated in version 0.4.0 and later, interpreted as score ratio.).\n", __func__);
+			if (mm_verbose >= 3)
+				fprintf(stderr, "[M::%s] Warning: Minimum length threshold option is deprecated in version 0.4.0 and later, interpreted as score ratio.).\n", __func__);
 			o->min_ratio = atof(optarg);
 		}
 		else if (ch == 'a') o->m = atoi(optarg);
@@ -1617,6 +1680,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 'S') o->sidx = atoi(optarg);
 		else if (ch == 'E') o->eidx = atoi(optarg);
 		else if (ch == 'Y') o->xdrop = atoi(optarg);
+		else if (ch == 'O') o->flag |= mm_mapopt_parse_format(optarg);
 		else if (ch == 'Q') o->flag |= MM_KEEP_QUAL;
 		else if (ch == 'R') mm_mapopt_parse_rg(o, optarg);
 		else if (ch == 'T') o->flag |= mm_mapopt_parse_tags(optarg, NULL);
