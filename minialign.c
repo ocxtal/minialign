@@ -1422,9 +1422,10 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 	for (uint64_t i = 0; i < b->n_occ; ++i) b->occ[i] = mm_idx_cal_max_occ(mi, b->opt->frq[i]);
 
 	// initialize alignment context
-	int m = opt->m, x = -opt->x, gi = opt->gi, ge = opt->ge;
-	struct gaba_score_s sc = {{{m,x,x,x},{x,m,x,x},{x,x,m,x},{x,x,x,m}},gi,ge,gi,ge};
-	struct gaba_params_s p = {0,0,7,opt->xdrop,&sc};
+	struct gaba_params_s p = {
+		.m = opt->m, .x = opt->x, .gi = opt->gi, .ge = opt->ge,
+		.xdrop = opt->xdrop, .filter_thresh = 7
+	};
 	if ((b->gaba = gaba_init(&p)) == 0) goto _fail;
 
 	// initialize threads

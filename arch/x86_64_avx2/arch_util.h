@@ -176,7 +176,6 @@
 /**
  * gap penalty vector abstraction macros
  */
-#if 0
 /* store */
 #define _make_gap(_e1, _e2, _e3, _e4) ( \
 	(v16i8_t){ _mm_set_epi8( \
@@ -211,40 +210,7 @@
 #define _load_adjv(_scv)					( _from_v32i8(_load_gap((_scv).v3, 0x55)) )
 #define _load_ofsh(_scv)					( _from_v32i8(_load_gap((_scv).v3, 0xaa)) )
 #define _load_ofsv(_scv)					( _from_v32i8(_load_gap((_scv).v3, 0xff)) )
-#else
-/* store */
-#define _make_gap(_e1, _e2) ( \
-	(v16i8_t){ _mm_set_epi8( \
-		(_e2), (_e2), (_e2), (_e2), \
-		(_e2), (_e2), (_e2), (_e2), \
-		(_e1), (_e1), (_e1), (_e1), \
-		(_e1), (_e1), (_e1), (_e1)) \
-	} \
-)
-#define _store_adjh(_scv, _adj, _ofs) { \
-	_store_v32i8((_scv).v3, _from_v16i8_v32i8(_make_gap(_adj, _ofs))) \
-}
-#define _store_adjv(_scv, _adj, _ofs) { \
-	/* nothing to do */ \
-	/*_store_v32i8((_scv).v3, _from_v16i8_v32i8(_make_gap(_adj, _ofs)))*/ \
-}
-#define _store_ofsh(_scv, _adj, _ofs) { \
-	/* nothing to do */ \
-	/*_store_v32i8((_scv).v5, _from_v16i8_v32i8(_make_gap(_adj, _ofs)))*/ \
-}
-#define _store_ofsv(_scv, _adj, _ofs) { \
-	/* nothing to do */ \
-	/*_store_v32i8((_scv).v5, _from_v16i8_v32i8(_make_gap(_adj, _ofs)))*/ \
-}
 
-/* load */
-#define _load_gap(_ptr, _idx) ( \
-	(v32i8_t){ _mm256_shuffle_epi32(_mm256_load_si256((__m256i const *)(_ptr)), (_idx)) } \
-)
-
-#define _load_adj(_scv)						( _from_v32i8(_load_gap((_scv).v3, 0x00)) )
-#define _load_ofs(_scv)						( _from_v32i8(_load_gap((_scv).v3, 0xaa)) )
-#endif
 
 
 /* cache line operation */
