@@ -243,16 +243,13 @@ struct gaba_api_s const api_table[] __attribute__(( aligned(16) )) = {
  */
 static inline
 int64_t gaba_init_get_index(
-	struct gaba_score_s const *score_matrix)
+	struct gaba_params_s const *params)
 {
-	if(score_matrix == NULL) {
+	if(params == NULL) {
 		return(AFFINE);
 	}
 
-	if(score_matrix->score_gi_a != 0) {
-		return(AFFINE);
-	}
-	if(score_matrix->score_gi_b != 0) {
+	if(params->gi != 0) {
 		return(AFFINE);
 	}
 	return(LINEAR);
@@ -283,7 +280,7 @@ gaba_t *gaba_init(
 		return(NULL);
 	}
 
-	struct gaba_api_s const *api = &api_table[gaba_init_get_index(params->score_matrix)];
+	struct gaba_api_s const *api = &api_table[gaba_init_get_index(params)];
 	if(api->init == NULL) {
 		return(NULL);
 	}
@@ -667,8 +664,7 @@ unittest()
 /* linear gap penalty */
 unittest()
 {
-	gaba_t *c = gaba_init(GABA_PARAMS(
-		.score_matrix = GABA_SCORE_SIMPLE(1, 1, 0, 1)));
+	gaba_t *c = gaba_init(GABA_PARAMS(GABA_SCORE_SIMPLE(1, 1, 0, 1)));
 	assert(c != NULL);
 
 	void const *lim = (void const *)0x800000000000;
@@ -684,8 +680,7 @@ unittest(with_seq_pair("GGAAAAAAAA", "AAAAAAAA"))
 	omajinai();
 
 	void const *lim = (void const *)0x800000000000;
-	gaba_t *c = gaba_init(GABA_PARAMS(
-		.score_matrix = GABA_SCORE_SIMPLE(1, 1, 0, 1)));
+	gaba_t *c = gaba_init(GABA_PARAMS(GABA_SCORE_SIMPLE(1, 1, 0, 1)));
 	gaba_dp_t *d = gaba_dp_init(c, lim, lim);
 
 
@@ -706,8 +701,7 @@ unittest(with_seq_pair("GGAAAAAAAA", "AAAAAAAA"))
 /* affine gap penalty */
 unittest()
 {
-	gaba_t *c = gaba_init(GABA_PARAMS(
-		.score_matrix = GABA_SCORE_SIMPLE(1, 1, 1, 1)));
+	gaba_t *c = gaba_init(GABA_PARAMS(GABA_SCORE_SIMPLE(1, 1, 1, 1)));
 	assert(c != NULL);
 
 	void const *lim = (void const *)0x800000000000;
@@ -723,8 +717,7 @@ unittest(with_seq_pair("GGAAAAAAAA", "AAAAAAAA"))
 	omajinai();
 
 	void const *lim = (void const *)0x800000000000;
-	gaba_t *c = gaba_init(GABA_PARAMS(
-		.score_matrix = GABA_SCORE_SIMPLE(1, 1, 1, 1)));
+	gaba_t *c = gaba_init(GABA_PARAMS(GABA_SCORE_SIMPLE(1, 1, 1, 1)));
 	gaba_dp_t *d = gaba_dp_init(c, lim, lim);
 
 

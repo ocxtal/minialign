@@ -58,31 +58,22 @@ enum gaba_clip_type {
 };
 
 /**
- * @struct gaba_score_s
- * @brief score container
- */
-struct gaba_score_s {
-	int8_t score_sub[4][4];
-	int8_t score_gi_a, score_ge_a;
-	int8_t score_gi_b, score_ge_b;
-};
-typedef struct gaba_score_s gaba_score_t;
-
-/**
  * @struct gaba_params_s
  * @brief input parameters of gaba_init
  */
 struct gaba_params_s {
-	/** output options */
-	int16_t head_margin;		/** margin at the head of gaba_res_t */
-	int16_t tail_margin;		/** margin at the tail of gaba_res_t */
-
-	/** filtering options */
-	int16_t filter_thresh;		/** popcnt filter threshold, set zero if you want to disable it */
+	/** scoring parameters */
+	int8_t m, x, gi, ge;		/** match, mismatch, gap open, and gap extend, all in positive integer */
 
 	/** score parameters */
-	int16_t xdrop;
-	gaba_score_t const *score_matrix;
+	int8_t xdrop;
+
+	/** filtering parameters */
+	uint8_t filter_thresh;		/** popcnt filter threshold, set zero if you want to disable it */
+
+	/** output options */
+	uint8_t head_margin;		/** margin at the head of gaba_res_t */
+	uint8_t tail_margin;		/** margin at the tail of gaba_res_t */
 };
 typedef struct gaba_params_s gaba_params_t;
 
@@ -96,6 +87,8 @@ typedef struct gaba_params_s gaba_params_t;
  * @macro GABA_SCORE_SIMPLE
  * @brief utility macro for constructing score parameters.
  */
+#define GABA_SCORE_SIMPLE(_m, _x, _gi, _ge)		.m = (_m), .x = (_x), .gi = (_gi), .ge = (_ge)
+#if 0
 #define GABA_SCORE_SIMPLE(m, x, gi, ge) ( \
 	&((gaba_score_t const) { \
 		.score_sub = { \
@@ -110,6 +103,7 @@ typedef struct gaba_params_s gaba_params_t;
 		.score_ge_b = ge \
 	}) \
 )
+#endif
 
 /**
  * @type gaba_t
@@ -194,10 +188,8 @@ typedef struct gaba_pos_pair_s gaba_pos_pair_t;
 struct gaba_path_section_s {
 	uint32_t aid, bid;			/** (8) id of the sections */
 	uint32_t apos, bpos;		/** (8) pos in the sections */
-	uint32_t alen, blen;		/** (8) length of the segments */
+	uint32_t alen, blen;		/** (8) lengths of the segments */
 	int64_t ppos;				/** (8) path string position (offset) */
-	// uint32_t plen;				/** (4) path string length */
-	// uint32_t reserved;			/** (4) */
 };
 typedef struct gaba_path_section_s gaba_path_section_t;
 #define gaba_plen(sec)		( (sec)->alen + (sec)->blen )
@@ -216,8 +208,7 @@ typedef struct gaba_path_s gaba_path_t;
  */
 struct gaba_alignment_s {
 	void *lmm;
-	int64_t score;
-	uint32_t reserved1, reserved2;
+	int64_t score, xcnt;		/** (16) score, #mismatchs */
 	uint32_t rapos, rbpos;
 	uint32_t rppos;				/** (4) local path index in the root section */
 	uint32_t rsidx;				/** (4) index of the root section */
@@ -325,12 +316,10 @@ gaba_pos_pair_t gaba_dp_search_max(
 struct gaba_trace_params_s {
 	void *lmm;
 	struct gaba_path_section_s const *sec;
-	uint16_t slen;
-	uint16_t k;
-	char seq_a_head_type;
-	char seq_a_tail_type;
-	char seq_b_head_type;
-	char seq_b_tail_type;
+	uint16_t slen;				/* section length */
+	uint16_t k;					/* path length (k-mer length) */
+	uint16_t xcnt;				/* #mismatches */
+	uint16_t _pad;
 };
 typedef struct gaba_trace_params_s gaba_trace_params_t;
 
