@@ -298,17 +298,17 @@ _static_assert(sizeof(struct gaba_merge_tail_s) == 128);
  * @struct gaba_path_intl_s
  */
 struct gaba_path_intl_s {
-	uint32_t *head, *tail;
-	uint32_t hofs, tofs;
-};
+	/* path arrays */
+	uint32_t *phead, *ptail;
+	uint32_t phofs, ptofs;
 
-/**
- * @struct gaba_sec_arr_s
- */
-struct gaba_sec_arr_s {
-	struct gaba_path_section_s *head;
-	struct gaba_path_section_s *tail;
+	/* section arrays */
+	struct gaba_path_section_s *shead, *stail;
+
+	/* gap counts */
+	int64_t xcnt;
 };
+_static_assert(sizeof(struct gaba_path_intl_s) == 48);
 
 /**
  * @struct gaba_reader_work_s
@@ -341,13 +341,8 @@ struct gaba_writer_work_s {
 	/* reserved to avoid collision with alim and blim */
 	uint8_t const *alim, *blim;			/** (16) unused in writer */
 
-	/** section info */
-	struct gaba_joint_tail_s const *tail;/** (8) current tail */
-	struct gaba_joint_tail_s const *atail;/** (8) */
-	struct gaba_joint_tail_s const *btail;/** (8) */
-
-	/** path pointers */
-	struct gaba_path_intl_s path;		/** (24) */
+	/** local context */
+	struct gaba_path_intl_s path;		/** (48) */
 	/** 64, 64 */
 
 	/** 64byte aligned */
@@ -372,10 +367,11 @@ struct gaba_writer_work_s {
 	int64_t psum;						/** (8) */
 	int64_t pspos;						/** (8) */
 
-	/* section info */
-	struct gaba_sec_arr_s sec;			/** (16) */
-	uint64_t _pad[4];					/** (32) */
-
+	/** section info */
+	struct gaba_joint_tail_s const *tail;/** (8) current tail */
+	struct gaba_joint_tail_s const *atail;/** (8) */
+	struct gaba_joint_tail_s const *btail;/** (8) */
+	uint64_t _pad4[3];					/** (24) */
 	/** 64, 192 */
 };
 _static_assert(sizeof(struct gaba_writer_work_s) == 192);
@@ -388,9 +384,8 @@ struct gaba_score_vec_s {
 	int8_t v2[16];
 	int8_t v3[16];
 	int8_t v4[16];
-	int8_t v5[16];
 };
-_static_assert(sizeof(struct gaba_score_vec_s) == 80);
+_static_assert(sizeof(struct gaba_score_vec_s) == 64);
 
 /**
  * @struct gaba_mem_block_s
@@ -440,21 +435,24 @@ struct gaba_dp_context_s {
 	/** 64byte aligned */
 	/** loaded on init */
 	struct gaba_score_vec_s scv;		/** (80) substitution matrix and gaps */
-	/** 80, 336 */
+	/** 64, 320 */
 
-	int8_t m;							/** (1) match award */
-	int8_t x;							/** (1) mismatch penalty (neg.int) */
-	int8_t tx;							/** (1) xdrop threshold */
+	/** 64byte aligned */
+	int32_t m;							/** (1) match award */
+	int32_t x;							/** (1) mismatch penalty (neg.int) */
+	int32_t gi;							/** (1) gap open penalty */
+	int32_t ge;							/** (1) gap extension penalty */
+	int32_t tx;							/** (1) xdrop threshold */
 	uint8_t tf;							/** (1) ungapped alignment filter threshold */
 
 	/** output options */
-	int16_t head_margin;				/** (2) margin at the head of gaba_res_t */
-	int16_t tail_margin;				/** (2) margin at the tail of gaba_res_t */
+	uint16_t head_margin;				/** (2) margin at the head of gaba_res_t */
+	uint16_t tail_margin;				/** (2) margin at the tail of gaba_res_t */
 
 	/* memory management */
 	struct gaba_mem_block_s *curr_mem;	/** (8) */
 	struct gaba_mem_block_s mem;		/** (32) */
-	/** 48, 384 */
+	/** 64, 384 */
 
 	/** phantom vectors */
 	/** 64byte aligned */
@@ -2365,7 +2363,7 @@ void trace_load_section_b(
  * @brief load context onto registers
  */
 #define _trace_load_context(t) \
-	v2i32_t idx = _load_v2i32(&(t)->w.l.aidx); \
+	v2i32_t idx = _load_v2i32(&(t)->w.l.aidx), gc = _zero_v2i32(); \
 	v2i32_t const hterm = _seta_v2i32(-1, 0); \
 	v2i32_t const dterm = _seta_v2i32(0, 0); \
 	v2i32_t const vterm = _seta_v2i32(0, -1); \
@@ -2373,8 +2371,7 @@ void trace_load_section_b(
 	_print_v2i32(dterm); \
 	_print_v2i32(vterm); \
 	struct gaba_block_s const *blk = (t)->w.l.blk; \
-	int64_t p = (t)->w.l.p; \
-	int64_t q = (t)->w.l.q; \
+	int64_t p = (t)->w.l.p, q = (t)->w.l.q; \
 	union gaba_dir_u dir = _dir_load(blk, p & (BLK - 1)); \
 	union gaba_mask_pair_u const *ptr = &blk->mask[p & (BLK - 1)]; \
 	_trace_declare_mask(); \
@@ -2384,14 +2381,14 @@ void trace_load_section_b(
 		p, q, mask_h, mask_v, path_array);
 
 #define _trace_forward_load_context(t) \
-	uint32_t *path = (t)->w.l.path.head; \
-	int64_t ofs = (t)->w.l.path.hofs; \
+	uint32_t *path = (t)->w.l.path.phead; \
+	int64_t ofs = (t)->w.l.path.phofs; \
 	uint64_t path_array = _loadu_u64(path - 1)>>(2*BLK - ofs); \
 	_trace_load_context(t);
 
 #define _trace_reverse_load_context(t) \
-	uint32_t *path = (t)->w.l.path.tail; \
-	int64_t ofs = (t)->w.l.path.tofs; \
+	uint32_t *path = (t)->w.l.path.ptail; \
+	int64_t ofs = (t)->w.l.path.ptofs; \
 	uint64_t path_array = _loadu_u64(path)<<(2*BLK - ofs); \
 	_trace_load_context(t);
 
@@ -2593,6 +2590,17 @@ void trace_load_section_b(
 }
 
 /**
+ * @macro _trace_inc_*
+ * @brief increment gap counters
+ */
+#define _trace_inc_gi()	{ \
+	gc = _sub_v2i32(gc, vterm); \
+}
+#define _trace_inc_ge()	{ \
+	gc = _sub_v2i32(gc, hterm); \
+}
+
+/**
  * @macro _trace_head_*_test_index
  * @brief test and update indices
  */
@@ -2690,16 +2698,17 @@ void trace_load_section_b(
 	(t)->w.l.psum -= (t)->w.l.p - p; \
 	(t)->w.l.p = p; \
 	(t)->w.l.q = q; \
+	_store_v2i32(&(t)->w.l.path.gic, _add_v2i32(gc, _load_v2i32(&(t)->w.l.path.gic))); \
 	debug("p(%lld), psum(%lld), q(%llu)", p, (t)->w.l.psum, q); \
 }
 #define _trace_forward_save_context(t) { \
-	(t)->w.l.path.head = path; \
-	(t)->w.l.path.hofs = ofs; \
+	(t)->w.l.path.phead = path; \
+	(t)->w.l.path.phofs = ofs; \
 	_trace_save_context(t); \
 }
 #define _trace_reverse_save_context(t) { \
-	(t)->w.l.path.tail = path; \
-	(t)->w.l.path.tofs = ofs; \
+	(t)->w.l.path.ptail = path; \
+	(t)->w.l.path.ptofs = ofs; \
 	_trace_save_context(t); \
 }
 
@@ -2719,6 +2728,7 @@ void trace_forward_body(
 			if(_trace_##_type##_##_label##_test_index()) { \
 				goto _trace_forward_index_break; \
 			} \
+			_trace_inc_ge(); \
 			debug("go %s (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
 				#_label, #_type, ((uint64_t)dir.dynamic.array), mask_h, mask_v, p, q, ptr, path_array); \
 			_trace_##_type##_##_label##_update_index(); \
@@ -2731,7 +2741,7 @@ void trace_forward_body(
 		while(1) { \
 		_trace_forward_##_type##_d_head: \
 			if(_trace_test_diag_h() != 0) { \
-				goto _trace_forward_##_type##_h_head; \
+				_trace_inc_gi(); goto _trace_forward_##_type##_h_head; \
 			} \
 			if(_trace_##_type##_d_test_index()) { \
 				_trace_forward_cap_update_path(); \
@@ -2748,7 +2758,7 @@ void trace_forward_body(
 			_trace_forward_##_type##_load(t, _trace_forward_##_next##_d_tail); \
 		_trace_forward_##_type##_d_tail: \
 			if(_trace_test_diag_v() != 0) { \
-				goto _trace_forward_##_type##_v_head; \
+				_trace_inc_gi(); goto _trace_forward_##_type##_v_head; \
 			} \
 		} \
 	}
@@ -2817,6 +2827,7 @@ void trace_reverse_body(
 			if(_trace_##_type##_##_label##_test_index()) { \
 				goto _trace_reverse_index_break; \
 			} \
+			_trace_inc_ge(); \
 			debug("go %s (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
 				#_label, #_type, ((uint64_t)dir.dynamic.array), mask_h, mask_v, p, q, ptr, path_array); \
 			_trace_##_type##_##_label##_update_index(); \
@@ -2829,7 +2840,7 @@ void trace_reverse_body(
 		while(1) { \
 		_trace_reverse_##_type##_d_head: \
 			if(_trace_test_diag_v() != 0) { \
-				goto _trace_reverse_##_type##_v_head; \
+				_trace_inc_gi(); goto _trace_reverse_##_type##_v_head; \
 			} \
 			if(_trace_##_type##_d_test_index()) { \
 				_trace_reverse_cap_update_path(); \
@@ -2846,7 +2857,7 @@ void trace_reverse_body(
 			_trace_reverse_##_type##_load(t, _trace_reverse_##_next##_d_tail); \
 		_trace_reverse_##_type##_d_tail: \
 			if(_trace_test_diag_h() != 0) { \
-				goto _trace_reverse_##_type##_h_head; \
+				_trace_inc_gi(); goto _trace_reverse_##_type##_h_head; \
 			} \
 		} \
 	}
@@ -2907,7 +2918,7 @@ void trace_forward_push(
 	struct gaba_dp_context_s *this)
 {
 	/* windback pointer */
-	this->w.l.sec.head--;
+	this->w.l.path.shead--;
 
 	/* load section info */
 	v2i32_t id = _load_v2i32(&this->w.l.aid);
@@ -2915,7 +2926,7 @@ void trace_forward_push(
 	v2i32_t sidx = _load_v2i32(&this->w.l.asidx);
 
 	/* adjust breakpoint */
-	uint64_t const path_array = *((uint64_t *)this->w.l.path.head)>>(32 - this->w.l.path.hofs);
+	uint64_t const path_array = *((uint64_t *)this->w.l.path.phead)>>(32 - this->w.l.path.phofs);
 	v2i32_t mask = _eq_v2i32(idx, _zero_v2i32());
 	v2i32_t adj = _and_v2i32(
 		_andn_v2i32(mask, _swap_v2i32(mask)),
@@ -2934,22 +2945,22 @@ void trace_forward_push(
 	// int64_t plen = _lo32(tlen) + _hi32(tlen);
 
 	/* store section info */
-	_store_v2i32(&this->w.l.sec.head->aid, id);
-	_store_v2i32(&this->w.l.sec.head->apos, idx);
-	_store_v2i32(&this->w.l.sec.head->alen, tlen);
+	_store_v2i32(&this->w.l.path.shead->aid, id);
+	_store_v2i32(&this->w.l.path.shead->apos, idx);
+	_store_v2i32(&this->w.l.path.shead->alen, tlen);
 
 	/* store path length */
-	// this->w.l.sec.head->plen = plen;
-	this->w.l.sec.head->ppos = 0;
+	// this->w.l.path.shead->plen = plen;
+	this->w.l.path.shead->ppos = 0;
 
 	debug("push current section forward a(%u, %u, %u), b(%u, %u, %u), len(%u)",
-		this->w.l.sec.head->aid,
-		this->w.l.sec.head->apos,
-		this->w.l.sec.head->alen,
-		this->w.l.sec.head->bid,
-		this->w.l.sec.head->bpos,
-		this->w.l.sec.head->blen,
-		_plen(this->w.l.sec.head));
+		this->w.l.path.shead->aid,
+		this->w.l.path.shead->apos,
+		this->w.l.path.shead->alen,
+		this->w.l.path.shead->bid,
+		this->w.l.path.shead->bpos,
+		this->w.l.path.shead->blen,
+		_plen(this->w.l.path.shead));
 
 	/* update rsidx */
 	_store_v2i32(&this->w.l.asidx, idx);
@@ -2976,23 +2987,23 @@ void trace_reverse_push(
 	int64_t ppos = this->w.l.pspos;
 
 	/* store revcomped section */
-	_store_v2i32(&this->w.l.sec.tail->aid, _xor_v2i32(id, mask));
-	_store_v2i32(&this->w.l.sec.tail->apos, _sub_v2i32(len, sidx));
-	_store_v2i32(&this->w.l.sec.tail->alen, tlen);
+	_store_v2i32(&this->w.l.path.stail->aid, _xor_v2i32(id, mask));
+	_store_v2i32(&this->w.l.path.stail->apos, _sub_v2i32(len, sidx));
+	_store_v2i32(&this->w.l.path.stail->alen, tlen);
 
 	/* store path length */
-	// this->w.l.sec.tail->plen = plen;
-	this->w.l.sec.tail->ppos = ppos;
+	// this->w.l.path.stail->plen = plen;
+	this->w.l.path.stail->ppos = ppos;
 
 	debug("push current section reverse a(%u, %u, %u), b(%u, %u, %u), pos(%lld), len(%u)",
-		this->w.l.sec.tail->aid,
-		this->w.l.sec.tail->apos,
-		this->w.l.sec.tail->alen,
-		this->w.l.sec.tail->bid,
-		this->w.l.sec.tail->bpos,
-		this->w.l.sec.tail->blen,
-		this->w.l.sec.tail->ppos,
-		_plen(this->w.l.sec.tail));
+		this->w.l.path.stail->aid,
+		this->w.l.path.stail->apos,
+		this->w.l.path.stail->alen,
+		this->w.l.path.stail->bid,
+		this->w.l.path.stail->bpos,
+		this->w.l.path.stail->blen,
+		this->w.l.path.stail->ppos,
+		_plen(this->w.l.path.stail));
 
 	/* update rsidx */
 	_store_v2i32(&this->w.l.asidx, idx);
@@ -3001,7 +3012,7 @@ void trace_reverse_push(
 	this->w.l.pspos = ppos + plen;
 
 	/* windback pointer */
-	this->w.l.sec.tail++;
+	this->w.l.path.stail++;
 	return;
 }
 
@@ -3012,8 +3023,7 @@ static _force_inline
 void trace_init_work(
 	struct gaba_dp_context_s *this,
 	struct gaba_leaf_s const *leaf,
-	struct gaba_path_intl_s const *path,
-	struct gaba_sec_arr_s const *sec)
+	struct gaba_path_intl_s const *path)
 {
 	/* store tail pointers */
 	struct gaba_joint_tail_s const *tail = leaf->tail;
@@ -3055,7 +3065,7 @@ void trace_init_work(
 	this->w.l.pspos = 0;
 
 	/* save section info */
-	this->w.l.sec = *sec;
+	// this->w.l.path = *sec;
 	return;
 }
 
@@ -3066,11 +3076,9 @@ static _force_inline
 void trace_clean_work(
 	struct gaba_dp_context_s *this,
 	struct gaba_leaf_s const *leaf,
-	struct gaba_path_intl_s *path,
-	struct gaba_sec_arr_s *sec)
+	struct gaba_path_intl_s *path)
 {
 	*path = this->w.l.path;
-	*sec = this->w.l.sec;
 	return;
 }
 
@@ -3081,10 +3089,9 @@ static _force_inline
 void trace_forward_generate_alignment(
 	struct gaba_dp_context_s *this,
 	struct gaba_leaf_s const *leaf,
-	struct gaba_path_intl_s *path,
-	struct gaba_sec_arr_s *sec)
+	struct gaba_path_intl_s *path)
 {
-	trace_init_work(this, leaf, path, sec);
+	trace_init_work(this, leaf, path);
 
 	while(this->w.l.psum >= 0) {
 		/* update section info */
@@ -3103,17 +3110,16 @@ void trace_forward_generate_alignment(
 		trace_forward_push(this);
 	}
 
-	trace_clean_work(this, leaf, path, sec);
+	trace_clean_work(this, leaf, path);
 	return;
 }
 static _force_inline
 void trace_reverse_generate_alignment(
 	struct gaba_dp_context_s *this,
 	struct gaba_leaf_s const *leaf,
-	struct gaba_path_intl_s *path,
-	struct gaba_sec_arr_s *sec)
+	struct gaba_path_intl_s *path)
 {
-	trace_init_work(this, leaf, path, sec);
+	trace_init_work(this, leaf, path);
 
 	while(this->w.l.psum >= 0) {
 		/* update section info */
@@ -3132,7 +3138,7 @@ void trace_reverse_generate_alignment(
 		trace_reverse_push(this);
 	}
 
-	trace_clean_work(this, leaf, path, sec);
+	trace_clean_work(this, leaf, path);
 	return;
 }
 
@@ -3143,14 +3149,14 @@ static _force_inline
 struct gaba_path_s *trace_finalize_path(
 	struct gaba_path_intl_s p)
 {
-	uint32_t *head = p.head, *tail = p.tail;
-	int64_t len = 32 * (p.tail - p.head) + p.tofs;	/* p.hofs must be zero */
+	uint32_t *head = p.phead, *tail = p.ptail;
+	int64_t len = 32 * (p.ptail - p.phead) + p.ptofs;	/* p.phofs must be zero */
 
-	debug("head(%p), tail(%p), hofs(%u), tofs(%u)", p.head, p.tail, p.hofs, p.tofs);
+	debug("head(%p), tail(%p), hofs(%u), tofs(%u)", p.phead, p.ptail, p.phofs, p.ptofs);
 
 
 	/* add terminator at the end of path array */
-	tail[0] |= 0x55555555<<p.tofs;
+	tail[0] |= 0x55555555<<p.ptofs;
 	tail[1] = 0x55555555;
 
 	#if 0
@@ -3181,21 +3187,21 @@ void trace_cat_path(
 	struct gaba_path_intl_s const *src)
 {
 	/* load pointers */
-	uint32_t const *sh = src->head;
-	uint32_t const *st = src->tail;
-	uint32_t *dt = dst->tail;
+	uint32_t const *sh = src->phead;
+	uint32_t const *st = src->ptail;
+	uint32_t *dt = dst->ptail;
 
 	/* concatenate heads */
-	uint64_t prev_array = ((uint64_t)*dt) & ((0x01ULL<<dst->tofs) - 1);
-	uint64_t curr_array = ((uint64_t)*sh++)>>(32 - src->hofs);
+	uint64_t prev_array = ((uint64_t)*dt) & ((0x01ULL<<dst->ptofs) - 1);
+	uint64_t curr_array = ((uint64_t)*sh++)>>(32 - src->phofs);
 
-	dt[0] = prev_array | (curr_array<<dst->tofs);
-	dt[1] = curr_array>>(32 - dst->tofs);
+	dt[0] = prev_array | (curr_array<<dst->ptofs);
+	dt[1] = curr_array>>(32 - dst->ptofs);
 
-	debug("dt[0](%x), dt[1](%x), dh[0](%x), dh[1](%x)", dt[0], dt[1], dst->head[0], dst->head[1]);
+	debug("dt[0](%x), dt[1](%x), dh[0](%x), dh[1](%x)", dt[0], dt[1], dst->phead[0], dst->phead[1]);
 
-	dt += (((dst->tofs + src->hofs) & 32) != 0) ? 1 : 0;
-	uint64_t ofs = (dst->tofs + src->hofs) & (32 - 1);
+	dt += (((dst->ptofs + src->phofs) & 32) != 0) ? 1 : 0;
+	uint64_t ofs = (dst->ptofs + src->phofs) & (32 - 1);
 
 	/* cat */
 	if(sh <= st) {
@@ -3214,17 +3220,17 @@ void trace_cat_path(
 		*dt = prev_array;
 
 		/* fix tail offset */
-		dt -= (((ofs + src->tofs) & 32) != 0) ? 1 : 0;
-		ofs = (ofs + src->tofs) & (32 - 1);
+		dt -= (((ofs + src->ptofs) & 32) != 0) ? 1 : 0;
+		ofs = (ofs + src->ptofs) & (32 - 1);
 	}
 
 	/* fix dst path object */
 	dt[1] = 0;
 	dt[2] = 0;
-	dst->tail = dt;
-	dst->tofs = ofs;
+	dst->ptail = dt;
+	dst->ptofs = ofs;
 
-	debug("head(%p), tail(%p), ofs(%u)", dst->head, dst->tail, dst->tofs);
+	debug("head(%p), tail(%p), ofs(%u)", dst->phead, dst->ptail, dst->ptofs);
 	return;
 }
 
@@ -3238,14 +3244,14 @@ struct trace_boundary_s {
 static _force_inline
 struct trace_boundary_s trace_cat_section(
 	struct gaba_dp_context_s *this,
-	struct gaba_sec_arr_s *dst,
-	struct gaba_sec_arr_s const *src)
+	struct gaba_path_intl_s *dst,
+	struct gaba_path_intl_s const *src)
 {
 	/* load pointers */
-	struct gaba_path_section_s *dh = dst->head;
-	struct gaba_path_section_s *dt = dst->tail;
-	struct gaba_path_section_s const *sh = src->head;
-	struct gaba_path_section_s const *st = src->tail;
+	struct gaba_path_section_s *dh = dst->shead;
+	struct gaba_path_section_s *dt = dst->stail;
+	struct gaba_path_section_s const *sh = src->shead;
+	struct gaba_path_section_s const *st = src->stail;
 
 	debug("dh(%p), dt(%p), sh(%p), st(%p)", dh, dt, sh, st);
 
@@ -3296,7 +3302,7 @@ struct trace_boundary_s trace_cat_section(
 	}
 
 	/* write back pointer */
-	dst->tail = dt;
+	dst->stail = dt;
 	return(b);
 }
 
@@ -3305,8 +3311,7 @@ struct trace_boundary_s trace_cat_section(
  */
 struct gaba_result_s {
 	struct gaba_alignment_s *aln;
-	struct gaba_sec_arr_s rv_sec, fw_sec;
-	struct gaba_path_intl_s rv_path, fw_path;
+	struct gaba_path_intl_s rv, fw;
 };
 
 /**
@@ -3344,48 +3349,54 @@ struct gaba_result_s trace_init_alignment(
 
 	aln->lmm = (void *)lmm;
 	aln->score = fw_tail->max + rv_tail->max + this->m * params->k;
-	aln->reserved1 = sec_size;
-	aln->reserved2 = path_size;
+	// aln->reserved1 = sec_size;
+	// aln->reserved2 = path_size;
 	aln->reserved3 = this->head_margin;
 
 	/* set pointers */
 	struct gaba_path_section_s *msec = (struct gaba_path_section_s *)(aln + 1);
-	*msec = (struct gaba_path_section_s){ 0 };
-	struct gaba_sec_arr_s rv_sec = {
-		.head = msec + 1,
-		.tail = msec + 1
-	};
-	struct gaba_sec_arr_s fw_sec = {
-		.head = rv_sec.tail + sec_len,
-		.tail = rv_sec.tail + sec_len
-	};
+	struct gaba_path_intl_s rv = {
+		/* path arrays */
+		.phead = (uint32_t *)(msec + sec_len + 1) + 2,
+		.ptail = (uint32_t *)(msec + sec_len + 1) + 2,
+		.phofs = 0,
+		.ptofs = 0,
 
-	uint32_t *mpath = (uint32_t *)fw_sec.tail + 1;
-	struct gaba_path_intl_s rv_path = {
-		.head = mpath + 1,
-		.tail = mpath + 1,
-		.hofs = 0,
-		.tofs = 0
+		/* section arrays */
+		.shead = msec + 1,
+		.stail = msec + 1,
+
+		/* gap counters */
+		.gic = 0,
+		.gec = 0
 	};
-	struct gaba_path_intl_s fw_path = {
-		.head = rv_path.head + path_len,
-		.tail = rv_path.head + path_len,
-		.hofs = 0,
-		.tofs = 0
+	struct gaba_path_intl_s fw = {
+		/* path arrays */
+		.phead = rv.phead + path_len,
+		.ptail = rv.phead + path_len,
+		.phofs = 0,
+		.ptofs = 0,
+
+		/* section arrays */
+		.shead = rv.stail + sec_len,
+		.stail = rv.stail + sec_len,
+
+		/* gap counters */
+		.gic = 0,
+		.gec = 0
 	};
 
 	/* clear array */
-	rv_path.head[-1] = 0;
-	rv_path.head[0] = 0;
-	fw_path.tail[0] = 0;
-	fw_path.tail[1] = 0;
+	msec[0] = (struct gaba_path_section_s){ 0 };
+	rv.phead[-1] = 0;
+	rv.phead[0] = 0;
+	fw.ptail[0] = 0;
+	fw.ptail[1] = 0;
 
 	return((struct gaba_result_s){
 		.aln = aln,
-		.rv_sec = rv_sec,
-		.fw_sec = fw_sec,
-		.rv_path = rv_path,
-		.fw_path = fw_path
+		.rv = rv,
+		.fw = fw
 	});
 }
 
@@ -3396,63 +3407,68 @@ static _force_inline
 struct gaba_alignment_s *trace_refine_alignment(
 	struct gaba_dp_context_s *this,
 	struct gaba_alignment_s *aln,
-	struct gaba_sec_arr_s rv_sec,
-	struct gaba_sec_arr_s fw_sec,
-	struct gaba_path_intl_s rv_path,
-	struct gaba_path_intl_s fw_path,
+	struct gaba_path_intl_s rv,
+	struct gaba_path_intl_s fw,
 	struct gaba_trace_params_s const *params)
 {
+	struct trace_boundary_s b;
 	if(params->sec != NULL) {
 		/* set root section info */
 		aln->rapos = params->sec[0].apos;
 		aln->rbpos = params->sec[0].bpos;
-		// aln->rppos = rv_sec.tail[-1].plen;		/* tail[-1].plen == 0 when head == tail */
-		// aln->rsidx = rv_sec.tail - rv_sec.head;
 
-		/* cat sections */
-		struct trace_boundary_s b = trace_cat_section(this, &rv_sec,
-			&((struct gaba_sec_arr_s const){
-				.head = (struct gaba_path_section_s *)params->sec,
-				.tail = (struct gaba_path_section_s *)params->sec + params->slen
-			}));
-		aln->rppos = b.ppos;
-		aln->rsidx = b.ptr - rv_sec.head;
-		trace_cat_section(this, &rv_sec, &fw_sec);
+		/* cat reverse and seed sections */
+		uint32_t seed[2] = { 0x55555555, 0x55555555 };
+		struct gaba_path_intl_s ss = {
+			/* path info */
+			.phead = seed,
+			.ptail = seed,
+			.phofs = 2 * params->k,
+			.ptofs = 0,
 
-		/* cat paths */
-		uint32_t seed = 0x55555555;
-		trace_cat_path(this, &rv_path,
-			&((struct gaba_path_intl_s const){
-				.head = &seed,
-				.tail = &seed,
-				.hofs = 2 * params->k,
-				.tofs = 0
-			}));
-		trace_cat_path(this, &rv_path, &fw_path);
+			/* section info */
+			.shead = (struct gaba_path_section_s *)params->sec,
+			.stail = (struct gaba_path_section_s *)params->sec + params->slen
+		};
+		b = trace_cat_section(this, &rv, &ss);
+		trace_cat_path(this, &rv, &ss);
+
+		/* cat forward section */
+		trace_cat_section(this, &rv, &fw);
+		trace_cat_path(this, &rv, &fw);
 
 	} else {
 		/* set root section info */
-		if(fw_sec.head == fw_sec.tail) {
-			aln->rapos = rv_sec.tail[-1].apos + rv_sec.tail[-1].alen;
-			aln->rbpos = rv_sec.tail[-1].bpos + rv_sec.tail[-1].blen;
+		if(fw.shead == fw.stail) {
+			aln->rapos = rv.stail[-1].apos + rv.stail[-1].alen;
+			aln->rbpos = rv.stail[-1].bpos + rv.stail[-1].blen;
 		} else {
-			aln->rapos = fw_sec.head->apos;
-			aln->rbpos = fw_sec.head->bpos;
+			aln->rapos = fw.shead->apos;
+			aln->rbpos = fw.shead->bpos;
 		}
 
 		/* append forward section */
-		struct trace_boundary_s b = trace_cat_section(this, &rv_sec, &fw_sec);
-		aln->rppos = b.ppos;
-		aln->rsidx = b.ptr - rv_sec.head;
-		trace_cat_path(this, &rv_path, &fw_path);
+		b = trace_cat_section(this, &rv, &fw);
+		trace_cat_path(this, &rv, &fw);
 	}
 	debug("ridx(%x), rppos(%x), rapos(%x), rbpos(%x)",
 		aln->rsidx, aln->rppos, aln->rapos, aln->rbpos);
 
-	/* set pointer fields in aln object */
-	aln->slen = rv_sec.tail - rv_sec.head;
-	aln->sec = rv_sec.head;
-	aln->path = trace_finalize_path(rv_path);
+	/* store root info */
+	aln->rppos = b.ppos;
+	aln->rsidx = b.ptr - rv.shead;
+
+	/* store section and path info */
+	aln->slen = rv.stail - rv.shead;
+	aln->sec = rv.shead;
+	aln->path = trace_finalize_path(rv);
+
+	/* calc mismatche count */
+	int64_t m = this->m, x = this->x, gi = this->gi, ge = this->ge;
+	int64_t gic = fw.gic + rv.gic;
+	int64_t gec = fw.gec + rv.gec;
+	aln->xcnt = (m * ((aln->path->len - gec)>>1) - gi * gic - ge * gec) / (m + x);
+
 	return(aln);
 }
 
@@ -3488,15 +3504,11 @@ struct gaba_alignment_s *suffix(gaba_dp_trace)(
 		_tail(fw_tail), _tail(rv_tail), params);
 
 	/* generate paths */
-	trace_forward_generate_alignment(this, &fw_leaf, &res.fw_path, &res.fw_sec);
-	trace_reverse_generate_alignment(this, &rv_leaf, &res.rv_path, &res.rv_sec);
+	trace_forward_generate_alignment(this, &fw_leaf, &res.fw);
+	trace_reverse_generate_alignment(this, &rv_leaf, &res.rv);
 
 	/* concatenate paths */
-	return(trace_refine_alignment(this,
-		res.aln,
-		res.rv_sec, res.fw_sec,
-		res.rv_path, res.fw_path,
-		params));
+	return(trace_refine_alignment(this, res.aln, res.rv, res.fw, params));
 }
 
 /**
@@ -3910,26 +3922,25 @@ void gaba_init_restore_default_params(
  */
 static _force_inline
 int gaba_init_check_score(
-	struct gaba_score_s const *score_matrix)
+	// struct gaba_score_s const *score_matrix)
+	struct gaba_params_s const *params)
 {
+	#if 0
 	int32_t max = extract_max(score_matrix->score_sub);
 	int32_t geh = -score_matrix->score_ge_a;
 	int32_t gev = -score_matrix->score_ge_b;
 	int32_t gih = -score_matrix->score_gi_a;
 	int32_t giv = -score_matrix->score_gi_b;
+	#endif
+	int32_t m = params->m, ge = -params->ge, gi = -params->gi;
 
 	#if MODEL == LINEAR
-		if(max - 2 * (geh + gih) > 255) { return(-1); }
-		if(max - 2 * (gev + giv) > 255) { return(-1); }
-		if((geh + gih) > 0) { return(-1); }
-		if((gev + giv) > 0) { return(-1); }
+		if(m - 2 * (ge + gi) > 255) { return(-1); }
+		if((ge + gi) > 0) { return(-1); }
 	#else
-		if(max - 2 * (geh + gih) > 31) { return(-1); }
-		if(max - 2 * (gev + giv) > 31) { return(-1); }
-		if(geh < gih) { return(-1); }
-		if(gev < giv) { return(-1); }
-		if((geh + gih) < -7) { return(-1); }
-		if((gev + giv) < -7) { return(-1); }
+		if(m - 2 * (ge + gi) > 31) { return(-1); }
+		if(ge < gi) { return(-1); }
+		if((ge + gi) < -7) { return(-1); }
 	#endif
 	return(0);
 }
@@ -3939,14 +3950,19 @@ int gaba_init_check_score(
  */
 static _force_inline
 struct gaba_score_vec_s gaba_init_create_score_vector(
-	struct gaba_score_s const *score_matrix)
+	// struct gaba_score_s const *score_matrix)
+	struct gaba_params_s const *params)
 {
+	#if 0
 	int8_t *v = (int8_t *)score_matrix->score_sub;
 	int8_t geh = -score_matrix->score_ge_a;
 	int8_t gev = -score_matrix->score_ge_b;
 	int8_t gih = -score_matrix->score_gi_a;
 	int8_t giv = -score_matrix->score_gi_b;
-	
+	#endif
+
+	int32_t m = params->m, x = -params->x, ge = -params->ge, gi = -params->gi;
+
 	int8_t sb[16] __attribute__(( aligned(16) ));
 	struct gaba_score_vec_s sc __attribute__(( aligned(BW) ));
 	#if BIT == 2
@@ -4256,6 +4272,8 @@ gaba_t *suffix(gaba_init)(
 			.scv = gaba_init_create_score_vector(params_intl.score_matrix),
 			.m = extract_max(params_intl.score_matrix->score_sub),
 			.x = extract_min(params_intl.score_matrix->score_sub),
+			.gi = -params_intl.score_matrix.gi,
+			.ge = -params_intl.score_matrix.ge,
 			.tx = params_intl.xdrop,
 			.tf = params_intl.filter_thresh,
 

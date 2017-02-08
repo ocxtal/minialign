@@ -182,6 +182,7 @@
 /**
  * gap penalty vector abstraction macros
  */
+#if 0
 /* store */
 #define _make_gap(_e1, _e2, _e3, _e4) ( \
 	(v16i8_t){ _mm_set_epi8( \
@@ -213,7 +214,37 @@
 #define _load_adjv(_scv)					( _from_v16i8(_load_gap((_scv).v2, 0x55)) )
 #define _load_ofsh(_scv)					( _from_v16i8(_load_gap((_scv).v2, 0xaa)) )
 #define _load_ofsv(_scv)					( _from_v16i8(_load_gap((_scv).v2, 0xff)) )
+#else
+/* store */
+#define _make_gap(_e1, _e2) ( \
+	(v16i8_t){ _mm_set_epi8( \
+		(_e2), (_e2), (_e2), (_e2), \
+		(_e2), (_e2), (_e2), (_e2), \
+		(_e1), (_e1), (_e1), (_e1), \
+		(_e1), (_e1), (_e1), (_e1)) \
+	} \
+)
+#define _store_adjh(_scv, _adj, _ofs) { \
+	_store_v16i8((_scv).v2, _make_gap(_adj, _ofs)) \
+}
+#define _store_adjv(_scv, _adj, _ofs) { \
+	/*_store_v16i8((_scv).v3, _make_gap(_adj, _ofs))*/ \
+}
+#define _store_ofsh(_scv, _adj, _ofs) { \
+	/*_store_v16i8((_scv).v4, _make_gap(_adj, _ofs))*/ \
+}
+#define _store_ofsv(_scv, _adj, _ofs) { \
+	/*_store_v16i8((_scv).v5, _make_gap(_adj, _ofs))*/ \
+}
 
+/* load */
+#define _load_gap(_ptr, _idx) ( \
+	(v16i8_t){ _mm_shuffle_epi32(_mm_load_si128((__m128i const *)(_ptr)), (_idx)) } \
+)
+
+#define _load_adj(_scv)						( _from_v16i8(_load_gap((_scv).v2, 0x00)) )
+#define _load_ofs(_scv)						( _from_v16i8(_load_gap((_scv).v2, 0xaa)) )
+#endif
 
 
 /* cache line operation */
