@@ -2502,7 +2502,7 @@ void trace_load_section_b(
  * @macro _trace_forward_*_load
  */
 #define _trace_forward_head_load(t, _jump_to) { \
-	if(ptr == blk->mask - 1) { \
+	if(_unlikely(ptr == blk->mask - 1)) { \
 		_trace_forward_cap_update_path(); \
 		_trace_reload_ptr(BLK - 1); \
 		_trace_load_mask(); \
@@ -2512,10 +2512,10 @@ void trace_load_section_b(
 	_trace_load_mask(); \
 }
 #define _trace_forward_bulk_load(t, _jump_to) { \
-	if(ptr == blk->mask - 1) { \
+	if(_unlikely(ptr == blk->mask - 1)) { \
 		_trace_forward_bulk_update_path(); \
 		_trace_reload_ptr(BLK - 1); \
-		if(p < BLK) { \
+		if(_unlikely(p < BLK)) { \
 			_trace_forward_calc_index(t); \
 			_trace_load_mask(); \
 			debug("jump to %s", #_jump_to); \
@@ -2525,12 +2525,12 @@ void trace_load_section_b(
 	_trace_load_mask(); \
 }
 #define _trace_forward_tail_load(t, _jump_to) { \
-	if(ptr == blk->mask - 1) { \
+	if(_unlikely(ptr == blk->mask - 1)) { \
 		debug("load block, blk(%p), next_blk(%p), p(%lld)", \
 			blk, blk-1, p); \
 		/* store path_array */ \
 		_trace_forward_cap_update_path(); \
-		if(p < 0) { \
+		if(_unlikely(p < 0)) { \
 			debug("w.l.psum(%lld), w.l.p(%d), p(%lld)", (t)->w.l.psum, (t)->w.l.p, p); \
 			if((t)->w.l.psum < (t)->w.l.p - p) { \
 				goto _trace_forward_index_break; \
@@ -2549,7 +2549,7 @@ void trace_load_section_b(
  * @macro _trace_reverse_*_load
  */
 #define _trace_reverse_head_load(t, _jump_to) { \
-	if(ptr == blk->mask - 1) { \
+	if(_unlikely(ptr == blk->mask - 1)) { \
 		_trace_reverse_cap_update_path(); \
 		_trace_reload_ptr(BLK - 1); \
 		_trace_load_mask(); \
@@ -2559,10 +2559,10 @@ void trace_load_section_b(
 	_trace_load_mask(); \
 }
 #define _trace_reverse_bulk_load(t, _jump_to) { \
-	if(ptr == blk->mask - 1) { \
+	if(_unlikely(ptr == blk->mask - 1)) { \
 		_trace_reverse_bulk_update_path(); \
 		_trace_reload_ptr(BLK - 1); \
-		if(p < BLK) { \
+		if(_unlikely(p < BLK)) { \
 			_trace_reverse_calc_index(t); \
 			_trace_load_mask(); \
 			debug("jump to %s", #_jump_to); \
@@ -2572,12 +2572,12 @@ void trace_load_section_b(
 	_trace_load_mask(); \
 }
 #define _trace_reverse_tail_load(t, _jump_to) { \
-	if(ptr == blk->mask - 1) { \
+	if(_unlikely(ptr == blk->mask - 1)) { \
 		debug("load block, blk(%p), next_blk(%p), p(%lld)", \
 			blk, blk-1, p); \
 		/* store path_array */ \
 		_trace_reverse_cap_update_path(); \
-		if(p < 0) { \
+		if(_unlikely(p < 0)) { \
 			debug("w.l.psum(%lld), w.l.p(%d), p(%lld)", (t)->w.l.psum, (t)->w.l.p, p); \
 			if((t)->w.l.psum < (t)->w.l.p - p) { \
 				goto _trace_reverse_index_break; \
