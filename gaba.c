@@ -105,7 +105,7 @@ _static_assert(sizeof(struct gaba_section_s) == 16);
 _static_assert(sizeof(struct gaba_fill_s) == 64);
 _static_assert(sizeof(struct gaba_path_section_s) == 32);
 _static_assert(sizeof(struct gaba_path_s) == 8);
-_static_assert(sizeof(struct gaba_alignment_s) == 64);
+_static_assert(sizeof(struct gaba_alignment_s) == 80);
 _static_assert(sizeof(vec_masku_t) == 4);
 
 /**
@@ -3371,6 +3371,8 @@ struct gaba_alignment_s *trace_refine_alignment(
 	aln->xcnt =
 		(m * ((aln->path->len - gec)>>1) + gi * gic + ge * gec - aln->score)
 		/ (m - x);
+	aln->gicnt = gic;
+	aln->gecnt = gec;
 	debug("plen(%lld), gic(%lld), gec(%lld), dcnt(%lld), xcnt(%lld)",
 		aln->path->len, gic, gec, (aln->path->len - gec)>>1, aln->xcnt);
 

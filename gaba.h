@@ -88,22 +88,6 @@ typedef struct gaba_params_s gaba_params_t;
  * @brief utility macro for constructing score parameters.
  */
 #define GABA_SCORE_SIMPLE(_m, _x, _gi, _ge)		.m = (_m), .x = (_x), .gi = (_gi), .ge = (_ge)
-#if 0
-#define GABA_SCORE_SIMPLE(m, x, gi, ge) ( \
-	&((gaba_score_t const) { \
-		.score_sub = { \
-			{m, -(x), -(x), -(x)}, \
-			{-(x), m, -(x), -(x)}, \
-			{-(x), -(x), m, -(x)}, \
-			{-(x), -(x), -(x), m} \
-		}, \
-		.score_gi_a = gi, \
-		.score_ge_a = ge, \
-		.score_gi_b = gi, \
-		.score_ge_b = ge \
-	}) \
-)
-#endif
 
 /**
  * @type gaba_t
@@ -209,6 +193,7 @@ typedef struct gaba_path_s gaba_path_t;
 struct gaba_alignment_s {
 	void *lmm;
 	int64_t score, xcnt;		/** (16) score, #mismatchs */
+	int64_t gicnt, gecnt;		/** (16) #gap opens, #gap bases */
 	uint32_t rapos, rbpos;
 	uint32_t rppos;				/** (4) local path index in the root section */
 	uint32_t rsidx;				/** (4) index of the root section */
