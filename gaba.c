@@ -2515,7 +2515,7 @@ void trace_load_section_b(
 	if(ptr == blk->mask - 1) { \
 		_trace_forward_bulk_update_path(); \
 		_trace_reload_ptr(BLK - 1); \
-		if(p < 2 * BLK) { \
+		if(p < BLK) { \
 			_trace_forward_calc_index(t); \
 			_trace_load_mask(); \
 			debug("jump to %s", #_jump_to); \
@@ -2562,7 +2562,7 @@ void trace_load_section_b(
 	if(ptr == blk->mask - 1) { \
 		_trace_reverse_bulk_update_path(); \
 		_trace_reload_ptr(BLK - 1); \
-		if(p < 2 * BLK) { \
+		if(p < BLK) { \
 			_trace_reverse_calc_index(t); \
 			_trace_load_mask(); \
 			debug("jump to %s", #_jump_to); \
@@ -2757,7 +2757,7 @@ void trace_forward_body(
 
 	/* v loop */
 	_trace_forward_loop_v_head: {
-		if(p < 3 * BLK) {
+		if(p < 2 * BLK) {
 			goto _trace_forward_tail_v_head;
 		}
 		_trace_forward_gap_loop(this, head, bulk, v);
@@ -2767,14 +2767,14 @@ void trace_forward_body(
 
 	/* d dispatchers */
 	_trace_forward_loop_d_mid: {
-		if(p < 3 * BLK) {
+		if(p < 2 * BLK) {
 			goto _trace_forward_tail_d_mid;
 		} else {
 			goto _trace_forward_head_d_mid;
 		}
 	}
 	_trace_forward_loop_d_tail: {
-		if(p < 3 * BLK) {
+		if(p < 2 * BLK) {
 			goto _trace_forward_tail_d_tail;
 		} else {
 			goto _trace_forward_head_d_tail;
@@ -2788,7 +2788,7 @@ void trace_forward_body(
 
 	/* h loop */
 	_trace_forward_loop_h_head: {
-		if(p < 3 * BLK) {
+		if(p < 2 * BLK) {
 			goto _trace_forward_tail_h_head;
 		}
 		_trace_forward_gap_loop(this, head, bulk, h);
@@ -2855,7 +2855,7 @@ void trace_reverse_body(
 
 	/* h loop */
 	_trace_reverse_loop_h_head: {
-		if(p < 3 * BLK) {
+		if(p < 2 * BLK) {
 			goto _trace_reverse_tail_h_head;
 		}
 		_trace_reverse_gap_loop(this, head, bulk, h);
@@ -2865,14 +2865,14 @@ void trace_reverse_body(
 
 	/* d dispatchers */
 	_trace_reverse_loop_d_mid: {
-		if(p < 3 * BLK) {
+		if(p < 2 * BLK) {
 			goto _trace_reverse_tail_d_mid;
 		} else {
 			goto _trace_reverse_head_d_mid;
 		}
 	}
 	_trace_reverse_loop_d_tail: {
-		if(p < 3 * BLK) {
+		if(p < 2 * BLK) {
 			goto _trace_reverse_tail_d_tail;
 		} else {
 			goto _trace_reverse_head_d_tail;
@@ -2886,7 +2886,7 @@ void trace_reverse_body(
 
 	/* v loop */
 	_trace_reverse_loop_v_head: {
-		if(p < 3 * BLK) {
+		if(p < 2 * BLK) {
 			goto _trace_reverse_tail_v_head;
 		}
 		_trace_reverse_gap_loop(this, head, bulk, v);
