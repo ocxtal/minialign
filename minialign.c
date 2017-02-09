@@ -14,7 +14,7 @@
 #include <sys/types.h>
 
 
-#define MM_VERSION "0.4.5-rc1"
+#define MM_VERSION "0.4.5"
 
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
 #define MIN2(x,y) 		( (x) < (y) ? (x) : (y) )
