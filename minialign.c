@@ -1312,7 +1312,7 @@ static void mm_print_unmapped_sam(mm_align_t *b, const bseq_t *t)
 static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t mapq, uint16_t flag)
 {
 	const mm_idx_t *mi = b->mi;
-	int qs = (flag&0x900)? a->qs : 0, qe = (flag&0x900)? a->qe : (int32_t)t->l_seq;
+	int32_t qs = (flag&0x900)? a->qs : 0, qe = (flag&0x900)? a->qe : (int32_t)t->l_seq;
 	_puts(b, t->name); _put(b, '\t'); _putn(b, flag); _put(b, '\t');
 	_puts(b, mi->s.a[a->rid - mi->base_rid].name); _put(b, '\t');
 	_putn(b, a->rs+1); _put(b, '\t');
@@ -1336,7 +1336,9 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, const reg_t *a, 
 
 static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, const reg_t *a, uint16_t mapq, uint16_t flag)
 {
-	_puts(b, "aaaaaa");
+	const mm_idx_t *mi = b->mi;
+	_puts(b, t->name); _put(b, '\t');
+	_puts(b, mi->s.a[a->rid - mi->base_rid].name); _put(b, '\t');
 	return;
 }
 
