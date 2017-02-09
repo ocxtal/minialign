@@ -820,12 +820,14 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 /* end of sketch.c */
 
 /* map.c, options */
-#define MM_RG			( 0 )
-#define MM_AS			( 1 )
-#define MM_XS			( 2 )
-#define MM_SA			( 3 )
-#define MM_MD			( 4 )
-#define MM_CO			( 5 )
+#define MM_RG			( 0 )		// Z: read group
+#define MM_CO			( 1 )		// Z: comment
+#define MM_NH			( 2 )		// i: #hits
+#define MM_IH 			( 3 )		// i: index of the record in the hits
+#define MM_AS			( 4 )		// i: score
+#define MM_XS			( 5 )		// i: suboptimal score
+#define MM_NM 			( 6 )		// i: editdist to the reference
+#define MM_SA			( 7 )		// Z: supplementary records
 
 #define MM_AVA			( 0x01ULL<<48 )
 #define MM_KEEP_QUAL	( 0x02ULL<<48 )
@@ -1265,7 +1267,7 @@ typedef struct mm_align_s mm_align_t;
 typedef struct {
 	void (*header)(mm_align_t*);
 	void (*unmapped)(mm_align_t*, const bseq_t*);
-	void (*mapped)(mm_align_t*, const bseq_t*, const gaba_alignment_t*, uint16_t, uint16_t);
+	void (*mapped)(mm_align_t*, const bseq_t*, uint32_t, const mm128_t*);
 } mm_printer_t;
 
 struct mm_align_s {
@@ -1461,30 +1463,29 @@ _abort:;
 #define MAPQ_COEF	( 1<<MAPQ_DEC )
 #define _clip(x)	MAX2(0, MIN2(((uint32_t)(x)), 60 * MAPQ_COEF))
 #define _aln(x)		( (const gaba_alignment_t*)(x).u64[1] )
-static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+static uint32_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
-	uint64_t i;
-	const gaba_alignment_t *paln = _aln(reg[0]);
+	uint32_t i, score = _aln(reg[0])->score, min = score * opt->min_ratio;
 	uint32_t ssc = (n_reg>1)? _aln(reg[1])->score : 0, bsc = (n_reg>1)? _aln(reg[n_reg-1])->score : 0, tsc = 0;
-	double elen = (double)gaba_plen(paln->sec) / 2.0, pid = 1.0 - (double)(elen * opt->m - paln->score) / (double)(opt->m + opt->x) / elen;
-	double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * (paln->score - ssc), pe = 1.0 / (ulen * ulen + (double)n_reg);
+	double elen = (double)gaba_plen(_aln(reg[0])->sec) / 2.0, pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
+	double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * (score - ssc), pe = 1.0 / (ulen * ulen + (double)n_reg);
 
 	for (i = 1; i < n_reg; ++i) tsc += _aln(reg[i])->score - bsc + 1;
 	reg[0].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe));
-	for (i = 1; i < n_reg; ++i)
-		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * MAPQ_COEF * log10(1.0 - pe * (double)(_aln(reg[i])->score - bsc + 1) / (double)tsc));
-	return n_reg;
+	for (i = 1; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i)
+		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * MAPQ_COEF * log10(1.0 - pe * (double)(score - bsc + 1) / (double)tsc));
+	return i;
 }
 
-static uint64_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+static uint32_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
-	for (uint64_t i = 0; i < n_reg; ++i) {
-		int32_t score = _aln(reg[i])->score;
+	uint32_t i, score, min = _aln(reg[0])->score * opt->min_ratio;
+	for (i = 0; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i) {
 		double elen = (double)gaba_plen(_aln(reg[i])->sec) / 2.0, pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
 		double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * score, pe = 1.0 / (ulen + 1);
 		reg[i].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe)) | ((i == 0? 0 : 0x800)<<16);
 	}
-	return n_reg;
+	return i;
 }
 #undef _clip
 #undef _aln
@@ -1547,7 +1548,8 @@ static const mm128_t *mm_align_seq(
 	*n_reg = reg.n;
 	if (reg.n == 0) return 0;
 	radix_sort_128x(reg.a, reg.a + reg.n);
-	((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
+	*n_reg = ((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
+	for (uint64_t i = *n_reg; i < reg.n; ++i) { lmm_free(lmm, (void*)reg.a[i].u64[1]); }
 	return reg.a;
 }
 
@@ -1586,15 +1588,31 @@ static const mm128_t *mm_align_seq(
 	for (const uint8_t *_q = (const uint8_t*)(_s); *_q; _q++) { _put(_buf, *_q); } \
 }
 
-static void mm_print_tags(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t flag)
+#define MM_RG			( 0 )		// Z: read group
+#define MM_CO			( 1 )		// Z: comment
+#define MM_NH			( 2 )		// i: #hits
+#define MM_IH 			( 3 )		// i: index of the record in the hits
+#define MM_AS			( 4 )		// i: score
+#define MM_XS			( 5 )		// i: suboptimal score
+#define MM_NM 			( 6 )		// i: editdist to the reference
+#define MM_SA			( 7 )		// Z: supplementary records
+
+#if 0
+static void mm_print_tags(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t flag, uint64_t idx)
 {
 	uint64_t f = b->opt->flag;
 	if (f & 0x01ULL<<MM_RG) { _puts(b, "\tRG:Z:"); _puts(b, b->opt->rg_id); }
 	if (a == 0) return;
 
+	if (f & 0x01ULL<<MM_NH) { _puts(b, "\tNH:i:"); _putn(b, idx>>32); }
+	if (f & 0x01ULL<<MM_IH) { _puts(b, "\tIH:i:"); _putn(b, idx&0xffffffff); }
 	if (f & 0x01ULL<<MM_AS) { _puts(b, "\tAS:i:"); _putn(b, a->score); }
+	if (f & 0x01ULL<<MM_XS) { _puts(b, "\tXS:i:"); _putn(b, ); }
+	if (f & 0x01ULL<<MM_NM) { }
+	if (f & 0x01ULL<<MM_SA) { }
 	return;
 }
+#endif
 
 static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 {
@@ -1670,117 +1688,150 @@ static int mm_cigar_printer(void *_b, int64_t len, char c)
 	return len+1;
 }
 
-static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
+#define _aln(x)		( (const gaba_alignment_t*)(x).u64[1] )
+#define _mapq(x)	( (x).u32[0] & 0xffff )
+#define _flag(x)	( (x).u32[0]>>16 )
+static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
 {
-	const mm_idx_t *mi = b->mi;
-	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
-	const gaba_path_section_t *s = &a->sec[0];
-	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
-	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
+	for (uint64_t j = 0; j < n_reg; ++j) {
+		uint16_t mapq = _mapq(reg[j]), flag = _flag(reg[j]);
+		const gaba_alignment_t *a = _aln(reg[j]);
+		const mm_idx_t *mi = b->mi;
+		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+		const gaba_path_section_t *s = &a->sec[0];
+		uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
+		uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
 
-	_puts(b, t->name); _t(b); _putn(b, flag); _t(b); _puts(b, r->name); _t(b);
-	_putn(b, rs+1); _t(b); _putn(b, mapq>>MAPQ_DEC); _t(b);
-	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
-	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
-	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
-	_puts(b, "\t*\t0\t0\t");
-	if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
-	else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
-	_t(b);
-	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
-		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, t->qual[k-1]); }
-		else { for (int64_t k = qs; k < qe; k++) _put(b, t->qual[k]); }
-	} else {
-		_put(b, '*');
+		_puts(b, t->name); _t(b); _putn(b, flag); _t(b); _puts(b, r->name); _t(b);
+		_putn(b, rs+1); _t(b); _putn(b, mapq>>MAPQ_DEC); _t(b);
+		if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
+		gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
+		if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
+		_puts(b, "\t*\t0\t0\t");
+		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
+		else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
+		_t(b);
+		if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
+			if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, t->qual[k-1]); }
+			else { for (int64_t k = qs; k < qe; k++) _put(b, t->qual[k]); }
+		} else {
+			_put(b, '*');
+		}
+		// mm_print_tags(b, t, a, flag, idx);
+		// print tags
+		uint64_t f = b->opt->flag;
+		if (f & 0x01ULL<<MM_RG) { _puts(b, "\tRG:Z:"); _puts(b, b->opt->rg_id); }
+		if (f & 0x01ULL<<MM_NH) { _puts(b, "\tNH:i:"); _putn(b, n_reg); }
+		if (f & 0x01ULL<<MM_IH) { _puts(b, "\tIH:i:"); _putn(b, j); }
+		if (f & 0x01ULL<<MM_AS) { _puts(b, "\tAS:i:"); _putn(b, a->score); }
+		if ((f & 0x01ULL<<MM_XS) && j == 0) { _puts(b, "\tXS:i:"); _putn(b, n_reg>1? _aln(reg[1])->score : 0); }
+		if (f & 0x01ULL<<MM_NM) { _puts(b, "\tNM:i:"); _putn(b, a->xcnt + a->gecnt); }
+		if (f & 0x01ULL<<MM_SA) { }
+		if (j == 0) mm_restore_tags(b, t);
+		_cr(b);
 	}
-	mm_print_tags(b, t, a, flag); mm_restore_tags(b, t); _cr(b);
 	return;
 }
+#endif
 
 #define _putd(b, _id)		_put(b, (_id)&0x01? '+' : '-');
 // qname rname idt len #x #gi qs qe rs re e-value bitscore
-static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
+static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
 {
-	const mm_idx_t *mi = b->mi;
-	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
-	const gaba_path_section_t *s = &a->sec[0];
-	int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-	int32_t mid = 100000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
-	uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen+1 : r->l_seq-s->apos;
-	uint32_t re = s->bid&0x01? r->l_seq-s->apos : r->l_seq-s->apos-s->alen+1;
-	uint32_t qs = t->l_seq-s->bpos-s->blen+1, qe = t->l_seq-s->bpos;
+	for (uint64_t j = 0; j < n_reg; ++j) {
+		const gaba_alignment_t *a = _aln(reg[j]);
+		const mm_idx_t *mi = b->mi;
+		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+		const gaba_path_section_t *s = &a->sec[0];
+		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
+		int32_t mid = 100000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
+		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen+1 : r->l_seq-s->apos;
+		uint32_t re = s->bid&0x01? r->l_seq-s->apos : r->l_seq-s->apos-s->alen+1;
+		uint32_t qs = t->l_seq-s->bpos-s->blen+1, qe = t->l_seq-s->bpos;
 
-	_puts(b, t->name); _t(b); _puts(b, r->name); _t(b);
-	_putfi(int32_t, b, mid, 3); _t(b); _putn(b, slen); _t(b); _putn(b, a->xcnt); _t(b); _putn(b, a->gicnt); _t(b);
-	_putn(b, qs); _t(b); _putn(b, qe); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
+		_puts(b, t->name); _t(b); _puts(b, r->name); _t(b);
+		_putfi(int32_t, b, mid, 3); _t(b); _putn(b, slen); _t(b); _putn(b, a->xcnt); _t(b); _putn(b, a->gicnt); _t(b);
+		_putn(b, qs); _t(b); _putn(b, qe); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
 
-	float bit = 1.85 * (float)a->score - 0.02;	// fixme, lambda and k should be calcd from the scoring params
-	int32_t e = 1000.0 * (float)r->l_seq * (float)t->l_seq * pow(2.0, -bit);	// fixme, lengths are not corrected
-	_putfi(int32_t, b, e, 3); _t(b); _putn(b, (int32_t)bit); _cr(b);
+		float bit = 1.85 * (float)a->score - 0.02;	// fixme, lambda and k should be calcd from the scoring params
+		int32_t e = 1000.0 * (float)r->l_seq * (float)t->l_seq * pow(2.0, -bit);	// fixme, lengths are not corrected
+		_putfi(int32_t, b, e, 3); _t(b); _putn(b, (int32_t)bit); _cr(b);
+	}
 	return;
 }
 
 // qname rname qd rd score idt rs re rl qs qe ql #cells
-static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
+static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
 {
-	const mm_idx_t *mi = b->mi;
-	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
-	const gaba_path_section_t *s = &a->sec[0];
-	int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-	int32_t mid = 1000000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
-	uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
-	uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
+	for (uint64_t j = 0; j < n_reg; ++j) {
+		const gaba_alignment_t *a = _aln(reg[j]);
+		const mm_idx_t *mi = b->mi;
+		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+		const gaba_path_section_t *s = &a->sec[0];
+		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
+		int32_t mid = 1000000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
+		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
+		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
-	_puts(b, t->name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
-	_puts(b, r->name); _sp(b); _put(b, '0'); _sp(b); _put(b, s->bid&0x01? '0' : '1'); _sp(b);
-	_put(b, '-'); _putn(b, a->score); _sp(b);	// score in negative
-	_putfi(int32_t, b, mid, 4); _sp(b);
-	_putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
-	_putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
-	_put(b, '0'); _cr(b);	// #cells is always 0
+		_puts(b, t->name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
+		_puts(b, r->name); _sp(b); _put(b, '0'); _sp(b); _put(b, s->bid&0x01? '0' : '1'); _sp(b);
+		_put(b, '-'); _putn(b, a->score); _sp(b);	// score in negative
+		_putfi(int32_t, b, mid, 4); _sp(b);
+		_putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
+		_putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
+		_put(b, '0'); _cr(b);	// #cells is always 0
+	}
 	return;
 }
 
 // qname rname score idt qd qs qe ql rd rs re rl mapq
-static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
+static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
 {
-	const mm_idx_t *mi = b->mi;
-	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
-	const gaba_path_section_t *s = &a->sec[0];
-	int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-	int32_t mid = 1000000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
-	uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
-	uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
+	for (uint64_t j = 0; j < n_reg; ++j) {
+		uint16_t mapq = _mapq(reg[j]);
+		const gaba_alignment_t *a = _aln(reg[j]);
+		const mm_idx_t *mi = b->mi;
+		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+		const gaba_path_section_t *s = &a->sec[0];
+		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
+		int32_t mid = 1000000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
+		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
+		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
-	_puts(b, t->name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
-	_puts(b, r->name); _sp(b);
-	_put(b, '-'); _putn(b, a->score); _sp(b); _putfi(int32_t, b, mid, 4); _sp(b);
-	_put(b, '0'); _sp(b); _putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
-	_put(b, s->bid&0x01? '0' : '1'); _sp(b); _putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
-	_putn(b, (mapq>>(MAPQ_DEC - 2)) + ((mapq>>(MAPQ_DEC + 2)) & ~0x01)); _cr(b);
+		_puts(b, t->name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
+		_puts(b, r->name); _sp(b);
+		_put(b, '-'); _putn(b, a->score); _sp(b); _putfi(int32_t, b, mid, 4); _sp(b);
+		_put(b, '0'); _sp(b); _putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
+		_put(b, s->bid&0x01? '0' : '1'); _sp(b); _putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
+		_putn(b, (mapq>>(MAPQ_DEC - 2)) + ((mapq>>(MAPQ_DEC + 2)) & ~0x01)); _cr(b);
+	}
 	return;
 }
 
 // qname ql qs qe qd rname rl rs re #m block_len mapq
-static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
+static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
 {
-	const mm_idx_t *mi = b->mi;
-	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
-	const gaba_path_section_t *s = &a->sec[0];
-	uint32_t dcnt = (a->path->len - a->gecnt)>>1;
-	uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
-	_puts(b, t->name); _t(b); _putn(b, t->l_seq); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
-	_puts(b, r->name); _t(b); _putn(b, r->l_seq); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
-	_putn(b, dcnt - a->xcnt); _t(b); _putn(b, dcnt + a->gecnt); _t(b); _putn(b, mapq>>MAPQ_DEC); _cr(b);
+	for (uint64_t j = 0; j < n_reg; ++j) {
+		uint16_t mapq = _mapq(reg[j]);
+		const gaba_alignment_t *a = _aln(reg[j]);
+		const mm_idx_t *mi = b->mi;
+		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+		const gaba_path_section_t *s = &a->sec[0];
+		uint32_t dcnt = (a->path->len - a->gecnt)>>1;
+		uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
+		_puts(b, t->name); _t(b); _putn(b, t->l_seq); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
+		_puts(b, r->name); _t(b); _putn(b, r->l_seq); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
+		_putn(b, dcnt - a->xcnt); _t(b); _putn(b, dcnt + a->gecnt); _t(b); _putn(b, mapq>>MAPQ_DEC); _cr(b);
+	}
 	return;
 }
-
 #undef _d
 #undef _t
 #undef _cr
 #undef _put
 #undef _putn
 #undef _puts
+#undef _aln
 
 static void *mm_align_source(void *arg)
 {
@@ -1824,12 +1875,8 @@ static void mm_align_drain(void *arg, void *item)
 			if (b->printer.unmapped) b->printer.unmapped(b, &s->seq[i]);
 			continue;
 		}
-		gaba_alignment_t *aln;
-		int32_t min = ((gaba_alignment_t*)r[0].u64[1])->score * b->opt->min_ratio;
-		for (uint64_t j = 0; j < n_reg && (aln = (gaba_alignment_t*)r[j].u64[1])->score >= min; ++j) {
-			b->printer.mapped(b, &s->seq[i], aln, r[j].u32[0] & 0xffff, r[j].u32[0]>>16);
-			lmm_free(s->lmm, aln);
-		}
+		b->printer.mapped(b, &s->seq[i], n_reg, r);
+		for (uint64_t j = 0; j < n_reg; ++j) { lmm_free(s->lmm, (void*)r[j].u64[1]); }
 		free(r);
 	}
 	free(s->reg.a); free(s->base); free((void*)s->seq); lmm_clean(s->lmm); free(s);
@@ -1990,7 +2037,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf} [sam]\n");
 	fprintf(stderr, "    -Q           include quality string\n");
 	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" []\n");
-	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS} []\n");
+	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,} []\n");
 	fprintf(stderr, "                   (RG is also inferred from -R)\n");
 	fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
 	fprintf(stderr, "\n");
@@ -2032,11 +2079,13 @@ static uint64_t mm_mapopt_parse_tags(const char *p, uint16_v *buf)
 		if (q - p == 2) {
 			if (buf) kv_push(uint16_t, *buf, (uint16_t)p[0] | ((uint16_t)p[1]<<8));
 			if (strncmp(p, "RG", 2) == 0) flag |= 0x01ULL<<MM_RG;
+			else if (strncmp(p, "CO", 2) == 0) flag |= 0x01ULL<<MM_CO;
+			else if (strncmp(p, "NH", 2) == 0) flag |= 0x01ULL<<MM_NH;
+			else if (strncmp(p, "IH", 2) == 0) flag |= 0x01ULL<<MM_IH;
 			else if (strncmp(p, "AS", 2) == 0) flag |= 0x01ULL<<MM_AS;
 			else if (strncmp(p, "XS", 2) == 0) flag |= 0x01ULL<<MM_XS;
+			else if (strncmp(p, "NM", 2) == 0) flag |= 0x01ULL<<MM_NM;
 			else if (strncmp(p, "SA", 2) == 0) flag |= 0x01ULL<<MM_SA;
-			else if (strncmp(p, "MD", 2) == 0) flag |= 0x01ULL<<MM_MD;
-			else if (strncmp(p, "CO", 2) == 0) flag |= 0x01ULL<<MM_CO;
 		}
 		if (*q == '\0') break;
 		p = q + 1;
