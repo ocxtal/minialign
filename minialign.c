@@ -2154,7 +2154,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 'S') o->sidx = atoi(optarg);
 		else if (ch == 'E') o->eidx = atoi(optarg);
 		else if (ch == 'Y') o->xdrop = atoi(optarg);
-		else if (ch == 'O') o->flag &= ~(0xffULL<<56); o->flag |= mm_mapopt_parse_format(optarg);
+		else if (ch == 'O') o->flag &= ~(0xffULL<<56), o->flag |= mm_mapopt_parse_format(optarg);
 		else if (ch == 'Q') o->flag |= MM_KEEP_QUAL;
 		else if (ch == 'R') mm_mapopt_parse_rg(o, optarg);
 		else if (ch == 'T') o->flag |= mm_mapopt_parse_tags(optarg, NULL);
