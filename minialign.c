@@ -528,7 +528,7 @@ static uint32_t bseq_close(bseq_file_t *fp)
 	uint32_t base_rid = fp->base_rid;
 	kseq_destroy(fp->ks);
 	gzclose(fp->fp);
-	free(fp);
+	free(fp->tags); free(fp);
 	return base_rid;
 }
 
@@ -1114,7 +1114,7 @@ static void *mm_idx_post(void *arg, void *item)
 		// count and preallocate
 		uint64_t n_keys = 0; b->n = 0;
 		for (uint64_t j = 1, n = 1; j <= b->a.n; ++j, ++n) {
-			if (b->a.a[j].u64[0] != b->a.a[j-1].u64[0] || j == b->a.n) {
+			if (j == b->a.n || b->a.a[j].u64[0] != b->a.a[j-1].u64[0]) {
 				b->n += (n > 1)? n : 0; ++n_keys; n = 0;
 			}
 		}
@@ -1123,7 +1123,7 @@ static void *mm_idx_post(void *arg, void *item)
 
 		// create the hash table
 		for (uint64_t j = 1, n = 1, sp = 0; j <= b->a.n; ++j, ++n) {
-			if (b->a.a[j].u64[0] != b->a.a[j-1].u64[0] || j == b->a.n) {
+			if (j == b->a.n || b->a.a[j].u64[0] != b->a.a[j-1].u64[0]) {
 				mm128_t *p = &b->a.a[j-n];
 				uint64_t key = p->u64[0]>>mi->b, val = p->u64[1];
 				if (n != 1) {
@@ -1135,7 +1135,6 @@ static void *mm_idx_post(void *arg, void *item)
 			}
 		}
 		b->h = h;
-		// assert(b->n == start_p);
 
 		// deallocate and clear b->a
 		free(b->a.a);
@@ -1159,6 +1158,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 
 	pt_t *pt = pt_init(opt->n_threads);
 	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
+	free(p);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
@@ -1732,7 +1732,6 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 	}
 	return;
 }
-#endif
 
 #define _putd(b, _id)		_put(b, (_id)&0x01? '+' : '-');
 // qname rname idt len #x #gi qs qe rs re e-value bitscore
