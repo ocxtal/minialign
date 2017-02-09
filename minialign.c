@@ -1,24 +1,34 @@
+#include <assert.h>
 #include <getopt.h>
-#include <unistd.h>
-#include <zlib.h>
+#include <inttypes.h>
 #include <math.h>
+#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
-#include <pthread.h>
+#include <unistd.h>
+#include <zlib.h>
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/types.h>
 
 
-#define MM_VERSION "0.4.5"
+/* global consts */
+#define MM_VERSION		"0.4.5"
+#define MAX_THREADS		( 128 )
 
+/* static assertion */
+#define _sa_cat_intl(x, y) 		x##y
+#define _sa_cat(x, y)			_sa_cat_intl(x, y)
+#define _static_assert(expr)	typedef char _sa_cat(_st, __LINE__)[(expr) ? 1 : -1]
+
+/* max, min */
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
 #define MIN2(x,y) 		( (x) < (y) ? (x) : (y) )
 
+/* timer */
 int mm_verbose = 3;
 double mm_realtime0;
 
@@ -36,11 +46,24 @@ static double realtime()
 	return tp.tv_sec + tp.tv_usec * 1e-6;
 }
 
-_Thread_local const char *info;	// thread-local comment on the current tasks
-#define set_info(x)		( info = (const char *)(x) )
+/* malloc wrappers */
+typedef struct {
+	uint64_t avail;
+	const char *msg;
+	void *_pad[6];
+} mm_info_t;
+_static_assert(sizeof(mm_info_t) == 64);	// fit in a cache line
+mm_info_t info[128];
+
+// _Thread_local const char *info;	// thread-local comment on the current tasks
+#define set_info(t, x)		( info[t].msg = (const char *)(x) )
 static void oom_abort(const char *name)
 {
-	fprintf(stderr, "[M::%s] ERROR: Out of memory. (%s)\n", name, info == NULL? "No additional information available" : info);
+	fprintf(stderr, "[M::%s] ERROR: Out of memory.\n", name);
+	for (uint64_t i = 0; i < 128; ++i) {
+		if (!info[i].avail) break;
+		fprintf(stderr, "[M::%s]  thread %" PRIu64 ": %s\n", name, i, info[i].msg? info[i].msg : "No information available.");
+	}
 	exit(128);	// 128 reserved for out of memory
 }
 
@@ -86,7 +109,6 @@ static void oom_abort(const char *name)
 #include "kvec.h"
 #include "gaba.h"
 #include "lmm.h"
-#include "sassert.h"
 #include "arch/arch.h"
 
 #include "kseq.h"
@@ -247,9 +269,9 @@ static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 
 /* queue.c */
 #define _cas(ptr, cmp, val) __atomic_compare_exchange_n(ptr, cmp, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
-typedef void *(*pt_source_t)(void *arg);
-typedef void *(*pt_worker_t)(void *arg, void *item);
-typedef void (*pt_drain_t)(void *arg, void *item);
+typedef void *(*pt_source_t)(uint32_t tid, void *arg);
+typedef void *(*pt_worker_t)(uint32_t tid, void *arg, void *item);
+typedef void (*pt_drain_t)(uint32_t tid, void *arg, void *item);
 
 typedef struct pt_q_s {
 	uint64_t lock, head, tail, size;
@@ -307,11 +329,11 @@ static void *pt_dispatch(void *s)
 	while(1) {
 		ping = pt_deq(c->in, c->tid);
 		if (ping == PT_EMPTY && pong == PT_EMPTY) sched_yield();
-		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->warg, pong));
+		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, pong));
 		if (ping == PT_EXIT) break;
 		pong = pt_deq(c->in, c->tid);
 		if (ping == PT_EMPTY && pong == PT_EMPTY) sched_yield();
-		if (ping != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->warg, ping));
+		if (ping != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, ping));
 		if (pong == PT_EXIT) break;
 	}
 	return NULL;
@@ -355,16 +377,16 @@ static int pt_stream(pt_t *pt, pt_source_t sfp, void *sarg, pt_worker_t wfp, voi
 	if (pt_set_worker(pt, wfp, warg)) return -1;
 	uint64_t bal = 0, lb = 2 * pt->nth, ub = 4 * pt->nth;
 	void *item;
-	while ((item = sfp(sarg)) != NULL) {
+	while ((item = sfp(pt->c->tid, sarg)) != NULL) {
 		pt_enq(pt->c->in, pt->c->tid, item);
 		if (++bal < ub) continue;
 		while (bal > lb) {
-			if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(darg, item), bal--;
-			if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) dfp(darg, wfp(*warg, item)), bal--;
+			if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(pt->c->tid, darg, item), bal--;
+			if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) dfp(pt->c->tid, darg, wfp(pt->c->tid, *warg, item)), bal--;
 		}
 	}
-	while ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) pt_enq(pt->c->out, pt->c->tid, wfp(*warg, item));
-	while (bal > 0) if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(darg, item), bal--;
+	while ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) pt_enq(pt->c->out, pt->c->tid, wfp(pt->c->tid, *warg, item));
+	while (bal > 0) if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(pt->c->tid, darg, item), bal--;
 	return 0;
 }
 
@@ -372,7 +394,7 @@ static int pt_parallel(pt_t *pt, pt_worker_t wfp, void **warg, void **src, void 
 {
 	if (pt_set_worker(pt, wfp, warg)) return -1;
 	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, src? src[i] : NULL);
-	void *res = wfp(*warg, src? src[0] : NULL); if (dst && dst[0]) dst[0] = res;
+	void *res = wfp(pt->c->tid, *warg, src? src[0] : NULL); if (dst && dst[0]) dst[0] = res;
 	for (uint64_t i = 1; i < pt->nth; ++i) {
 		while ((res = pt_deq(pt->c->out, pt->c->tid)) == PT_EMPTY) {}
 		if (dst && dst[i]) dst[i] = res;
@@ -502,7 +524,7 @@ static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_q
 	bseq_file_t *fp;
 	gzFile f;
 
-	set_info("[bseq_open] initialize bseq object");
+	set_info(0, "[bseq_open] initialize bseq object");
 	f = fn && strcmp(fn, "-")? gzopen(fn, "r") : gzdopen(fileno(stdin), "r");
 	if (f == 0) return 0;
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
@@ -641,7 +663,7 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n, void
 	bseq_v seq = {0};
 	static const uint8_t margin[64] = {0};
 
-	set_info("[bseq_read] read sequence block from file");
+	set_info(0, "[bseq_read] read sequence block from file");
 	kv_reserve(uint8_t, mem, chunk_size + 128);
 	kv_pushm(uint8_t, mem, margin, 64);
 	if (fp->bh) {
@@ -858,7 +880,7 @@ static void mm_mapopt_destroy(mm_mapopt_t *opt)
 
 static mm_mapopt_t *mm_mapopt_init(void)
 {
-	set_info("[mm_mapopt_init] initialize mapopt object");
+	set_info(0, "[mm_mapopt_init] initialize mapopt object");
 	mm_mapopt_t *opt = calloc(1, sizeof(mm_mapopt_t));
 	*opt = (mm_mapopt_t){
 		/* -f, -k, -w, -b, -T */ .k = 15, .w = 16, .b = 14, .flag = 0,
@@ -1003,7 +1025,7 @@ static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
 	uint64_t n = 0;
 	uint32_t thres;
 
-	set_info("[mm_idx_cal_max_occ] calculate occurrence thresholds");
+	set_info(0, "[mm_idx_cal_max_occ] calculate occurrence thresholds");
 	if (f <= 0.) return UINT32_MAX;
 	for (uint64_t i = (n = 0); i < 1ULL<<mi->b; ++i)
 		if (mi->B[i].h) n += kh_cnt((kh_t*)mi->B[i].h);
@@ -1040,14 +1062,14 @@ typedef struct {
 	mm128_v a;
 } mm_idx_step_t;
 
-static void *mm_idx_source(void *arg)
+static void *mm_idx_source(uint32_t tid, void *arg)
 {
+	set_info(tid, "[mm_idx_source] fetch sequence block");
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)calloc(1, sizeof(mm_idx_step_t));
 	uint64_t size;
 	void *base;
 
-	set_info("[mm_idx_source] fetch sequence block");
 	s->seq = bseq_read(q->fp, q->batch_size, &s->n_seq, &base, &size);
 	if (s->seq == 0) { free(s), s = 0; return 0; }
 
@@ -1056,24 +1078,25 @@ static void *mm_idx_source(void *arg)
 	return s;
 }
 
-static void *mm_idx_worker(void *arg, void *item)
+static void *mm_idx_worker(uint32_t tid, void *arg, void *item)
 {
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
 
 	char buf[128], *p = buf;
 	p += _pstr(p, "[mm_idx_worker] bin id "); p += _pnum(uint32_t, p, s->seq[0].rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->seq[s->n_seq-1].rid);
-	set_info(buf);
+	set_info(tid, buf);
 	for (uint64_t i = 0; i < s->n_seq; ++i)
 		mm_sketch(s->seq[i].seq, s->seq[i].l_seq, q->mi->w, q->mi->k, s->seq[i].rid, &s->a);
 	return s;
 }
 
-static void mm_idx_drain(void *arg, void *item)
+static void mm_idx_drain(uint32_t tid, void *arg, void *item)
 {
-	set_info("[mm_idx_drain] dump minimizers to pool");
+	set_info(tid, "[mm_idx_drain] dump minimizers to pool");
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
+
 	q->mi->s.n = MAX2(q->mi->s.n, s->seq[s->n_seq-1].rid+1-q->mi->base_rid);
 	kv_reserve(mm_idx_seq_t, q->mi->s, q->mi->s.n);
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
@@ -1098,9 +1121,9 @@ typedef struct {
 	uint32_t from, to;
 } mm_idx_post_t;
 
-static void *mm_idx_post(void *arg, void *item)
+static void *mm_idx_post(uint32_t tid, void *arg, void *item)
 {
-	set_info("[mm_idx_post] indexing postprocess");
+	set_info(tid, "[mm_idx_post] indexing postprocess");
 	mm_idx_post_t *q = (mm_idx_post_t*)arg;
 	mm_idx_t *mi = q->mi;
 
@@ -1147,7 +1170,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 {
 	mm_idx_pipeline_t pl = {0}, **p;
 
-	set_info("[mm_idx_gen] initialize index object");
+	set_info(0, "[mm_idx_gen] initialize index object");
 	pl.batch_size = opt->batch_size;
 	pl.fp = fp;
 	if (pl.fp == 0) return 0;
@@ -1189,7 +1212,7 @@ static void mm_idx_dump(gzFile fp, const mm_idx_t *mi)
 {
 	uint32_t x[3];
 	uint64_t size = 0, y[2];
-	set_info("[mm_idx_dump] dump index to file");
+	set_info(0, "[mm_idx_dump] dump index to file");
 	for (uint64_t i = (size = 0); i < mi->size.n; ++i) size += mi->size.a[i];
 	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
 	gzwrite(fp, MM_IDX_MAGIC, sizeof(char) * 4);
@@ -1228,7 +1251,7 @@ static mm_idx_t *mm_idx_load(gzFile fp)
 	uint64_t bsize, y[2];
 
 	mm_idx_t *mi;
-	set_info("[mm_idx_load] load index from file");
+	set_info(0, "[mm_idx_load] load index from file");
 	if (gzread(fp, magic, sizeof(char) * 4) != sizeof(char) * 4) return 0;
 	if (strncmp(magic, MM_IDX_MAGIC, 4) != 0) return 0;
 	if (gzread(fp, x, sizeof(uint32_t) * 3) != sizeof(uint32_t) * 3) return 0;
@@ -1820,11 +1843,12 @@ static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 #undef _puts
 #undef _aln
 
-static void *mm_align_source(void *arg)
+static void *mm_align_source(uint32_t tid, void *arg)
 {
-	set_info("[mm_align_source] fetch sequence block");
+	set_info(tid, "[mm_align_source] fetch sequence block");
 	mm_align_t *b = (mm_align_t*)arg;
 	mm_align_step_t *s = (mm_align_step_t*)calloc(1, sizeof(mm_align_step_t));
+
 	s->lmm = lmm_init(NULL, 512 * 1024);
 	if (s->lmm == 0) return 0;
 	s->seq = bseq_read(b->fp, b->opt->batch_size, &s->n_seq, &s->base, &s->size);
@@ -1832,14 +1856,14 @@ static void *mm_align_source(void *arg)
 	return s;
 }
 
-static void *mm_align_worker(void *arg, void *item)
+static void *mm_align_worker(uint32_t tid, void *arg, void *item)
 {
 	mm_tbuf_t *t = (mm_tbuf_t*)arg;
 	mm_align_step_t *s = (mm_align_step_t*)item;
 
 	char buf[128], *p = buf;
 	p += _pstr(p, "[mm_align_worker] bin id "); p += _pnum(uint32_t, p, s->seq[0].rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->seq[s->n_seq-1].rid);
-	set_info(buf);
+	set_info(tid, buf);
 
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
 		mm128_t *r;
@@ -1849,12 +1873,12 @@ static void *mm_align_worker(void *arg, void *item)
 	return s;
 }
 
-static void mm_align_drain(void *arg, void *item)
+static void mm_align_drain(uint32_t tid, void *arg, void *item)
 {
+	set_info(tid, "[mm_align_drain] dump alignments to sam records");
 	mm_align_t *b = (mm_align_t*)arg;
 	mm_align_step_t *s = (mm_align_step_t*)item;
 
-	set_info("[mm_align_drain] dump alignments to sam records");
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
 		mm128_t *r = (mm128_t*)s->reg.a[i].u64[0];
 		uint32_t n_reg = s->reg.a[i].u64[1];
@@ -2179,7 +2203,7 @@ int main(int argc, char *argv[])
 	ptr_v v = {0};
 	gzFile fpr = 0, fpw = 0;
 
-	set_info("[main] parsing arguments");
+	set_info(0, "[main] parsing arguments");
 	liftrlimit(); posixly_correct();
 	mm_realtime0 = realtime();
 	mm_mapopt_t *opt = mm_mapopt_init();
@@ -2197,7 +2221,7 @@ int main(int argc, char *argv[])
 		ret = 1; goto _final;
 	}
 
-	set_info("[main] open index file");
+	set_info(0, "[main] open index file");
 	if (fnr) fpr = gzopen(fnr, "rb");
 	if (fnw) fpw = gzopen(fnw, "wb1");
 	for (uint64_t i = 0; i < (fpr? 0x7fffffff : (((opt->flag&MM_AVA) || fpw)? v.n : 1)); ++i) {
