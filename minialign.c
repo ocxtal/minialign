@@ -13,16 +13,11 @@
 #include <sys/resource.h>
 #include <sys/time.h>
 #include <sys/types.h>
-
+#include "sassert.h"
 
 /* global consts */
 #define MM_VERSION		"0.4.5"
-#define MAX_THREADS		( 128 )
-
-/* static assertion */
-#define _sa_cat_intl(x, y) 		x##y
-#define _sa_cat(x, y)			_sa_cat_intl(x, y)
-#define _static_assert(expr)	typedef char _sa_cat(_st, __LINE__)[(expr) ? 1 : -1]
+#define MAX_THREADS		( 64 )
 
 /* max, min */
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
@@ -48,22 +43,25 @@ static double realtime()
 
 /* malloc wrappers */
 typedef struct {
-	uint64_t avail;
+	uint64_t enabled;
 	const char *msg;
-	void *_pad[6];
+	void *_pad[14];
 } mm_info_t;
-_static_assert(sizeof(mm_info_t) == 64);	// fit in a cache line
-mm_info_t info[128];
+_static_assert(sizeof(mm_info_t) == 128);	// fits in a cache line
+mm_info_t info[MAX_THREADS] __attribute__(( aligned(64) ));
 
-// _Thread_local const char *info;	// thread-local comment on the current tasks
-#define set_info(t, x)		( info[t].msg = (const char *)(x) )
+#define enable_info(t)		{ info[t].enabled = 1; }
+#define disable_info(t)		{ info[t].enabled = 0; }
+#define set_info(t, x)		{ info[t].msg = (const char *)(x); }
 static void oom_abort(const char *name)
 {
+	#if 1
 	fprintf(stderr, "[M::%s] ERROR: Out of memory.\n", name);
-	for (uint64_t i = 0; i < 128; ++i) {
-		if (!info[i].avail) break;
-		fprintf(stderr, "[M::%s]  thread %" PRIu64 ": %s\n", name, i, info[i].msg? info[i].msg : "No information available.");
+	for (uint64_t i = 0; i < MAX_THREADS; ++i) {
+		if (info[i].enabled)
+			fprintf(stderr, "[M::%s]  thread %" PRIu64 ": %s\n", name, i, info[i].msg? info[i].msg : "No information available.");
 	}
+	#endif
 	exit(128);	// 128 reserved for out of memory
 }
 
@@ -343,7 +341,7 @@ static void pt_destoroy(pt_t *pt)
 {
 	void *status;
 	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, PT_EXIT);
-	for (uint64_t i = 1; i < pt->nth; ++i) pthread_join(pt->c[i].th, &status);
+	for (uint64_t i = 1; i < pt->nth; ++i) { disable_info(i); pthread_join(pt->c[i].th, &status); }
 	while (pt_deq(pt->c->in, pt->c->tid) != PT_EMPTY) {}
 	while (pt_deq(pt->c->out, pt->c->tid) != PT_EMPTY) {}
 	free(pt->in.elems); free(pt->out.elems); free(pt);
@@ -360,6 +358,7 @@ static pt_t *pt_init(uint32_t nth)
 	for (uint64_t i = 1; i < nth; ++i) {
 		pt->c[i].tid = i; pt->c[i].in = &pt->in; pt->c[i].out = &pt->out;
 		pthread_create(&pt->c[i].th, NULL, pt_dispatch, (void *)&pt->c[i]);
+		enable_info(i);
 	}
 	return pt;
 }
@@ -2203,6 +2202,7 @@ int main(int argc, char *argv[])
 	ptr_v v = {0};
 	gzFile fpr = 0, fpw = 0;
 
+	enable_info(0);
 	set_info(0, "[main] parsing arguments");
 	liftrlimit(); posixly_correct();
 	mm_realtime0 = realtime();
