@@ -1261,14 +1261,6 @@ _mm_idx_load_fail:
 /**************************
  * Multi-threaded mapping *
  **************************/
-
-typedef struct {
-	int32_t rs, re, qs, qe;
-	int32_t rid, score;
-	uint32_t l_cigar;
-	uint8_t cigar[];
-} reg_t;
-
 typedef struct mm_align_s mm_align_t;
 typedef struct {
 	void (*header)(mm_align_t*);
@@ -1313,7 +1305,6 @@ typedef struct mm_tbuf_s { // per-thread buffer
 
 #define _s(x)		( (x)<0?-1:1)
 #define _m(x)		( (((int32_t)(x))>>31)^(x) )
-#define _len(x)		( (x)->re+(x)->qe-(x)->rs-(x)->qs )
 #define _clip(x)	MAX2(0, MIN2(((uint32_t)(x)), 60))
 static void mm_expand(uint32_t n, const v2u32_t *r, uint32_t qid, int32_t qs, uint32_t thresh, mm128_v *coef)
 {
@@ -1467,33 +1458,33 @@ _abort:;
 	return 0;
 }
 
-#define _reg(x)		( (reg_t*)(x).u64[1] )
+#define _aln(x)		( (const gaba_alignment_t*)(x).u64[1] )
 static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	uint64_t i;
-	const reg_t *preg = _reg(reg[0]);
-	uint32_t ssc = (n_reg>1)? _reg(reg[1])->score : 0, bsc = (n_reg>1)? _reg(reg[n_reg-1])->score : 0, tsc = 0;
-	double elen = (double)_len(preg) / 2.0, pid = 1.0 - (double)(elen * opt->m - preg->score) / (double)(opt->m + opt->x) / elen;
-	double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * (preg->score - ssc), pe = 1.0 / (ulen * ulen + (double)n_reg);
+	const gaba_alignment_t *paln = _aln(reg[0]);
+	uint32_t ssc = (n_reg>1)? _aln(reg[1])->score : 0, bsc = (n_reg>1)? _aln(reg[n_reg-1])->score : 0, tsc = 0;
+	double elen = (double)gaba_plen(paln->sec) / 2.0, pid = 1.0 - (double)(elen * opt->m - paln->score) / (double)(opt->m + opt->x) / elen;
+	double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * (paln->score - ssc), pe = 1.0 / (ulen * ulen + (double)n_reg);
 
-	for (i = 1; i < n_reg; ++i) tsc += _reg(reg[i])->score - bsc + 1;
+	for (i = 1; i < n_reg; ++i) tsc += _aln(reg[i])->score - bsc + 1;
 	reg[0].u32[0] |= _clip(-10.0 * log10(pe));
 	for (i = 1; i < n_reg; ++i)
-		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * log10(1.0 - pe * (double)(_reg(reg[i])->score - bsc + 1) / (double)tsc));
+		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * log10(1.0 - pe * (double)(_aln(reg[i])->score - bsc + 1) / (double)tsc));
 	return n_reg;
 }
 
 static uint64_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	for (uint64_t i = 0; i < n_reg; ++i) {
-		int32_t score = _reg(reg[i])->score;
-		double elen = (double)_len((reg_t*)reg[i].u64[1]) / 2.0, pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
+		int32_t score = _aln(reg[i])->score;
+		double elen = (double)gaba_plen(_aln(reg[i])->sec) / 2.0, pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
 		double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * score, pe = 1.0 / (ulen + 1);
 		reg[i].u32[0] |= _clip(-10.0 * log10(pe)) | ((i == 0? 0 : 0x800)<<16);
 	}
 	return n_reg;
 }
-#undef _reg
+#undef _aln
 
 static const mm128_t *mm_align_seq(
 	mm_tbuf_t *b, const mm_mapopt_t *opt, const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t qid,
@@ -1693,7 +1684,7 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, const gaba_align
 	return;
 }
 
-#define _putd(b, _id)		_put(b, (_id)&0x01? '-' : '+');
+#define _putd(b, _id)		_put(b, (_id)&0x01? '+' : '-');
 // qname rname idt #x #gi qs qe rs re e-value bitscore
 static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
 {
@@ -1750,13 +1741,11 @@ static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, const gaba_align
 	const mm_idx_t *mi = b->mi;
 	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 	const gaba_path_section_t *s = &a->sec[0];
-	int32_t mcnt = ((a->path->len - a->gecnt)>>1) - a->xcnt;
+	uint32_t dcnt = (a->path->len - a->gecnt)>>1;
 	uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
-	uint32_t klen = 0;		// fixme
-
-	_puts(b, t->name); _t(b); _putn(b, s->blen); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
-	_puts(b, r->name); _t(b); _putn(b, s->alen); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
-	_putn(b, mcnt); _t(b); _putn(b, klen); _t(b); _putn(b, mapq); _cr(b);
+	_puts(b, t->name); _t(b); _putn(b, t->l_seq); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
+	_puts(b, r->name); _t(b); _putn(b, r->l_seq); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
+	_putn(b, dcnt - a->xcnt); _t(b); _putn(b, dcnt + a->gecnt); _t(b); _putn(b, mapq); _cr(b);
 	return;
 }
 
