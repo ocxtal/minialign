@@ -1618,6 +1618,8 @@ static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 	return 1;
 }
 
+#define _tab(b)			_put(b, '\t')
+#define _cr(b)			_put(b, '\n')
 static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
 {
 	static const uint8_t tag_size[32] = {
@@ -1626,7 +1628,7 @@ static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
 	};
 	const uint8_t *p = t->tag, *tail = p + t->l_tag;
 	while (p < tail) {
-		_put(b, '\t'); _put(b, p[0]); _put(b, p[1]); _put(b, ':'); _put(b, p[2]); _put(b, ':');
+		_tab(b); _put(b, p[0]); _put(b, p[1]); _put(b, ':'); _put(b, p[2]); _put(b, ':');
 		if (p[2] == 'Z') {
 			p += 3; while(*p) { _put(b, *p); p++; } p++;
 		} else if (tag_size[p[2]&0x1f] == 0xfe) {
@@ -1647,9 +1649,9 @@ static void mm_print_header_sam(mm_align_t *b)
 	for (uint64_t i = 0; i < mi->s.n; ++i) {
 		_puts(b, "@SQ\tSN:"); _puts(b, mi->s.a[i].name);
 		_puts(b, "\tLN:"); _putn(b, mi->s.a[i].l_seq);
-		_put(b, '\n');
+		_cr(b);
 	}
-	if (b->opt->flag & 0x01ULL<<MM_RG) { _puts(b, b->opt->rg_line); _put(b, '\n'); }
+	if (b->opt->flag & 0x01ULL<<MM_RG) { _puts(b, b->opt->rg_line); _cr(b); }
 	_puts(b, "@PG\tID:minialign\tPN:minialign\n");
 	return;
 }
@@ -1658,10 +1660,10 @@ static void mm_print_unmapped_sam(mm_align_t *b, const bseq_t *t)
 {
 	_puts(b, t->name); _puts(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");
 	for (uint64_t k = 0; k < t->l_seq; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]);
-	_put(b, '\t');
+	_tab(b);
 	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') { _puts(b, t->qual); }
 	else { _put(b, '*'); }
-	mm_restore_tags(b, t); _put(b, '\n');
+	mm_restore_tags(b, t); _cr(b);
 	return;
 }
 
@@ -1680,22 +1682,22 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, const gaba_align
 	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
 	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
 
-	_puts(b, t->name); _put(b, '\t'); _putn(b, flag); _put(b, '\t'); _puts(b, r->name); _put(b, '\t');
-	_putn(b, rs+1); _put(b, '\t'); _putn(b, mapq); _put(b, '\t');
+	_puts(b, t->name); _tab(b); _putn(b, flag); _tab(b); _puts(b, r->name); _tab(b);
+	_putn(b, rs+1); _tab(b); _putn(b, mapq); _tab(b);
 	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
 	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	_puts(b, "\t*\t0\t0\t");
 	if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
 	else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
-	_put(b, '\t');
+	_tab(b);
 	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
 		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, t->qual[k-1]); }
 		else { for (int64_t k = qs; k < qe; k++) _put(b, t->qual[k]); }
 	} else {
 		_put(b, '*');
 	}
-	mm_print_tags(b, t, a, flag); mm_restore_tags(b, t); _put(b, '\n');
+	mm_print_tags(b, t, a, flag); mm_restore_tags(b, t); _cr(b);
 	return;
 }
 
@@ -1703,8 +1705,14 @@ static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, const gaba_al
 {
 	const mm_idx_t *mi = b->mi;
 	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
-	_puts(b, t->name); _put(b, '\t');
-	_puts(b, r->name); _put(b, '\t');
+	const gaba_path_section_t *s = &a->sec[0];
+	int32_t mid = 100 * (((a->path->len - a->gecnt)>>1) - a->xcnt) / s->alen;	// percent identity
+	uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
+
+	_puts(b, t->name); _tab(b); _puts(b, r->name); _tab(b);
+	_putn(b, mid); _tab(b); _putn(b, s->alen); _tab(b); _putn(b, a->gicnt); _tab(b);
+	_putn(b, qs+1); _tab(b); _putn(b, qe); _tab(b); _putn(b, rs+1); _tab(b); _putn(b, re); _tab(b);
+	_putn(b, mapq); _tab(b); _putn(b, a->score); _cr(b);
 	return;
 }
 
@@ -1718,6 +1726,8 @@ static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, const gaba_align
 	return;
 }
 
+#undef _tab
+#undef _cr
 #undef _put
 #undef _putn
 #undef _puts
