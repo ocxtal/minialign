@@ -1246,7 +1246,12 @@ static mm_idx_t *mm_idx_load(gzFile fp)
 	mi->size.a = malloc(sizeof(uint64_t) * mi->size.n);
 	mi->base.a[0] = malloc(sizeof(char) * bsize);
 	mi->size.a[0] = bsize;
-	if (gzread(fp, mi->base.a[0], sizeof(char) * mi->size.a[0]) != sizeof(char) * mi->size.a[0]) goto _mm_idx_load_fail;
+
+	const uint64_t chunk_size = 1024 * 1024 * 1024;	// 1G to fit in signed int
+	for (uint64_t b = 0; b < mi->size.a[0]; b += chunk_size) {
+		uint64_t size = MIN2(chunk_size, mi->size.a[0] - b);
+		if (gzread(fp, mi->base.a[0] + b, sizeof(char) * size) != sizeof(char) * size) goto _mm_idx_load_fail;
+	}
 	mi->s.a = malloc(sizeof(mm_idx_seq_t) * mi->s.n);
 	if (gzread(fp, mi->s.a, sizeof(mm_idx_seq_t) * mi->s.n) != sizeof(mm_idx_seq_t) * mi->s.n) goto _mm_idx_load_fail;
 	for (uint64_t i = 0; i < mi->s.n; ++i) mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
