@@ -146,7 +146,6 @@ Adjusting alignment scoring parameters `-a`, `-b`, `-p`, and `-q` (match award, 
 
 Passing `-TRG` flag adds the default `@RG	ID:1` line and the corresponding `RG:Z:1` tag in each alignment record. If you need more specific line, pass `-R` flag, which is the same as the BWA-MEM's `-R` option, like `-R"@RG\tID:foo\tSM:bar"`.
 
-
 ### Applying multiple query / reference files
 
 #### Index construction mode
