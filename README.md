@@ -10,7 +10,7 @@ C11 compiler (gcc / clang / icc) is required to build the program.
 ```
 $ make && make install	# PREFIX=/usr/local by default
 $ minialign -xont reference.fa reads.[fa,fq,bam] > read_to_ref.sam
-$ minialign -X -xava reads.[fa,fq,bam] > all_versus_all.sam
+$ minialign -X -xava reads.[fa,fq,bam] > all_versus_all.paf
 ```
 
 Reference sequence index can be stored in separate. Using prebuilt index saves around a minute per run for a human haploid (~3G) genome.
@@ -37,12 +37,12 @@ All the following benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz,
 
 |                      Time (sec.)                     |  minialign  |   DALIGNER  |   BWA-MEM   |
 |:----------------------------------------------------:|:-----------:|:-----------:|:-----------:|
-| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        14.5 |        39.5 |        6272 |
-| S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        41.9 |       1134* |       10869 |
-| D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |         132 |           - |       31924 |
-| Human (hg38) x3 sim. (9.2Gb) to ref.                 |        1209 |           - |           - |
+| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        10.5 |        39.5 |        6272 |
+| S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        28.7 |       1134* |       10869 |
+| D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |        80.2 |           - |       31924 |
+| Human (hg38) x3 sim. (9.2Gb) to ref.                 |         654 |           - |           - |
 
-Notes: Execution time was measured with the unix `time` command, shown in seconds. Dashes denote untested conditions. Program version information: minialign-0.4.4, DALIGNER-ca167d3 (commit on 2016/9/27), and BWA-MEM-0.7.15-r1142-dirty. All the programs were compiled with gcc/g++-5.4.0 providing the optimization flag `-O3`. PBSIM (PacBio long-read simulator), [modified version based on 1.0.3 (1.0.3-nfree)](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Simulation parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Arguments passed to the programs; minialign: `-t4 -xpacbio`, DALIGNER: `-T4`, and BWA-MEM: `-t4 -xpacbio -A1 -B2 -O2 -E1` (overriding scoring parameters based on the PacBio defaults). Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from the measurements. Peak RAM usage of minialign was around 12GB in human read-to-ref mapping with four threads. Starred sample, S.cerevisiae on DALIGNER, was splitted into five subsamples since the whole concatenated fastq resulted in an out-of-memory error. Calculation time of the subsamples were 61.6, 914.2, 56.8, 50.3, and 51.5 seconds, where the second trial behaved a bit strangely with too long calculation on one (out of four) threads.
+Notes: Execution time was measured with the unix `time` command, shown in seconds. Dashes denote untested conditions. Program version information: minialign-0.4.5, DALIGNER-ca167d3 (commit on 2016/9/27), and BWA-MEM-0.7.15-r1142-dirty. All the programs were compiled with gcc/g++-5.4.0 providing the optimization flag `-O3`. PBSIM (PacBio long-read simulator), [modified version based on 1.0.3 (1.0.3-nfree)](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Simulation parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Arguments passed to the programs; minialign: `-t4 -xpacbio`, DALIGNER: `-T4`, and BWA-MEM: `-t4 -xpacbio -A1 -B2 -O2 -E1` (overriding scoring parameters based on the PacBio defaults). Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from the measurements. Peak RAM usage of minialign was around 12GB in human read-to-ref mapping with four threads. Starred sample, S.cerevisiae on DALIGNER, was splitted into five subsamples since the whole concatenated fastq resulted in an out-of-memory error. Calculation time of the subsamples were 61.6, 914.2, 56.8, 50.3, and 51.5 seconds, where the second trial behaved a bit strangely with too long calculation on one (out of four) threads.
 
 ### Recall-precision trend
 
@@ -191,7 +191,8 @@ $ minialign -X -l index.mai read1.fa read2.fa ... readN.fa > out.sam	# map read[
 
 ## Updates
 
-* 2016/1/25 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags), change -xpacbio scoring params to -a1 -b2 -p2 -q1 (performed better on recent PacBio reads)
+* 2016/2/9 (0.4.5) Add support for BLAST6 / BLASR1 / BLASR4 / PAF formats. Change the default output format to PAF in the all-versus-all mode. Add support for NH, IH, XS, and NM tags in the sam format. Replaced internal implementations (hashmap and queue) to eliminate overheads.
+* 2016/1/25 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags), change -xpacbio scoring params to -a1 -b2 -p2 -q1 (performed better on recent PacBio reads).
 * 2016/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.
 * 2016/12/6 (0.4.2) Add splitted alignment rescuing algorithm.
 * 2016/12/1 (0.4.1) Fix bug in sam output (broken CIGAR with both reverse-complemented and secondary flags).
