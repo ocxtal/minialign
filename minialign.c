@@ -832,8 +832,9 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 #define MM_CIRCULAR		( 0x04ULL<<48 )
 
 #define MM_BLAST6		( 0x01ULL<<56 )
-#define MM_BLASR4		( 0x02ULL<<56 )
-#define MM_PAF			( 0x04ULL<<56 )
+#define MM_BLASR1		( 0x02ULL<<56 )
+#define MM_BLASR4		( 0x04ULL<<56 )
+#define MM_PAF			( 0x08ULL<<56 )
 
 typedef struct {
 	uint32_t sidx, eidx, n_threads, min, k, w, b;
@@ -1156,12 +1157,6 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 
 	pt_t *pt = pt_init(opt->n_threads);
 	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
-
-	// ptask_t *pt = ptask_init(mm_idx_worker, (void**)p, opt->n_threads, 64);
-	// ptask_stream(pt, mm_idx_source, &pl, mm_idx_drain, &pl, 8*opt->n_threads);
-	// ptask_clean(pt);
-	// free(p);
-	
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
@@ -1173,9 +1168,6 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->n_threads;
 		qq[i] = &q[i];
 	}
-	// pt = ptask_init(mm_idx_post, (void**)qq, opt->n_threads, 64);
-	// ptask_parallel(pt, NULL, NULL);
-	// ptask_clean(pt);
 	pt_parallel(pt, mm_idx_post, (void**)qq, NULL, NULL);
 	pt_destoroy(pt);
 
@@ -1618,7 +1610,7 @@ static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 	return 1;
 }
 
-#define _tab(b)			_put(b, '\t')
+#define _t(b)			_put(b, '\t')
 #define _cr(b)			_put(b, '\n')
 static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
 {
@@ -1628,7 +1620,7 @@ static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
 	};
 	const uint8_t *p = t->tag, *tail = p + t->l_tag;
 	while (p < tail) {
-		_tab(b); _put(b, p[0]); _put(b, p[1]); _put(b, ':'); _put(b, p[2]); _put(b, ':');
+		_t(b); _put(b, p[0]); _put(b, p[1]); _put(b, ':'); _put(b, p[2]); _put(b, ':');
 		if (p[2] == 'Z') {
 			p += 3; while(*p) { _put(b, *p); p++; } p++;
 		} else if (tag_size[p[2]&0x1f] == 0xfe) {
@@ -1660,7 +1652,7 @@ static void mm_print_unmapped_sam(mm_align_t *b, const bseq_t *t)
 {
 	_puts(b, t->name); _puts(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");
 	for (uint64_t k = 0; k < t->l_seq; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]);
-	_tab(b);
+	_t(b);
 	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') { _puts(b, t->qual); }
 	else { _put(b, '*'); }
 	mm_restore_tags(b, t); _cr(b);
@@ -1682,15 +1674,15 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, const gaba_align
 	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
 	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
 
-	_puts(b, t->name); _tab(b); _putn(b, flag); _tab(b); _puts(b, r->name); _tab(b);
-	_putn(b, rs+1); _tab(b); _putn(b, mapq); _tab(b);
+	_puts(b, t->name); _t(b); _putn(b, flag); _t(b); _puts(b, r->name); _t(b);
+	_putn(b, rs+1); _t(b); _putn(b, mapq); _t(b);
 	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
 	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	_puts(b, "\t*\t0\t0\t");
 	if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
 	else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
-	_tab(b);
+	_t(b);
 	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
 		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, t->qual[k-1]); }
 		else { for (int64_t k = qs; k < qe; k++) _put(b, t->qual[k]); }
@@ -1701,6 +1693,8 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, const gaba_align
 	return;
 }
 
+#define _putd(b, _id)		_put(b, (_id)&0x01? '-' : '+');
+// qname rname idt #x #gi qs qe rs re e-value bitscore
 static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
 {
 	const mm_idx_t *mi = b->mi;
@@ -1709,24 +1703,65 @@ static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, const gaba_al
 	int32_t mid = 100 * (((a->path->len - a->gecnt)>>1) - a->xcnt) / s->alen;	// percent identity
 	uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
 
-	_puts(b, t->name); _tab(b); _puts(b, r->name); _tab(b);
-	_putn(b, mid); _tab(b); _putn(b, s->alen); _tab(b); _putn(b, a->gicnt); _tab(b);
-	_putn(b, qs+1); _tab(b); _putn(b, qe); _tab(b); _putn(b, rs+1); _tab(b); _putn(b, re); _tab(b);
-	_putn(b, mapq); _tab(b); _putn(b, a->score); _cr(b);
+	_puts(b, t->name); _t(b); _puts(b, r->name); _t(b);
+	_putn(b, mid); _t(b); _putn(b, s->alen); _t(b); _putn(b, a->gicnt); _t(b);
+	_putn(b, qs+1); _t(b); _putn(b, qe); _t(b); _putn(b, rs+1); _t(b); _putn(b, re); _t(b);
+	_putn(b, mapq); _t(b); _putn(b, a->score); _cr(b);
 	return;
 }
 
+// qname rname qd rd score idt rs re rl qs qe ql #cells
+static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
+{
+	const mm_idx_t *mi = b->mi;
+	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+	const gaba_path_section_t *s = &a->sec[0];
+	int32_t mid = 100 * (((a->path->len - a->gecnt)>>1) - a->xcnt) / s->alen;	// percent identity
+	uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
+	uint32_t ccnt = 0;		// fixme
+
+	_puts(b, t->name); _t(b); _puts(b, r->name); _t(b); _putd(b, s->bid); _t(b); _putd(b, s->aid); _t(b);
+	_putn(b, a->score); _t(b); _putn(b, mid); _t(b);
+	_putn(b, rs); _t(b); _putn(b, re); _t(b); _putn(b, s->blen); _t(b);
+	_putn(b, qs); _t(b); _putn(b, qe); _t(b); _putn(b, s->alen); _t(b);
+	_putn(b, ccnt); _cr(b);
+	return;
+}
+
+// qname rname score idt qd qs qe ql rd rs re rl mapq
 static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
 {
+	const mm_idx_t *mi = b->mi;
+	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+	const gaba_path_section_t *s = &a->sec[0];
+	int32_t mid = 100 * (((a->path->len - a->gecnt)>>1) - a->xcnt) / s->alen;	// percent identity
+	uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
+
+	_puts(b, t->name); _t(b); _puts(b, r->name); _t(b); _putn(b, a->score); _t(b); _putn(b, mid); _t(b);
+	_putd(b, s->bid); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putn(b, s->blen); _t(b);
+	_putd(b, s->aid); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b); _putn(b, s->alen); _t(b);
+	_putn(b, mapq); _cr(b);
 	return;
 }
 
+// qname ql qs qe qd rname rl rs re #m block_len mapq
 static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
 {
+	const mm_idx_t *mi = b->mi;
+	const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+	const gaba_path_section_t *s = &a->sec[0];
+	int32_t mcnt = ((a->path->len - a->gecnt)>>1) - a->xcnt;
+	uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
+	uint32_t klen = 0;		// fixme
+
+	_puts(b, t->name); _t(b); _putn(b, s->blen); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
+	_puts(b, r->name); _t(b); _putn(b, s->alen); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
+	_putn(b, mcnt); _t(b); _putn(b, klen); _t(b); _putn(b, mapq); _cr(b);
 	return;
 }
 
-#undef _tab
+#undef _d
+#undef _t
 #undef _cr
 #undef _put
 #undef _putn
@@ -1826,6 +1861,7 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 	static const mm_printer_t printer[] = {
 		[0] = { .header = mm_print_header_sam, .unmapped = mm_print_unmapped_sam, .mapped = mm_print_mapped_sam },
 		[MM_BLAST6>>56] = { .mapped = mm_print_mapped_blast6 },
+		[MM_BLASR1>>56] = { .mapped = mm_print_mapped_blasr1 },
 		[MM_BLASR4>>56] = { .mapped = mm_print_mapped_blasr4 },
 		[MM_PAF>>56] = { .mapped = mm_print_mapped_paf }
 	};
@@ -1856,7 +1892,6 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 	// initialize threads
 	if ((b->t = (void**)calloc(b->opt->n_threads, sizeof(mm_tbuf_t*))) == 0) goto _fail;
 	for (uint64_t i = 0; i < b->opt->n_threads; ++i) { if ((b->t[i] = (void*)mm_tbuf_init(b)) == 0) goto _fail; }
-	// if ((b->pt = ptask_init(mm_align_worker, (void**)b->t, b->opt->n_threads, 64)) == 0) goto _fail;
 	if ((b->pt = pt_init(b->opt->n_threads)) == 0) goto _fail;
 
 	// print sam header
@@ -1872,7 +1907,6 @@ static int mm_align_file(mm_align_t *b, bseq_file_t *fp)
 	assert(b != 0);
 	if (fp == 0) return -1;
 	b->fp = fp;
-	// return ptask_stream(b->pt, mm_align_source, b, mm_align_drain, b, 8*b->opt->n_threads);
 	return pt_stream(b->pt, mm_align_source, b, mm_align_worker, (void**)b->t, mm_align_drain, b);
 }
 
@@ -2025,6 +2059,7 @@ static uint64_t mm_mapopt_parse_format(const char *arg)
 {
 	if (strcmp(arg, "sam") == 0) return 0;
 	else if (strcmp(arg, "blast6") == 0) return MM_BLAST6;
+	else if (strcmp(arg, "blasr1") == 0) return MM_BLASR1;
 	else if (strcmp(arg, "blasr4") == 0) return MM_BLASR4;
 	else if (strcmp(arg, "paf") == 0) return MM_PAF;
 	return 0;
