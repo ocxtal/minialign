@@ -18,7 +18,7 @@
  * @macro popcnt
  */
 #ifdef __POPCNT__
-	#define popcnt(x)		( (uint64_t)_mm_popcnt_u64(x) )
+#  define popcnt(x)		( (uint64_t)_mm_popcnt_u64(x) )
 #else
 	// #warning "popcnt instruction is not enabled."
 	static inline
@@ -40,8 +40,12 @@
  * @brief trailing zero count (count #continuous zeros from LSb)
  */
 #ifdef __BMI__
-	/** immintrin.h is already included */
-	#define tzcnt(x)		( (uint64_t)_tzcnt_u64(x) )
+/** immintrin.h is already included */
+#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 480
+#    define tzcnt(x)		( (uint64_t)__tzcnt_u64(x) )
+#  else
+#    define tzcnt(x)		( (uint64_t)_tzcnt_u64(x) )
+#  endif
 #else
 	// #warning "tzcnt instruction is not enabled."
 	static inline
@@ -66,7 +70,12 @@
  * @brief leading zero count (count #continuous zeros from MSb)
  */
 #ifdef __LZCNT__
-	#define lzcnt(x)		( (uint64_t)_lzcnt_u64(x) )
+/* __lzcnt_u64 in bmiintrin.h gcc-4.6, _lzcnt_u64 in lzcntintrin.h from gcc-4.7 */
+#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470
+#    define lzcnt(x)		( (uint64_t)__lzcnt_u64(x) )
+#  else
+#    define lzcnt(x)		( (uint64_t)_lzcnt_u64(x) )
+#  endif
 #else
 	// #warning "lzcnt instruction is not enabled."
 	static inline
@@ -248,6 +257,25 @@
 #define p_128(v)			( _mm_cvtsi64_si128((uint64_t)(v)) )
 #define e_128(v)			( (uint64_t)_mm_cvtsi128_si64((__m128i)(v)) )
 
+
+
+/* compare and swap (cas) */
+#if defined(__GNUC__)
+#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 480
+#    define cas(ptr, cmp, val)	({ \
+		uint8_t _res; \
+		__asm__ volatile ("lock cmpxchg %[src], %[dst]\n\tsete %[res]" \
+			: [dst]"+m"(*ptr), [res]"=a"(_res) \
+			: [src]"r"(val), "a"(*cmp) \
+			: "memory", "cc"); \
+		_res; \
+	})
+#  else											/* > 4.7 */
+#    define cas(ptr, cmp, val)	__atomic_compare_exchange_n(ptr, cmp, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
+#  endif
+#else
+#  error "atomic compare-and-exchange is not supported in this version of compiler."
+#endif
 
 #endif /* #ifndef _ARCH_UTIL_H_INCLUDED */
 /**

@@ -5,8 +5,12 @@
 #ifndef _ARCH_H_INCLUDED
 #define _ARCH_H_INCLUDED
 
-
 #ifdef __x86_64__
+#  if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
+/* the compiler is gcc, not clang nor icc */
+#    define _ARCH_GCC_VERSION	( __GNUC__ * 100 + __GNUC_MINOR__ * 10 + __GNUC_PATCHLEVEL__ )
+#  endif
+/* import architectured depentent stuffs and SIMD vectors */
 #  if defined(__AVX2__)
 #    include "x86_64_avx2/arch_util.h"
 #    include "x86_64_avx2/vector.h"

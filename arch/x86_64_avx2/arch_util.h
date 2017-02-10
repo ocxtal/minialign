@@ -18,62 +18,28 @@
 /**
  * @macro popcnt
  */
-#if 1
-	#define popcnt(x)		( (uint64_t)_mm_popcnt_u64(x) )
-#else
-	static inline
-	int popcnt(uint64_t n)
-	{
-		uint64_t c = 0;
-		c = (n & 0x5555555555555555) + ((n>>1) & 0x5555555555555555);
-		c = (c & 0x3333333333333333) + ((c>>2) & 0x3333333333333333);
-		c = (c & 0x0f0f0f0f0f0f0f0f) + ((c>>4) & 0x0f0f0f0f0f0f0f0f);
-		c = (c & 0x00ff00ff00ff00ff) + ((c>>8) & 0x00ff00ff00ff00ff);
-		c = (c & 0x0000ffff0000ffff) + ((c>>16) & 0x0000ffff0000ffff);
-		c = (c & 0x00000000ffffffff) + ((c>>32) & 0x00000000ffffffff);
-		return(c);
-	}
-#endif
+#define popcnt(x)		( (uint64_t)_mm_popcnt_u64(x) )
 
 /**
  * @macro tzcnt
  * @brief trailing zero count (count #continuous zeros from LSb)
  */
-#if 1
-	/** immintrin.h is already included */
-	#define tzcnt(x)		( (uint64_t)_tzcnt_u64(x) )
+/** immintrin.h is already included */
+#if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 480
+#  define tzcnt(x)		( (uint64_t)__tzcnt_u64(x) )
 #else
-	static inline
-	int tzcnt(uint64_t n)
-	{
-		n |= n<<1;
-		n |= n<<2;
-		n |= n<<4;
-		n |= n<<8;
-		n |= n<<16;
-		n |= n<<32;
-		return(64-popcnt(n));
-	}
+#  define tzcnt(x)		( (uint64_t)_tzcnt_u64(x) )
 #endif
 
 /**
  * @macro lzcnt
  * @brief leading zero count (count #continuous zeros from MSb)
  */
-#if 1
-	#define lzcnt(x)		( (uint64_t)_lzcnt_u64(x) )
+/* __lzcnt_u64 in bmiintrin.h gcc-4.6, _lzcnt_u64 in lzcntintrin.h from gcc-4.7 */
+#if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470
+#  define lzcnt(x)		( (uint64_t)__lzcnt_u64(x) )
 #else
-	static inline
-	int lzcnt(uint64_t n)
-	{
-		n |= n>>1;
-		n |= n>>2;
-		n |= n>>4;
-		n |= n>>8;
-		n |= n>>16;
-		n |= n>>32;
-		return(64-popcnt(n));
-	}
+#  define lzcnt(x)		( (uint64_t)_lzcnt_u64(x) )
 #endif
 
 /**
@@ -237,6 +203,25 @@
 #define p_128(v)			( _mm_cvtsi64_si128((uint64_t)(v)) )
 #define e_128(v)			( (uint64_t)_mm_cvtsi128_si64((__m128i)(v)) )
 
+
+
+/* compare and swap (cas) */
+#if defined(__GNUC__)
+#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 480
+#    define cas(ptr, cmp, val)	({ \
+		uint8_t _res; \
+		__asm__ volatile ("lock cmpxchg %[src], %[dst]\n\tsete %[res]" \
+			: [dst]"+m"(*ptr), [res]"=a"(_res) \
+			: [src]"r"(val), "a"(*cmp) \
+			: "memory", "cc"); \
+		_res; \
+	})
+#  else											/* > 4.7 */
+#    define cas(ptr, cmp, val)	__atomic_compare_exchange_n(ptr, cmp, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
+#  endif
+#else
+#  error "atomic compare-and-exchange is not supported in this version of compiler."
+#endif
 
 #endif /* #ifndef _ARCH_UTIL_H_INCLUDED */
 /**

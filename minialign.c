@@ -266,7 +266,7 @@ static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 /* end of hash.c */
 
 /* queue.c */
-#define _cas(ptr, cmp, val) __atomic_compare_exchange_n(ptr, cmp, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
+// #define cas(ptr, cmp, val) __atomic_compare_exchange_n(ptr, cmp, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
 typedef void *(*pt_source_t)(uint32_t tid, void *arg);
 typedef void *(*pt_worker_t)(uint32_t tid, void *arg, void *item);
 typedef void (*pt_drain_t)(uint32_t tid, void *arg, void *item);
@@ -298,12 +298,12 @@ typedef struct pt_s {
 uint64_t pt_enq(pt_q_t *q, uint64_t tid, void *elem)
 {
 	uint64_t z, ret = (int64_t)-1;
-	do { z = 0xffffffff; } while (!_cas(&q->lock, &z, tid));
+	do { z = 0xffffffff; } while (!cas(&q->lock, &z, tid));
 	uint64_t head = q->head, tail = q->tail, mask = q->size - 1;
 	if (((head + 1) & mask) != tail) {
 		q->elems[head] = elem; q->head = (head + 1) & mask; ret = 0;
 	}
-	do { z = tid; } while (!_cas(&q->lock, &z, 0xffffffff));
+	do { z = tid; } while (!cas(&q->lock, &z, 0xffffffff));
 	return ret;
 }
 
@@ -311,12 +311,12 @@ void *pt_deq(pt_q_t *q, uint64_t tid)
 {
 	void *elem = PT_EMPTY;
 	uint64_t z;
-	do { z = 0xffffffff; } while (!_cas(&q->lock, &z, tid));
+	do { z = 0xffffffff; } while (!cas(&q->lock, &z, tid));
 	uint64_t head = q->head, tail = q->tail, mask = q->size - 1;
 	if (head != tail) {
 		elem = q->elems[tail]; q->tail = (tail + 1) & mask;
 	}
-	do { z = tid; } while (!_cas(&q->lock, &z, 0xffffffff));
+	do { z = tid; } while (!cas(&q->lock, &z, 0xffffffff));
 	return elem;
 }
 
