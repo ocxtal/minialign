@@ -5,7 +5,7 @@ Minialign is a little bit fast and moderately accurate nucleotide sequence align
 
 ## Getting started
 
-C11 compiler (gcc / clang / icc) is required to build the program.
+C99 compiler (gcc / clang / icc) is required to build the program.
 
 ```
 $ make && make install	# PREFIX=/usr/local by default
