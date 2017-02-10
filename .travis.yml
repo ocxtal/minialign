@@ -1,4 +1,4 @@
 language: C
 script:
-  - make clean && make CC=gcc-4.8
+  - make clean && make
   - ./minialign -v
