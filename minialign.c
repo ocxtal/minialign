@@ -907,7 +907,7 @@ static int mm_mapopt_check(mm_mapopt_t *opt, int (*_fprintf)(FILE*,const char*,.
 
 	if (opt->m < 1 || opt->m > 5) _fprintf(_fp, "[M::%s] ERROR: Match award must be inside [1,5].\n", __func__), ret = 1;
 	if (opt->x < 1 || opt->x > 5) _fprintf(_fp, "[M::%s] ERROR: Mismatch penalty must be inside [1,5].\n", __func__), ret = 1;
-	if (opt->gi < 1 || opt->gi > 5) _fprintf(_fp, "[M::%s] ERROR: Gap open penalty must be inside [1,5].\n", __func__), ret = 1;
+	if (opt->gi > 5) _fprintf(_fp, "[M::%s] ERROR: Gap open penalty must be inside [0,5].\n", __func__), ret = 1;
 	if (opt->ge < 1 || opt->ge > 5) _fprintf(_fp, "[M::%s] ERROR: Gap extension penalty must be inside [1,5].\n", __func__), ret = 1;
 	if (ret) return(ret);
 
