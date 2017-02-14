@@ -2428,7 +2428,7 @@ void trace_load_section_b(
 			blk, blk-1, p); \
 		/* store path_array */ \
 		_trace_forward_cap_update_path(); \
-		if(_unlikely(p < 0)) { \
+		if(p < 0) { \
 			debug("w.l.psum(%lld), w.l.p(%d), p(%lld)", (t)->w.l.psum, (t)->w.l.p, p); \
 			if((t)->w.l.psum < (t)->w.l.p - p) { \
 				goto _trace_forward_index_break; \
@@ -2475,7 +2475,7 @@ void trace_load_section_b(
 			blk, blk-1, p); \
 		/* store path_array */ \
 		_trace_reverse_cap_update_path(); \
-		if(_unlikely(p < 0)) { \
+		if(p < 0) { \
 			debug("w.l.psum(%lld), w.l.p(%d), p(%lld)", (t)->w.l.psum, (t)->w.l.p, p); \
 			if((t)->w.l.psum < (t)->w.l.p - p) { \
 				goto _trace_reverse_index_break; \
@@ -2987,7 +2987,7 @@ void trace_clean_work(
  * @fn trace_forward_generate_alignment, trace_reverse_generate_alignment
  */
 static _force_inline
-void trace_forward_generate_alignment(
+int64_t trace_forward_generate_alignment(
 	struct gaba_dp_context_s *this,
 	struct gaba_leaf_s const *leaf,
 	struct gaba_path_intl_s *path)
@@ -3007,15 +3007,18 @@ void trace_forward_generate_alignment(
 		trace_forward_body(this);
 		debug("p(%d), psum(%lld), q(%d)", this->w.l.p, this->w.l.psum, this->w.l.q);
 
+		/* check sanity of the q-coordinate */
+		if((uint32_t)this->w.l.q >= 32) { return(-1); }		/* abort */
+
 		/* push section info to section array */
 		trace_forward_push(this);
 	}
 
 	trace_clean_work(this, leaf, path);
-	return;
+	return(0);
 }
 static _force_inline
-void trace_reverse_generate_alignment(
+int64_t trace_reverse_generate_alignment(
 	struct gaba_dp_context_s *this,
 	struct gaba_leaf_s const *leaf,
 	struct gaba_path_intl_s *path)
@@ -3035,12 +3038,15 @@ void trace_reverse_generate_alignment(
 		trace_reverse_body(this);
 		debug("p(%d), psum(%lld), q(%d)", this->w.l.p, this->w.l.psum, this->w.l.q);
 
+		/* check sanity of the q-coordinate */
+		if((uint32_t)this->w.l.q >= 32) { return(-1); }
+
 		/* push section info to section array */
 		trace_reverse_push(this);
 	}
 
 	trace_clean_work(this, leaf, path);
-	return;
+	return(0);
 }
 
 /**
@@ -3410,9 +3416,13 @@ struct gaba_alignment_s *suffix(gaba_dp_trace)(
 	struct gaba_result_s res = trace_init_alignment(this,
 		_tail(fw_tail), _tail(rv_tail), params);
 
-	/* generate paths */
-	trace_forward_generate_alignment(this, &fw_leaf, &res.fw);
-	trace_reverse_generate_alignment(this, &rv_leaf, &res.rv);
+	/* generate paths, may fail when path got lost out of the band */
+	if(trace_forward_generate_alignment(this, &fw_leaf, &res.fw) < 0
+	|| trace_reverse_generate_alignment(this, &rv_leaf, &res.rv) < 0) {
+		lmm_t *lmm = (lmm_t *)params->lmm;
+		lmm_free(lmm, (void *)((uint8_t *)res.aln - this->head_margin));
+		return(NULL);
+	}
 
 	/* concatenate paths */
 	return(trace_refine_alignment(this, res.aln, res.rv, res.fw, params));
