@@ -912,7 +912,7 @@ static int mm_mapopt_check(mm_mapopt_t *opt, int (*_fprintf)(FILE*,const char*,.
 	if (ret) return(ret);
 
 	if (opt->gi == 0 && opt->x == 1 && opt->ge == 1)
-		_fprintf(_fp, "[M::%s] info: (M, X, Gi, Ge) = (1, 1, 0, 1) result in positive expected score between two independent random sequences (may result in false positives). Please consider using a more stringent score.\n", __func__);
+		_fprintf(_fp, "[M::%s] info: (M,X,Gi,Ge) = (1,1,0,1) has positive expected score for two independent random sequences (thus result in false positives). Please consider using a more stringent score.\n", __func__);
 	if (opt->gi != 0 && opt->x >= (opt->gi + opt->ge))
 		_fprintf(_fp, "[M::%s] info: Large mismatch penalty with respect to the gap open/extend penalty may cause SEGV or broken CIGAR. [issue #2]\n", __func__);
 	if (opt->gi != 0 && opt->m + 2*(opt->gi + opt->ge) > 10)
@@ -1477,7 +1477,7 @@ static const gaba_alignment_t *mm_extend(
 		} while(!(flag & f->status));
 		if (m->max < min) { key &= 0xffffffff00000000; continue; }
 		// convert alignment to cigar
-		a = gaba_dp_trace(dp, NULL, m, GABA_TRACE_PARAMS( .lmm = lmm ));
+		a = gaba_dp_trace(dp, NULL, m, GABA_TRACE_PARAMS( .lmm = lmm ));	// might be NULL
 		break;
 	}
 	// record head
