@@ -324,7 +324,7 @@ static void *pt_dispatch(void *s)
 {
 	pt_thread_t *c = (pt_thread_t *)s;
 	void *ping = PT_EMPTY, *pong = PT_EMPTY;
-	while(1) {
+	while (1) {
 		ping = pt_deq(c->in, c->tid);
 		if (ping == PT_EMPTY && pong == PT_EMPTY) sched_yield();
 		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, pong));
@@ -337,7 +337,7 @@ static void *pt_dispatch(void *s)
 	return NULL;
 }
 
-static void pt_destoroy(pt_t *pt)
+static void pt_destroy(pt_t *pt)
 {
 	void *status;
 	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, PT_EXIT);
@@ -1195,7 +1195,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 		qq[i] = &q[i];
 	}
 	pt_parallel(pt, mm_idx_post, (void**)qq, NULL, NULL);
-	pt_destoroy(pt);
+	pt_destroy(pt);
 
 	free(q); free(qq);
 	if (mm_verbose >= 3)
@@ -1922,7 +1922,7 @@ static void mm_align_destroy(mm_align_t *b)
 	assert(b != 0);
 	fwrite(b->base, sizeof(uint8_t), b->p - b->base, stdout);
 	for (uint64_t i = 0; i < b->opt->n_threads; ++i) mm_tbuf_destroy((mm_tbuf_t*)b->t[i]);
-	free(b->base); free(b->occ); free(b->t); gaba_clean(b->gaba); pt_destoroy(b->pt); // ptask_clean(b->pt);
+	free(b->base); free(b->occ); free(b->t); gaba_clean(b->gaba); pt_destroy(b->pt); // ptask_clean(b->pt);
 	free(b);
 	return;
 }
