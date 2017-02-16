@@ -124,4 +124,39 @@ int main() {
 		} \
 	} while (0)
 
+/** heap queue : elements in v must be orderd in heap */
+#define kv_hq_init(v)		{ (v).n = (v).m = 1; (v).a = NULL; }
+#define kv_hq_destroy(v)	kv_destroy(v)
+#define kv_hq_clear(v)		( (v).n = 1 )
+
+#define kv_hq_n(v, i) ( *((int64_t *)&v.a[i]) )
+#define kv_hq_push(type, __comp, v, x) { \
+	kv_push(type, v, x); \
+	uint64_t i = (v).n - 1; \
+	while(i > 1 && __comp((v).a[i>>1], (v).a[i]) > 0) { \
+		(v).a[0] = (v).a[i>>1]; \
+		(v).a[i>>1] = (v).a[i]; \
+		(v).a[i] = (v).a[0]; \
+		i >>= 1; \
+	} \
+}
+#define kv_hq_pop(type, __comp, v) ({ \
+	uint64_t i = 1, j = 2; \
+	(v).a[0] = (v).a[i]; \
+	(v).a[i] = (v).a[--(v).n]; \
+	(v).a[(v).n] = (v).a[0]; \
+	while(j < (v).n) { \
+		uint64_t k; \
+		/*k = (j + 1 < (v).n && kv_hq_n(v, j + 1) < kv_hq_n(v, j)) ? (j + 1) : j; */ \
+		k = (j + 1 < (v).n && __comp((v).a[j + 1], (v).a[j]) < 0) ? j + 1 : j; \
+		/*k = (kv_hq_n(v, k) < kv_hq_n(v, i)) ? k : 0; */ \
+		k = __comp((v).a[k], (v).a[i]) < 0 ? k : 0; \
+		if(k == 0) { break; } \
+		(v).a[0] = (v).a[k]; \
+		(v).a[k] = (v).a[i]; \
+		(v).a[i] = (v).a[0]; \
+		i = k; j = k<<1; \
+	} \
+	v.a[v.n]; \
+})
 #endif

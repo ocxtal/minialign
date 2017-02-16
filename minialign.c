@@ -175,24 +175,26 @@ static void kh_destroy(kh_t *h)
 	return;
 }
 
-static void kh_dump(gzFile fp, kh_t *h)
+typedef uint64_t (*khwrite_t)(void *, void *, uint64_t);
+static void kh_dump(kh_t *h, void *fp, khwrite_t wfp)
 {
 	uint32_t x[2] = {0};
-	if (h == 0) { gzwrite(fp, x, sizeof(uint32_t) * 2); return; }
+	if (h == 0) { wfp(fp, x, sizeof(uint32_t) * 2); return; }
 	x[0] = h->mask + 1; x[1] = h->cnt;
-	gzwrite(fp, x, sizeof(uint32_t) * 2);
-	gzwrite(fp, h->a, sizeof(mm128_t) * x[0]);
+	wfp(fp, x, sizeof(uint32_t) * 2);
+	wfp(fp, h->a, sizeof(mm128_t) * x[0]);
 	return;
 }
 
-static kh_t *kh_load(gzFile fp)
+typedef uint64_t (*khread_t)(void *, void *, uint64_t);
+static kh_t *kh_load(void *fp, khread_t rfp)
 {
 	uint32_t x[2] = {0};
-	if ((gzread(fp, x, sizeof(uint32_t) * 2)) != sizeof(uint32_t) * 2 || x[0] == 0) return NULL;
+	if ((rfp(fp, x, sizeof(uint32_t) * 2)) != sizeof(uint32_t) * 2 || x[0] == 0) return NULL;
 	kh_t *h = calloc(1, sizeof(kh_t));
 	h->mask = x[0] - 1; h->max = x[0]; h->cnt = x[1]; h->ub = h->max * KH_THRESH;
 	h->a = malloc(sizeof(mm128_t) * x[0]);
-	if ((gzread(fp, h->a, sizeof(mm128_t) * x[0])) != sizeof(mm128_t) * x[0]) { free(h->a); free(h); return NULL; }
+	if ((rfp(fp, h->a, sizeof(mm128_t) * x[0])) != sizeof(mm128_t) * x[0]) { free(h->a); free(h); return NULL; }
 	return h;
 }
 
@@ -400,6 +402,190 @@ static int pt_parallel(pt_t *pt, pt_worker_t wfp, void **warg, void **src, void 
 	}
 	return 0;
 }
+
+/* stdio stream with multithreaded compression / decompression */
+typedef struct {
+	uint64_t head, len;
+	uint32_t id, raw, flush, pad;
+	uint8_t buf[];
+} pg_block_t;
+
+typedef struct {
+	FILE *fp;
+	pt_t *pt;
+	pg_block_t *s;
+	uint32_t ub, lb, bal, icnt, ocnt, eof, nth;
+	uint64_t block_size;
+	kvec_t(mm128_t) hq;
+	void *c[];
+} pg_t;
+#define incq_comp(a, b)		( (int64_t)(a).u64[0] - (int64_t)(b).u64[0] )
+
+static pg_block_t *pg_deflate(pg_block_t *in, uint64_t block_size)
+{
+	uint64_t buf_size = block_size * 1.2;
+	pg_block_t *out = malloc(sizeof(pg_block_t) + buf_size);
+	z_stream zs = {
+		.next_in = in->buf, .avail_in = in->len,
+		.next_out = out->buf, .avail_out = buf_size
+	};
+	deflateInit2(&zs, 8, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY);
+	deflate(&zs, Z_FINISH);
+	deflateEnd(&zs);
+	out->head = 0; out->len = buf_size - zs.avail_out;
+	out->id = in->id; out->raw = 0; out->flush = 1;
+	free(in);
+	return out;
+}
+
+static pg_block_t *pg_inflate(pg_block_t *in, uint64_t block_size)
+{
+	uint64_t buf_size = block_size * 1.2;
+	pg_block_t *out = malloc(sizeof(pg_block_t) + buf_size);
+	z_stream zs = {
+		.next_in = in->buf, .avail_in = in->len,
+		.next_out = out->buf, .avail_out = buf_size
+	};
+	inflateInit2(&zs, 15);
+	inflate(&zs, Z_FINISH);
+	inflateEnd(&zs);
+	out->head = 0; out->len = buf_size - zs.avail_out;
+	out->id = in->id; out->raw = 1; out->flush = 0;
+	free(in);
+	return out;
+}
+
+static void *pg_worker(uint32_t tid, void *arg, void *item)
+{
+	pg_t *pg = (pg_t*)arg;
+	pg_block_t *s = (pg_block_t*)item;
+	if (s == NULL || s->len == 0) return s;
+	return (s->raw? pg_deflate : pg_inflate)(s, pg->block_size);
+}
+
+static pg_block_t *pg_read_block(pg_t *pg)
+{
+	pg_block_t *s = malloc(sizeof(pg_block_t) + pg->block_size);
+	s->head = 0; s->id = pg->icnt++; s->raw = 0; s->flush = 0;
+	if (fread(&s->len, sizeof(uint64_t), 1, pg->fp) != 1) { goto _fail; }
+	if (fread(s->buf, sizeof(uint8_t), s->len, pg->fp) != s->len) { goto _fail; }
+	return s;
+_fail:
+	free(s);
+	return NULL;
+}
+
+static void pg_write_block(pg_t *pg, pg_block_t *s)
+{
+	if (s->len == 0) return;
+	fwrite(&s->len, sizeof(uint64_t), 1, pg->fp);
+	fwrite(s->buf, sizeof(uint8_t), s->len, pg->fp);
+	free(s);
+	return;
+}
+
+static pg_t *pg_init(FILE *fp, uint32_t nth)
+{
+	pg_t *pg = calloc(1, sizeof(pg_t) + nth * sizeof(pg_t*));
+	*pg = (pg_t){
+		.fp = fp,
+		.pt = pt_init(nth),
+		.lb = nth, .ub = 3 * nth, .bal = 0, .nth = nth,
+		.block_size = 1024 * 1024
+	};
+	kv_hq_init(pg->hq);
+	for (uint64_t i = 0; i < nth; ++i) pg->c[i] = (void*)pg;
+	pt_set_worker(pg->pt, pg_worker, pg->c);
+	return pg;
+}
+
+static void pg_destroy(pg_t *pg)
+{
+	pg_block_t *s = pg->s, *t;
+	if (s && s->flush == 1 && s->head != 0) {
+		s->len = s->head;
+		pt_enq(pg->pt->c->in, pg->pt->c->tid, s); pg->bal++;
+	} else free(s);
+	while (pg->bal > 0) {
+		if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) { sched_yield(); continue; }
+		pg->bal--;
+		if (t && !t->flush) { free(t); continue; }
+		kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
+	}
+	while (pg->hq.n > 1) {
+		pg->ocnt++;
+		t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
+		pg_write_block(pg, t);
+	}
+	uint64_t z = 0;
+	fwrite(&z, sizeof(uint64_t), 1, pg->fp);	/* terminator */
+	pt_destroy(pg->pt); free(pg);
+	return;
+}
+
+static uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
+{
+	uint64_t rem = len;
+	pg_block_t *s = pg->s, *t;
+	if (pg->eof == 2) return 0;
+	while (rem > 0) {
+		while (!s || s->head == s->len) {
+			free(s); s = 0;
+			while (!pg->eof && pg->bal < pg->ub) {
+				if ((t = pg_read_block(pg))->len == 0) { pg->eof = 1; }
+				pg->bal++;
+				pt_enq(pg->pt->c->in, pg->pt->c->tid, t);
+			}
+			while ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) != PT_EMPTY) {
+				pg->bal--;
+				kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
+			}
+			if (pg->hq.n < 2 || pg->hq.a[1].u64[0] != pg->ocnt) { sched_yield(); continue; }
+			pg->ocnt++;
+			if ((pg->s = s = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1])->len == 0) {
+				free(s); pg->eof = 2; return len-rem;
+			}
+		}
+		uint64_t adv = MIN2(rem, s->len-s->head);
+		memcpy(&dst[len-rem], s->buf + s->head, adv);
+		rem -= adv; s->head += adv;
+	}
+	return len;
+}
+
+static uint64_t pgwrite(pg_t *pg, void *src, uint64_t len)
+{
+	uint64_t rem = len;
+	pg_block_t *s = pg->s, *t;
+	while (rem > 0) {
+		if (!s || s->head == s->len) {
+			while (pg->bal > pg->lb) {
+				if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
+					if (pg->bal >= pg->ub) { sched_yield(); continue; } else break;
+				}
+				pg->bal--;
+				kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
+			}
+			while (pg->hq.n > 1 && pg->hq.a[1].u64[0] == pg->ocnt) {
+				pg->ocnt++;
+				t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
+				pg_write_block(pg, t);
+			}
+			if (s) {
+				pg->bal++;
+				pt_enq(pg->pt->c->in, pg->pt->c->tid, s);
+			}
+			s = malloc(sizeof(pg_block_t) + pg->block_size);
+			s->head = 0; s->len = pg->block_size; s->id = pg->icnt++; s->raw = 1; s->flush = 1;
+		}
+		uint64_t adv = MIN2(rem, s->len-s->head);
+		memcpy(s->buf + s->head, &src[len-rem], adv);
+		rem -= adv; s->head += adv;
+	}
+	pg->s = s;
+	return len;
+}
+
 /* end of queue.c */
 
 /* bamlite.c in bwa */
@@ -1209,24 +1395,27 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 
 #define MM_IDX_MAGIC "MAI\5"		/* minialign index version 5, differs from minimap index signature */
 
-static void mm_idx_dump(gzFile fp, const mm_idx_t *mi)
+static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t n_threads)
 {
 	uint32_t x[3];
 	uint64_t size = 0, y[2];
 	set_info(0, "[mm_idx_dump] dump index to file");
+
 	for (uint64_t i = (size = 0); i < mi->size.n; ++i) size += mi->size.a[i];
 	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
-	gzwrite(fp, MM_IDX_MAGIC, sizeof(char) * 4);
-	gzwrite(fp, x, sizeof(uint32_t) * 3);
-	gzwrite(fp, y, sizeof(uint64_t) * 2);
+
+	pg_t *pg = pg_init(fp, n_threads);
+	pgwrite(pg, MM_IDX_MAGIC, sizeof(char) * 4);
+	pgwrite(pg, x, sizeof(uint32_t) * 3);
+	pgwrite(pg, y, sizeof(uint64_t) * 2);
 	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
 		mm_idx_bucket_t *b = &mi->B[i];
-		gzwrite(fp, &b->n, sizeof(uint32_t) * 1);
-		gzwrite(fp, b->p, sizeof(uint64_t) * b->n);
-		kh_dump(fp, (kh_t*)b->h);
+		pgwrite(pg, &b->n, sizeof(uint32_t) * 1);
+		pgwrite(pg, b->p, sizeof(uint64_t) * b->n);
+		kh_dump((kh_t*)b->h, pg, (khwrite_t)pgwrite);
 	}
 	for (uint64_t i = 0; i < mi->base.n; ++i)
-		gzwrite(fp, mi->base.a[i], sizeof(char) * mi->size.a[i]);
+		pgwrite(pg, mi->base.a[i], sizeof(char) * mi->size.a[i]);
 	for (uint64_t i = 0, j = 0, s = 0; i < mi->s.n; ++i) {
 		if ((uintptr_t)mi->s.a[i].seq < (uintptr_t)mi->base.a[j]
 		|| (uintptr_t)mi->s.a[i].seq >= (uintptr_t)mi->base.a[j] + (ptrdiff_t)mi->size.a[j]) {
@@ -1235,35 +1424,37 @@ static void mm_idx_dump(gzFile fp, const mm_idx_t *mi)
 		mi->s.a[i].name -= (ptrdiff_t)mi->base.a[j], mi->s.a[i].seq -= (ptrdiff_t)mi->base.a[j];
 		mi->s.a[i].name += (ptrdiff_t)s, mi->s.a[i].seq += (ptrdiff_t)s;
 	}
-	gzwrite(fp, mi->s.a, sizeof(mm_idx_seq_t) * mi->s.n);
+	pgwrite(pg, mi->s.a, sizeof(mm_idx_seq_t) * mi->s.n);
 	// restore pointers
 	for (uint64_t i = 0, j = 0, s = 0; i < mi->s.n; ++i) {
 		mi->s.a[i].name -= (ptrdiff_t)s, mi->s.a[i].seq -= (ptrdiff_t)s;
 		mi->s.a[i].name += (ptrdiff_t)mi->base.a[j], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[j];
 		if ((uintptr_t)mi->s.a[i].name > s + mi->size.a[j]) s += mi->size.a[j++];
 	}
+	pg_destroy(pg);
 	return;
 }
 
-static mm_idx_t *mm_idx_load(gzFile fp)
+static mm_idx_t *mm_idx_load(FILE *fp, uint32_t n_threads)
 {
 	char magic[4];
 	uint32_t x[3];
 	uint64_t bsize, y[2];
-
 	mm_idx_t *mi;
 	set_info(0, "[mm_idx_load] load index from file");
-	if (gzread(fp, magic, sizeof(char) * 4) != sizeof(char) * 4) return 0;
+
+	pg_t *pg = pg_init(fp, n_threads);
+	if (pgread(pg, magic, sizeof(char) * 4) != sizeof(char) * 4) return 0;
 	if (strncmp(magic, MM_IDX_MAGIC, 4) != 0) return 0;
-	if (gzread(fp, x, sizeof(uint32_t) * 3) != sizeof(uint32_t) * 3) return 0;
-	if (gzread(fp, y, sizeof(uint64_t) * 2) != sizeof(uint64_t) * 2) return 0;
+	if (pgread(pg, x, sizeof(uint32_t) * 3) != sizeof(uint32_t) * 3) return 0;
+	if (pgread(pg, y, sizeof(uint64_t) * 2) != sizeof(uint64_t) * 2) return 0;
 	mi = mm_idx_init(x[0], x[1], x[2]); mi->s.n = y[0]; bsize = y[1];
 	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
 		mm_idx_bucket_t *b = &mi->B[i];
-		if (gzread(fp, &b->n, sizeof(uint32_t) * 1) != sizeof(uint32_t) * 1) goto _mm_idx_load_fail;
+		if (pgread(pg, &b->n, sizeof(uint32_t) * 1) != sizeof(uint32_t) * 1) goto _mm_idx_load_fail;
 		b->p = (uint64_t*)malloc(b->n * sizeof(uint64_t));
-		if (gzread(fp, b->p, sizeof(uint64_t) * b->n) != sizeof(uint64_t) * (size_t)b->n) goto _mm_idx_load_fail;
-		b->h = kh_load(fp);
+		if (pgread(pg, b->p, sizeof(uint64_t) * b->n) != sizeof(uint64_t) * (size_t)b->n) goto _mm_idx_load_fail;
+		b->h = kh_load(pg, (khread_t)pgread);
 	}
 	mi->base.n = mi->size.n = 1;
 	mi->base.a = malloc(sizeof(void*) * mi->base.n);
@@ -1274,14 +1465,16 @@ static mm_idx_t *mm_idx_load(gzFile fp)
 	const uint64_t chunk_size = 1024 * 1024 * 1024;	// 1G to fit in signed int
 	for (uint64_t b = 0; b < mi->size.a[0]; b += chunk_size) {
 		uint64_t size = MIN2(chunk_size, mi->size.a[0] - b);
-		if (gzread(fp, mi->base.a[0] + b, sizeof(char) * size) != sizeof(char) * size) goto _mm_idx_load_fail;
+		if (pgread(pg, mi->base.a[0] + b, sizeof(char) * size) != sizeof(char) * size) goto _mm_idx_load_fail;
 	}
 	mi->s.a = malloc(sizeof(mm_idx_seq_t) * mi->s.n);
-	if (gzread(fp, mi->s.a, sizeof(mm_idx_seq_t) * mi->s.n) != sizeof(mm_idx_seq_t) * mi->s.n) goto _mm_idx_load_fail;
+	if (pgread(pg, mi->s.a, sizeof(mm_idx_seq_t) * mi->s.n) != sizeof(mm_idx_seq_t) * mi->s.n) goto _mm_idx_load_fail;
 	for (uint64_t i = 0; i < mi->s.n; ++i) mi->s.a[i].name += (ptrdiff_t)mi->base.a[0], mi->s.a[i].seq += (ptrdiff_t)mi->base.a[0];
 	mi->base_rid = mi->s.a[0].rid;
+	pg_destroy(pg);
 	return mi;
 _mm_idx_load_fail:
+	pg_destroy(pg);
 	mm_idx_destroy(mi);
 	return 0;
 }
@@ -2202,7 +2395,7 @@ int main(int argc, char *argv[])
 	const char *fnr = 0, *fnw = 0;
 	bseq_file_t *fp = 0;
 	ptr_v v = {0};
-	gzFile fpr = 0, fpw = 0;
+	FILE *fpr = 0, *fpw = 0;
 
 	enable_info(0);
 	set_info(0, "[main] parsing arguments");
@@ -2224,13 +2417,13 @@ int main(int argc, char *argv[])
 	}
 
 	set_info(0, "[main] open index file");
-	if (fnr) fpr = gzopen(fnr, "rb");
-	if (fnw) fpw = gzopen(fnw, "wb1");
+	if (fnr) fpr = fopen(fnr, "rb");
+	if (fnw) fpw = fopen(fnw, "wb1");
 	for (uint64_t i = 0; i < (fpr? 0x7fffffff : (((opt->flag&MM_AVA) || fpw)? v.n : 1)); ++i) {
 		uint32_t qid = base_qid;
 		mm_idx_t *mi = 0;
 		mm_align_t *aln = 0;
-		if (fpr) mi = mm_idx_load(fpr);
+		if (fpr) mi = mm_idx_load(fpr, opt->n_threads);
 		else mi = mm_idx_gen(opt, (fp = bseq_open((const char *)v.a[i], base_rid, 0, 0, NULL))), base_rid = bseq_close(fp);
 		if (mi == 0) {
 			if (fpr && i > 0) break;
@@ -2241,7 +2434,7 @@ int main(int argc, char *argv[])
 		}
 		if (mm_verbose >= 3) fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %lu target sequence(s)\n", __func__,
 			realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->s.n);
-		if (fpw) mm_idx_dump(fpw, mi);
+		if (fpw) mm_idx_dump(fpw, mi, opt->n_threads);
 		else aln = mm_align_init(opt, mi);
 		for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < (fpw? 0 : v.n); ++j)
 			mm_align_file(aln, (fp = bseq_open((const char*)v.a[j], qid, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n, opt->tags.a))), qid = bseq_close(fp);
@@ -2255,8 +2448,8 @@ int main(int argc, char *argv[])
 	ret = 0;
 _final:
 	free(v.a); mm_mapopt_destroy(opt);
-	if (fpr) gzclose(fpr);
-	if (fpw) gzclose(fpw);
+	if (fpr) fclose(fpr);
+	if (fpw) fclose(fpw);
 	return ret;
 }
 
