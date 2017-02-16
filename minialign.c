@@ -299,9 +299,9 @@ uint64_t pt_enq(pt_q_t *q, uint64_t tid, void *elem)
 {
 	uint64_t z, ret = (int64_t)-1;
 	do { z = 0xffffffff; } while (!cas(&q->lock, &z, tid));
-	uint64_t head = q->head, tail = q->tail, mask = q->size - 1;
-	if (((head + 1) & mask) != tail) {
-		q->elems[head] = elem; q->head = (head + 1) & mask; ret = 0;
+	uint64_t head = q->head, tail = q->tail, size = q->size;
+	if (((head + 1) % size) != tail) {
+		q->elems[head] = elem; q->head = (head + 1) % size; ret = 0;
 	}
 	do { z = tid; } while (!cas(&q->lock, &z, 0xffffffff));
 	return ret;
@@ -312,9 +312,9 @@ void *pt_deq(pt_q_t *q, uint64_t tid)
 	void *elem = PT_EMPTY;
 	uint64_t z;
 	do { z = 0xffffffff; } while (!cas(&q->lock, &z, tid));
-	uint64_t head = q->head, tail = q->tail, mask = q->size - 1;
+	uint64_t head = q->head, tail = q->tail, size = q->size;
 	if (head != tail) {
-		elem = q->elems[tail]; q->tail = (tail + 1) & mask;
+		elem = q->elems[tail]; q->tail = (tail + 1) % size;
 	}
 	do { z = tid; } while (!cas(&q->lock, &z, 0xffffffff));
 	return elem;
