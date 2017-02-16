@@ -1,3 +1,8 @@
+
+/* make sure posix apis are properly activated */
+#define _POSIX_C_SOURCE		200112L
+#define _DARWIN_C_SOURCE	_DARWIN_C_FULL
+
 #include <assert.h>
 #include <getopt.h>
 #include <inttypes.h>
@@ -55,13 +60,13 @@ mm_info_t info[MAX_THREADS] __attribute__(( aligned(64) ));
 #define set_info(t, x)		{ info[t].msg = (const char *)(x); }
 static void oom_abort(const char *name)
 {
-	#if 1
-	fprintf(stderr, "[M::%s] ERROR: Out of memory.\n", name);
+	struct rusage r;
+	getrusage(RUSAGE_SELF, &r);
+	fprintf(stderr, "[M::%s] ERROR: Out of memory. (maxrss: %ld MB)\n", name, r.ru_maxrss);
 	for (uint64_t i = 0; i < MAX_THREADS; ++i) {
 		if (info[i].enabled)
 			fprintf(stderr, "[M::%s]  thread %" PRIu64 ": %s\n", name, i, info[i].msg? info[i].msg : "No information available.");
 	}
-	#endif
 	exit(128);	// 128 reserved for out of memory
 }
 
@@ -429,7 +434,7 @@ static pg_block_t *pg_deflate(pg_block_t *in, uint64_t block_size)
 		.next_in = in->buf, .avail_in = in->len,
 		.next_out = out->buf, .avail_out = buf_size
 	};
-	deflateInit2(&zs, 8, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY);
+	deflateInit2(&zs, 4, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY);
 	deflate(&zs, Z_FINISH);
 	deflateEnd(&zs);
 	out->head = 0; out->len = buf_size - zs.avail_out;
@@ -460,14 +465,18 @@ static void *pg_worker(uint32_t tid, void *arg, void *item)
 	pg_t *pg = (pg_t*)arg;
 	pg_block_t *s = (pg_block_t*)item;
 	if (s == NULL || s->len == 0) return s;
+
+	char buf[128], *p = buf;
+	p += _pstr(p, "[pg_worker] bucket id: "); p += _pnum(uint32_t, p, s->id);
+	set_info(tid, buf);
 	return (s->raw? pg_deflate : pg_inflate)(s, pg->block_size);
 }
 
 static pg_block_t *pg_read_block(pg_t *pg)
 {
 	pg_block_t *s = malloc(sizeof(pg_block_t) + pg->block_size);
+	if (fread(&s->len, sizeof(uint64_t), 1, pg->fp) != 1 || s->len == 0) { goto _fail; }
 	s->head = 0; s->id = pg->icnt++; s->raw = 0; s->flush = 0;
-	if (fread(&s->len, sizeof(uint64_t), 1, pg->fp) != 1) { goto _fail; }
 	if (fread(s->buf, sizeof(uint8_t), s->len, pg->fp) != s->len) { goto _fail; }
 	return s;
 _fail:
@@ -532,7 +541,7 @@ static uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 		while (!s || s->head == s->len) {
 			free(s); s = 0;
 			while (!pg->eof && pg->bal < pg->ub) {
-				if ((t = pg_read_block(pg))->len == 0) { pg->eof = 1; }
+				if ((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
 				pg->bal++;
 				pt_enq(pg->pt->c->in, pg->pt->c->tid, t);
 			}
@@ -540,14 +549,13 @@ static uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 				pg->bal--;
 				kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
 			}
-			if (pg->hq.n < 2 || pg->hq.a[1].u64[0] != pg->ocnt) { sched_yield(); continue; }
+			if (pg->ocnt >= pg->icnt) { pg->eof = 2; return len-rem; }
+			if (pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) { sched_yield(); continue; }
 			pg->ocnt++;
-			if ((pg->s = s = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1])->len == 0) {
-				free(s); pg->eof = 2; return len-rem;
-			}
+			pg->s = s = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
 		}
 		uint64_t adv = MIN2(rem, s->len-s->head);
-		memcpy(&dst[len-rem], s->buf + s->head, adv);
+		memcpy(dst + len - rem, s->buf + s->head, adv);
 		rem -= adv; s->head += adv;
 	}
 	return len;
@@ -566,7 +574,7 @@ static uint64_t pgwrite(pg_t *pg, void *src, uint64_t len)
 				pg->bal--;
 				kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
 			}
-			while (pg->hq.n > 1 && pg->hq.a[1].u64[0] == pg->ocnt) {
+			while (pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
 				pg->ocnt++;
 				t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
 				pg_write_block(pg, t);
@@ -579,7 +587,7 @@ static uint64_t pgwrite(pg_t *pg, void *src, uint64_t len)
 			s->head = 0; s->len = pg->block_size; s->id = pg->icnt++; s->raw = 1; s->flush = 1;
 		}
 		uint64_t adv = MIN2(rem, s->len-s->head);
-		memcpy(s->buf + s->head, &src[len-rem], adv);
+		memcpy(s->buf + s->head, src + len - rem, adv);
 		rem -= adv; s->head += adv;
 	}
 	pg->s = s;
@@ -1399,7 +1407,7 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t n_threads)
 {
 	uint32_t x[3];
 	uint64_t size = 0, y[2];
-	set_info(0, "[mm_idx_dump] dump index to file");
+	set_info(0, "[mm_idx_dump] dump index to file (main thread)");
 
 	for (uint64_t i = (size = 0); i < mi->size.n; ++i) size += mi->size.a[i];
 	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
@@ -1441,7 +1449,7 @@ static mm_idx_t *mm_idx_load(FILE *fp, uint32_t n_threads)
 	uint32_t x[3];
 	uint64_t bsize, y[2];
 	mm_idx_t *mi;
-	set_info(0, "[mm_idx_load] load index from file");
+	set_info(0, "[mm_idx_load] load index from file (main thread)");
 
 	pg_t *pg = pg_init(fp, n_threads);
 	if (pgread(pg, magic, sizeof(char) * 4) != sizeof(char) * 4) return 0;

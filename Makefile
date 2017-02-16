@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99 -D_POSIX_C_SOURCE=200112L
+CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99
 LIBS = -lm -lz -lpthread
 SRCS = minialign.c gaba_wrap.c
 PREFIX = /usr/local
