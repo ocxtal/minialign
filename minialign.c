@@ -164,12 +164,10 @@ static kh_t *kh_init(uint64_t size)
 {
 	kh_t *h = calloc(1, sizeof(kh_t));
 	// roundup
-	size |= size>>1; size |= size>>2; size |= size>>4;
-	size |= size>>8; size |= size>>16; size |= size>>32;
-
-	h->mask = KH_SIZE - 1; h->max = KH_SIZE; h->cnt = 0; h->ub = KH_SIZE * KH_THRESH;
-	h->a = malloc(sizeof(mm128_t) * KH_SIZE);
-	for (uint64_t i = 0; i < KH_SIZE; ++i) h->a[i].u64[0] = (int64_t)-2, h->a[i].u64[1] = 0;
+	size = 0x8000000000000000>>(lzcnt(size - 1) - 1);
+	h->mask = size - 1; h->max = size; h->cnt = 0; h->ub = size * KH_THRESH;
+	h->a = malloc(sizeof(mm128_t) * size);
+	for (uint64_t i = 0; i < size; ++i) h->a[i].u64[0] = (int64_t)-2, h->a[i].u64[1] = 0;
 	return h;
 }
 
@@ -273,7 +271,6 @@ static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 /* end of hash.c */
 
 /* queue.c */
-// #define cas(ptr, cmp, val) __atomic_compare_exchange_n(ptr, cmp, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
 typedef void *(*pt_source_t)(uint32_t tid, void *arg);
 typedef void *(*pt_worker_t)(uint32_t tid, void *arg, void *item);
 typedef void (*pt_drain_t)(uint32_t tid, void *arg, void *item);
