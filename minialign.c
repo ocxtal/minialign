@@ -893,7 +893,7 @@ static int bseq_eof(bseq_file_t *fp)
 /* end of bseq.c */
 
 /* sketch.c */
-
+#if 0
 static inline uint64_t hash64(uint64_t key, uint64_t mask)
 {
 	key = (~key + (key << 21)) & mask; // key = (key << 21) - key - 1;
@@ -905,6 +905,9 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 	key = (key + (key << 31)) & mask;
 	return key;
 }
+#else
+#define hash64(k0, k1, mask)		( (_mm_crc32_u64(0x741B8CD7, (k0)) ^ (k1)) & (mask) )
+#endif
 
 /**
  * Find symmetric (w,k)-minimizers on a DNA sequence
@@ -998,7 +1001,7 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 			uint64_t c, h;
 			if ((c = seq4[++i]) == 0) goto _loop_tail;
 			_push_kmer(c); if (k0 == k1) continue;
-			buf[l&0x0f] = (mm128_t){ .u64 = { h = hash64(k0 < k1? k0 : k1, mask), (k0 < k1? 0 : 0xffffffff) ^ i } };
+			buf[l&0x0f] = (mm128_t){ .u64 = { h = hash64(k0 < k1? k0 : k1, k0 < k1 ? k1 : k0, mask), (k0 < k1? 0 : 0xffffffff) ^ i } };
 			if (h <= min) min = h, min_pos = l & 0x0f;
 			l++;
 		}
@@ -1008,7 +1011,7 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 			uint64_t c, h;
 			if ((c = seq4[++i]) == 0) goto _loop_tail;
 			_push_kmer(c); if (k0 == k1) continue;
-			buf[l&0x0f] = (mm128_t){ .u64 = { h = hash64(k0 < k1? k0 : k1, mask), (k0 < k1? 0 : 0xffffffff) ^ i } };
+			buf[l&0x0f] = (mm128_t){ .u64 = { h = hash64(k0 < k1? k0 : k1, k0 < k1 ? k1 : k0, mask), (k0 < k1? 0 : 0xffffffff) ^ i } };
 
 			if (h <= min) {
 				*q++ = buf[min_pos], min = h, min_pos = l&0x0f;
