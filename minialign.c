@@ -1333,7 +1333,7 @@ static void *mm_idx_post(uint32_t tid, void *arg, void *item)
 				b->n += (n > 1)? n : 0; ++n_keys; n = 0;
 			}
 		}
-		kh_t *h = kh_init(n_keys);
+		kh_t *h = kh_init(n_keys / KH_THRESH);
 		b->p = (uint64_t*)malloc(sizeof(uint64_t) * b->n);
 
 		// create the hash table
