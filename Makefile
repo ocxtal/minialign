@@ -7,7 +7,7 @@ PREFIX = /usr/local
 all: minialign
 
 minialign: $(SRCS) gaba_linear.o gaba_affine.o
-	$(CC) -o minialign $(CFLAGS) $(CFLAGS_MALLOC) $^ $(LIBS)
+	$(CC) -o minialign $(CFLAGS) $^ $(LIBS)
 
 gaba_linear.o: gaba.c gaba.h unittest.h sassert.h
 	$(CC) -c -o gaba_linear.o $(CFLAGS) -DMODEL=LINEAR -DSUFFIX gaba.c
