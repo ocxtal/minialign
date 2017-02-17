@@ -327,14 +327,15 @@ void *pt_deq(pt_q_t *q, uint64_t tid)
 static void *pt_dispatch(void *s)
 {
 	pt_thread_t *c = (pt_thread_t *)s;
+	struct timespec tv = { .tv_nsec = 512 * 1024 };
 	void *ping = PT_EMPTY, *pong = PT_EMPTY;
 	while (1) {
 		ping = pt_deq(c->in, c->tid);
-		if (ping == PT_EMPTY && pong == PT_EMPTY) sched_yield();
+		if (ping == PT_EMPTY && pong == PT_EMPTY) { nanosleep(&tv, NULL); }
 		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, pong));
 		if (ping == PT_EXIT) break;
 		pong = pt_deq(c->in, c->tid);
-		if (ping == PT_EMPTY && pong == PT_EMPTY) sched_yield();
+		if (ping == PT_EMPTY && pong == PT_EMPTY) { nanosleep(&tv, NULL); }
 		if (ping != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, ping));
 		if (pong == PT_EXIT) break;
 	}
