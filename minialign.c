@@ -434,7 +434,7 @@ static pg_block_t *pg_deflate(pg_block_t *in, uint64_t block_size)
 		.next_in = in->buf, .avail_in = in->len,
 		.next_out = out->buf, .avail_out = buf_size
 	};
-	deflateInit2(&zs, 4, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY);
+	deflateInit2(&zs, 1, Z_DEFLATED, 15, 8, Z_DEFAULT_STRATEGY);
 	deflate(&zs, Z_FINISH);
 	deflateEnd(&zs);
 	out->head = 0; out->len = buf_size - zs.avail_out;
