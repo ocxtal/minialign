@@ -164,7 +164,7 @@ static kh_t *kh_init(uint64_t size)
 {
 	kh_t *h = calloc(1, sizeof(kh_t));
 	// roundup
-	size = 0x8000000000000000>>(lzcnt(size - 1) - 1);
+	size = size < KH_SIZE? KH_SIZE : (0x8000000000000000>>(lzcnt(size - 1) - 1));
 	h->mask = size - 1; h->max = size; h->cnt = 0; h->ub = size * KH_THRESH;
 	h->a = malloc(sizeof(mm128_t) * size);
 	for (uint64_t i = 0; i < size; ++i) h->a[i].u64[0] = (int64_t)-2, h->a[i].u64[1] = 0;
