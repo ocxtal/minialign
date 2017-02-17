@@ -2426,7 +2426,7 @@ int main(int argc, char *argv[])
 
 	set_info(0, "[main] open index file");
 	if (fnr) fpr = fopen(fnr, "rb");
-	if (fnw) fpw = fopen(fnw, "wb1");
+	if (fnw) fpw = fopen(fnw, "wb");
 	for (uint64_t i = 0; i < (fpr? 0x7fffffff : (((opt->flag&MM_AVA) || fpw)? v.n : 1)); ++i) {
 		uint32_t qid = base_qid;
 		mm_idx_t *mi = 0;
