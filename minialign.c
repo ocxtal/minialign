@@ -21,7 +21,7 @@
 #include "sassert.h"
 
 /* global consts */
-#define MM_VERSION		"0.4.5"
+#define MM_VERSION		"0.4.6-dev"
 #define MAX_THREADS		( 64 )
 
 /* max, min */
