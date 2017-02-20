@@ -906,7 +906,7 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 	return key;
 }
 #else
-#define hash64(k0, k1, mask)		( (_mm_crc32_u64(0x741B8CD7, (k0)) ^ (k1)) & (mask) )
+#define hash64(k0, k1, mask)		( (_mm_crc32_u64((k1), (k0)) ^ (k1)) & (mask) )
 #endif
 
 /**
