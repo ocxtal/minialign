@@ -398,9 +398,9 @@ static int pt_parallel(pt_t *pt, pt_worker_t wfp, void **warg, void **src, void 
 {
 	if (pt_set_worker(pt, wfp, warg)) return -1;
 	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, src? src[i] : NULL);
-	void *res = wfp(pt->c->tid, *warg, src? src[0] : NULL); if (dst && dst[0]) dst[0] = res;
+	void *res = wfp(pt->c->tid, warg[0], src? src[0] : NULL); if (dst && dst[0]) dst[0] = res;
 	for (uint64_t i = 1; i < pt->nth; ++i) {
-		while ((res = pt_deq(pt->c->out, pt->c->tid)) == PT_EMPTY) {}
+		while ((res = pt_deq(pt->c->out, pt->c->tid)) == PT_EMPTY) sched_yield();
 		if (dst && dst[i]) dst[i] = res;
 	}
 	return 0;
@@ -1293,13 +1293,16 @@ static void mm_idx_drain(uint32_t tid, void *arg, void *item)
 	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
 
-	q->mi->s.n = MAX2(q->mi->s.n, s->seq[s->n_seq-1].rid+1-q->mi->base_rid);
+	uint64_t hidx = s->seq[0].rid-q->mi->base_rid, n_req = s->seq[s->n_seq-1].rid+1-q->mi->base_rid;
+	q->mi->s.n = MAX2(q->mi->s.n, n_req);
 	kv_reserve(mm_idx_seq_t, q->mi->s, q->mi->s.n);
+
+	const bseq_t *src = s->seq;
+	mm_idx_seq_t *dst = &q->mi->s.a[hidx];
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
-		const bseq_t *p = &s->seq[i];
-		q->mi->s.a[s->seq[i].rid-q->mi->base_rid] = (mm_idx_seq_t){
-			.l_seq = p->l_seq, .rid = p->rid, .l_name = p->l_name, .circular = q->mi->circular,
-			.name = p->name, .seq = p->seq
+		dst[i] = (mm_idx_seq_t){
+			.l_seq = src[i].l_seq, .rid = src[i].rid, .l_name = src[i].l_name, .circular = q->mi->circular,
+			.name = src[i].name, .seq = src[i].seq
 		};
 	}
 	uint64_t mask = q->mi->mask;
@@ -1333,25 +1336,23 @@ static void *mm_idx_post(uint32_t tid, void *arg, void *item)
 		// count and preallocate
 		uint64_t n_keys = 0; b->n = 0;
 		for (uint64_t j = 1, n = 1; j <= b->a.n; ++j, ++n) {
-			if (j == b->a.n || b->a.a[j].u64[0] != b->a.a[j-1].u64[0]) {
-				b->n += (n > 1)? n : 0; ++n_keys; n = 0;
-			}
+			if (j != b->a.n && b->a.a[j].u64[0] == b->a.a[j-1].u64[0]) continue;
+			b->n += (n > 1)? n : 0; ++n_keys; n = 0;
 		}
 		kh_t *h = kh_init(n_keys / KH_THRESH);
 		b->p = (uint64_t*)malloc(sizeof(uint64_t) * b->n);
 
 		// create the hash table
 		for (uint64_t j = 1, n = 1, sp = 0; j <= b->a.n; ++j, ++n) {
-			if (j == b->a.n || b->a.a[j].u64[0] != b->a.a[j-1].u64[0]) {
-				mm128_t *p = &b->a.a[j-n];
-				uint64_t key = p->u64[0]>>mi->b, val = p->u64[1];
-				if (n != 1) {
-					b->p[sp] = val;	// k = 0
-					for (uint64_t k = 1; k < n; ++k) b->p[sp+k] = b->a.a[j-n+k].u64[1];
-					val = sp<<32 | n | 0x01ULL<<63;
-				}
-				kh_put(h, key, val); n = 0;
+			if (j != b->a.n && b->a.a[j].u64[0] == b->a.a[j-1].u64[0]) continue;
+
+			mm128_t *p = &b->a.a[j-n];
+			uint64_t key = p->u64[0]>>mi->b, val = p->u64[1];
+			if (n != 1) {
+				b->p[sp++] = val; val = (sp-1)<<32 | n | 0x01ULL<<63;	// k = 0
+				while (n > 1) b->p[sp++] = b->a.a[j - --n].u64[1];
 			}
+			kh_put(h, key, val); n = 0;
 		}
 		b->h = h;
 
@@ -1666,7 +1667,7 @@ static const gaba_alignment_t *mm_extend(
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
 		key |= p.apos - (p.bpos>>1);
-		if ((pval = kh_get_ptr(pos, key)) != NULL) { return 0; }	// already evaluated
+		if ((pval = kh_get_ptr(pos, key)) != NULL) return 0;	// already evaluated
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
 		if ((m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1)) == NULL) goto _abort;
