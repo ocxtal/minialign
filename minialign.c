@@ -286,8 +286,8 @@ typedef struct pt_thread_s {
 	pthread_t th;
 	uint64_t tid;
 	pt_q_t *in, *out;
-	pt_worker_t wfp;
-	void *warg;
+	volatile pt_worker_t wfp;
+	volatile void *warg;
 } pt_thread_t;
 
 typedef struct pt_s {
@@ -332,11 +332,11 @@ static void *pt_dispatch(void *s)
 	while (1) {
 		ping = pt_deq(c->in, c->tid);
 		if (ping == PT_EMPTY && pong == PT_EMPTY) { nanosleep(&tv, NULL); }
-		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, pong));
+		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, (void*)c->warg, pong));
 		if (ping == PT_EXIT) break;
 		pong = pt_deq(c->in, c->tid);
 		if (ping == PT_EMPTY && pong == PT_EMPTY) { nanosleep(&tv, NULL); }
-		if (ping != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, ping));
+		if (ping != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, (void*)c->warg, ping));
 		if (pong == PT_EXIT) break;
 	}
 	return NULL;
@@ -373,6 +373,7 @@ static int pt_set_worker(pt_t *pt, pt_worker_t wfp, void **warg)
 	void *item;
 	if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) { pt_enq(pt->c->in, pt->c->tid, item); return -1; }
 	for (uint64_t i = 0; i < pt->nth; ++i) pt->c[i].wfp = wfp, pt->c[i].warg = warg[i];
+	fence();
 	return 0;
 }
 
@@ -538,6 +539,9 @@ static uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 	while (rem > 0) {
 		while (!s || s->head == s->len) {
 			free(s); s = 0;
+			if (pg->nth == 1) {
+				pg->s = s = pg_inflate(pg_read_block(pg), pg->block_size); break;
+			}
 			while (!pg->eof && pg->bal < pg->ub) {
 				if ((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
 				pg->bal++;
@@ -565,6 +569,12 @@ static uint64_t pgwrite(pg_t *pg, void *src, uint64_t len)
 	pg_block_t *s = pg->s, *t;
 	while (rem > 0) {
 		if (!s || s->head == s->len) {
+			if (pg->nth == 1) {
+				if (s) pg_write_block(pg, pg_deflate(s, pg->block_size));
+				s = malloc(sizeof(pg_block_t) + pg->block_size);
+				s->head = 0; s->len = pg->block_size; s->id = pg->icnt++; s->raw = 1; s->flush = 1;
+				break;
+			}
 			while (pg->bal > pg->lb) {
 				if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
 					if (pg->bal >= pg->ub) { sched_yield(); continue; } else break;
