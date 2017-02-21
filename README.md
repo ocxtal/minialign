@@ -3,6 +3,10 @@
 
 Minialign is a little bit fast and moderately accurate nucleotide sequence alignment tool designed for PacBio and Nanopore long reads. It is built on three key algorithms, minimizer-based index of the [minimap](https://github.com/lh3/minimap) overlapper, array-based seed chaining, and SIMD-parallel Smith-Waterman-Gotoh extension.
 
+## Announcements
+
+* **2016/2/21** A severe bug was found in the release 0.4.5. Please update to the latest (0.4.6), or rewind to the old ones (0.4.4 or below) if your binary shows `0.4.5` when invoked by `minialign -v`.
+
 ## Getting started
 
 C99 compiler (gcc / clang / icc) is required to build the program.
@@ -191,6 +195,7 @@ $ minialign -X -l index.mai read1.fa read2.fa ... readN.fa > out.sam	# map read[
 
 ## Updates
 
+* 2016/2/21 (0.4.6) Fix bugs in the indexing routines and the hashmap. Index file format is modified (now compressed by deflate).
 * 2016/2/9 (0.4.5) Add support for BLAST6 / BLASR1 / BLASR4 / PAF formats. Change the default output format to PAF in the all-versus-all mode. Add support for NH, IH, XS, and NM tags in the sam format. Replaced internal implementations (hashmap and queue) to eliminate overheads.
 * 2016/1/25 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags), change -xpacbio scoring params to -a1 -b2 -p2 -q1 (performed better on recent PacBio reads).
 * 2016/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.
