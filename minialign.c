@@ -21,7 +21,7 @@
 #include "sassert.h"
 
 /* global consts */
-#define MM_VERSION		"0.4.6-dev"
+#define MM_VERSION		"0.4.6"
 #define MAX_THREADS		( 64 )
 
 /* max, min */
@@ -1410,7 +1410,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
  * index I/O *
  *************/
 
-#define MM_IDX_MAGIC "MAI\5"		/* minialign index version 5, differs from minimap index signature */
+#define MM_IDX_MAGIC "MAI\6"		/* minialign index version 6, differs from minimap index signature */
 
 static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t n_threads)
 {
