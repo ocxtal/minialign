@@ -512,7 +512,8 @@ static void pg_destroy(pg_t *pg)
 	pg_block_t *s = pg->s, *t;
 	if (s && s->flush == 1 && s->head != 0) {
 		s->len = s->head;
-		pt_enq(pg->pt->c->in, pg->pt->c->tid, s); pg->bal++;
+		if (pg->nth == 1) { pg_write_block(pg, pg_deflate(s, pg->block_size)); }
+		else { pt_enq(pg->pt->c->in, pg->pt->c->tid, s); pg->bal++; }
 	} else free(s);
 	while (pg->bal > 0) {
 		if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) { sched_yield(); continue; }
@@ -540,21 +541,23 @@ static uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 		while (!s || s->head == s->len) {
 			free(s); s = 0;
 			if (pg->nth == 1) {
-				pg->s = s = pg_inflate(pg_read_block(pg), pg->block_size); break;
+				if ((t = pg_read_block(pg)) == NULL) { pg->eof = 2; return len-rem; }
+				pg->s = s = pg_inflate(t, pg->block_size);
+			} else {
+				while (!pg->eof && pg->bal < pg->ub) {
+					if ((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
+					pg->bal++;
+					pt_enq(pg->pt->c->in, pg->pt->c->tid, t);
+				}
+				while ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) != PT_EMPTY) {
+					pg->bal--;
+					kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
+				}
+				if (pg->ocnt >= pg->icnt) { pg->eof = 2; return len-rem; }
+				if (pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) { sched_yield(); continue; }
+				pg->ocnt++;
+				pg->s = s = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
 			}
-			while (!pg->eof && pg->bal < pg->ub) {
-				if ((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
-				pg->bal++;
-				pt_enq(pg->pt->c->in, pg->pt->c->tid, t);
-			}
-			while ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) != PT_EMPTY) {
-				pg->bal--;
-				kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
-			}
-			if (pg->ocnt >= pg->icnt) { pg->eof = 2; return len-rem; }
-			if (pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) { sched_yield(); continue; }
-			pg->ocnt++;
-			pg->s = s = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
 		}
 		uint64_t adv = MIN2(rem, s->len-s->head);
 		memcpy(dst + len - rem, s->buf + s->head, adv);
@@ -571,25 +574,23 @@ static uint64_t pgwrite(pg_t *pg, void *src, uint64_t len)
 		if (!s || s->head == s->len) {
 			if (pg->nth == 1) {
 				if (s) pg_write_block(pg, pg_deflate(s, pg->block_size));
-				s = malloc(sizeof(pg_block_t) + pg->block_size);
-				s->head = 0; s->len = pg->block_size; s->id = pg->icnt++; s->raw = 1; s->flush = 1;
-				break;
-			}
-			while (pg->bal > pg->lb) {
-				if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
-					if (pg->bal >= pg->ub) { sched_yield(); continue; } else break;
+			} else {
+				while (pg->bal > pg->lb) {
+					if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
+						if (pg->bal >= pg->ub) { sched_yield(); continue; } else break;
+					}
+					pg->bal--;
+					kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
 				}
-				pg->bal--;
-				kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
-			}
-			while (pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
-				pg->ocnt++;
-				t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
-				pg_write_block(pg, t);
-			}
-			if (s) {
-				pg->bal++;
-				pt_enq(pg->pt->c->in, pg->pt->c->tid, s);
+				while (pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
+					pg->ocnt++;
+					t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
+					pg_write_block(pg, t);
+				}
+				if (s) {
+					pg->bal++;
+					pt_enq(pg->pt->c->in, pg->pt->c->tid, s);
+				}
 			}
 			s = malloc(sizeof(pg_block_t) + pg->block_size);
 			s->head = 0; s->len = pg->block_size; s->id = pg->icnt++; s->raw = 1; s->flush = 1;
