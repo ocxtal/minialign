@@ -21,7 +21,7 @@
 #include "sassert.h"
 
 /* global consts */
-#define MM_VERSION		"0.4.6-dev"
+#define MM_VERSION		"0.4.6"
 #define MAX_THREADS		( 64 )
 
 /* max, min */
@@ -286,8 +286,8 @@ typedef struct pt_thread_s {
 	pthread_t th;
 	uint64_t tid;
 	pt_q_t *in, *out;
-	pt_worker_t wfp;
-	void *warg;
+	volatile pt_worker_t wfp;
+	volatile void *warg;
 } pt_thread_t;
 
 typedef struct pt_s {
@@ -332,11 +332,11 @@ static void *pt_dispatch(void *s)
 	while (1) {
 		ping = pt_deq(c->in, c->tid);
 		if (ping == PT_EMPTY && pong == PT_EMPTY) { nanosleep(&tv, NULL); }
-		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, pong));
+		if (pong != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, (void*)c->warg, pong));
 		if (ping == PT_EXIT) break;
 		pong = pt_deq(c->in, c->tid);
 		if (ping == PT_EMPTY && pong == PT_EMPTY) { nanosleep(&tv, NULL); }
-		if (ping != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, c->warg, ping));
+		if (ping != PT_EMPTY) pt_enq(c->out, c->tid, c->wfp(c->tid, (void*)c->warg, ping));
 		if (pong == PT_EXIT) break;
 	}
 	return NULL;
@@ -373,6 +373,7 @@ static int pt_set_worker(pt_t *pt, pt_worker_t wfp, void **warg)
 	void *item;
 	if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) { pt_enq(pt->c->in, pt->c->tid, item); return -1; }
 	for (uint64_t i = 0; i < pt->nth; ++i) pt->c[i].wfp = wfp, pt->c[i].warg = warg[i];
+	fence();
 	return 0;
 }
 
@@ -511,7 +512,8 @@ static void pg_destroy(pg_t *pg)
 	pg_block_t *s = pg->s, *t;
 	if (s && s->flush == 1 && s->head != 0) {
 		s->len = s->head;
-		pt_enq(pg->pt->c->in, pg->pt->c->tid, s); pg->bal++;
+		if (pg->nth == 1) { pg_write_block(pg, pg_deflate(s, pg->block_size)); }
+		else { pt_enq(pg->pt->c->in, pg->pt->c->tid, s); pg->bal++; }
 	} else free(s);
 	while (pg->bal > 0) {
 		if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) { sched_yield(); continue; }
@@ -538,19 +540,24 @@ static uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 	while (rem > 0) {
 		while (!s || s->head == s->len) {
 			free(s); s = 0;
-			while (!pg->eof && pg->bal < pg->ub) {
-				if ((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
-				pg->bal++;
-				pt_enq(pg->pt->c->in, pg->pt->c->tid, t);
+			if (pg->nth == 1) {
+				if ((t = pg_read_block(pg)) == NULL) { pg->eof = 2; return len-rem; }
+				pg->s = s = pg_inflate(t, pg->block_size);
+			} else {
+				while (!pg->eof && pg->bal < pg->ub) {
+					if ((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
+					pg->bal++;
+					pt_enq(pg->pt->c->in, pg->pt->c->tid, t);
+				}
+				while ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) != PT_EMPTY) {
+					pg->bal--;
+					kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
+				}
+				if (pg->ocnt >= pg->icnt) { pg->eof = 2; return len-rem; }
+				if (pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) { sched_yield(); continue; }
+				pg->ocnt++;
+				pg->s = s = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
 			}
-			while ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) != PT_EMPTY) {
-				pg->bal--;
-				kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
-			}
-			if (pg->ocnt >= pg->icnt) { pg->eof = 2; return len-rem; }
-			if (pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) { sched_yield(); continue; }
-			pg->ocnt++;
-			pg->s = s = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
 		}
 		uint64_t adv = MIN2(rem, s->len-s->head);
 		memcpy(dst + len - rem, s->buf + s->head, adv);
@@ -565,21 +572,25 @@ static uint64_t pgwrite(pg_t *pg, void *src, uint64_t len)
 	pg_block_t *s = pg->s, *t;
 	while (rem > 0) {
 		if (!s || s->head == s->len) {
-			while (pg->bal > pg->lb) {
-				if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
-					if (pg->bal >= pg->ub) { sched_yield(); continue; } else break;
+			if (pg->nth == 1) {
+				if (s) pg_write_block(pg, pg_deflate(s, pg->block_size));
+			} else {
+				while (pg->bal > pg->lb) {
+					if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
+						if (pg->bal >= pg->ub) { sched_yield(); continue; } else break;
+					}
+					pg->bal--;
+					kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
 				}
-				pg->bal--;
-				kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
-			}
-			while (pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
-				pg->ocnt++;
-				t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
-				pg_write_block(pg, t);
-			}
-			if (s) {
-				pg->bal++;
-				pt_enq(pg->pt->c->in, pg->pt->c->tid, s);
+				while (pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
+					pg->ocnt++;
+					t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
+					pg_write_block(pg, t);
+				}
+				if (s) {
+					pg->bal++;
+					pt_enq(pg->pt->c->in, pg->pt->c->tid, s);
+				}
 			}
 			s = malloc(sizeof(pg_block_t) + pg->block_size);
 			s->head = 0; s->len = pg->block_size; s->id = pg->icnt++; s->raw = 1; s->flush = 1;
@@ -1403,7 +1414,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
  * index I/O *
  *************/
 
-#define MM_IDX_MAGIC "MAI\5"		/* minialign index version 5, differs from minimap index signature */
+#define MM_IDX_MAGIC "MAI\6"		/* minialign index version 6, differs from minimap index signature */
 
 static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t n_threads)
 {

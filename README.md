@@ -3,6 +3,11 @@
 
 Minialign is a little bit fast and moderately accurate nucleotide sequence alignment tool designed for PacBio and Nanopore long reads. It is built on three key algorithms, minimizer-based index of the [minimap](https://github.com/lh3/minimap) overlapper, array-based seed chaining, and SIMD-parallel Smith-Waterman-Gotoh extension.
 
+## Announcements
+
+* Latest: 0.4.6; stable: 0.4.4
+* A severe bug was found in the release 0.4.5. Please update to the latest (0.4.6), or rewind to the old ones (0.4.4 or below) if your binary shows `0.4.5` when invoked by `minialign -v`.
+
 ## Getting started
 
 C99 compiler (gcc / clang / icc) is required to build the program.
@@ -37,12 +42,12 @@ All the following benchmarks were took on Intel i5-6260U (Skylake, 2C4T, 2.8GHz,
 
 |                      Time (sec.)                     |  minialign  |   DALIGNER  |   BWA-MEM   |
 |:----------------------------------------------------:|:-----------:|:-----------:|:-----------:|
-| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        10.5 |        39.5 |        6272 |
-| S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        28.7 |       1134* |       10869 |
-| D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |        80.2 |           - |       31924 |
-| Human (hg38) x3 sim. (9.2Gb) to ref.                 |         654 |           - |           - |
+| E.coli (MG1655) x100 simulated read (460Mb) to ref.  |        10.0 |        39.5 |        6272 |
+| S.cerevisiae (sacCer3) x100 sim. (1.2Gb) to ref.     |        29.3 |       1134* |       10869 |
+| D.melanogaster (dm6) x20 sim. (2.75Gb) to ref.       |        82.6 |           - |       31924 |
+| Human (hg38) x3 sim. (9.2Gb) to ref.                 |         648 |           - |           - |
 
-Notes: Execution time was measured with the unix `time` command, shown in seconds. Dashes denote untested conditions. Program version information: minialign-0.4.5, DALIGNER-ca167d3 (commit on 2016/9/27), and BWA-MEM-0.7.15-r1142-dirty. All the programs were compiled with gcc/g++-5.4.0 providing the optimization flag `-O3`. PBSIM (PacBio long-read simulator), [modified version based on 1.0.3 (1.0.3-nfree)](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Simulation parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Arguments passed to the programs; minialign: `-t4 -xpacbio`, DALIGNER: `-T4`, and BWA-MEM: `-t4 -xpacbio -A1 -B2 -O2 -E1` (overriding scoring parameters based on the PacBio defaults). Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from the measurements. Peak RAM usage of minialign was around 12GB in human read-to-ref mapping with four threads. Starred sample, S.cerevisiae on DALIGNER, was splitted into five subsamples since the whole concatenated fastq resulted in an out-of-memory error. Calculation time of the subsamples were 61.6, 914.2, 56.8, 50.3, and 51.5 seconds, where the second trial behaved a bit strangely with too long calculation on one (out of four) threads.
+Notes: Execution time was measured with the unix `time` command, shown in seconds. Dashes denote untested conditions. Program version information: minialign-0.4.6, DALIGNER-ca167d3 (commit on 2016/9/27), and BWA-MEM-0.7.15-r1142-dirty. All the programs were compiled with gcc/g++-5.4.0 providing the optimization flag `-O3`. PBSIM (PacBio long-read simulator), [modified version based on 1.0.3 (1.0.3-nfree)](https://github.com/ocxtal/pbsim/tree/nfree) not to generate reads containing N's, was used to generate read sets. Simulation parameters (len-mean, len-SD, acc-mean, acc-SD) were fixed at (20k, 2k, 0.88, 0.07) in all the samples. Arguments passed to the programs; minialign: `-t4 -xpacbio`, DALIGNER: `-T4`, and BWA-MEM: `-t4 -xpacbio -A1 -B2 -O2 -E1` (overriding scoring parameters based on the PacBio defaults). Index construction (minialign and BWA-MEM) and format conversion time (DALIGNER: fasta -> DB, las -> sam) are excluded from the measurements. Peak RAM usage of minialign was around 12GB in human read-to-ref mapping with four threads. Starred sample, S.cerevisiae on DALIGNER, was splitted into five subsamples since the whole concatenated fastq resulted in an out-of-memory error. Calculation time of the subsamples were 61.6, 914.2, 56.8, 50.3, and 51.5 seconds, where the second trial behaved a bit strangely with too long calculation on one (out of four) threads.
 
 ### Recall-precision trend
 
@@ -54,12 +59,12 @@ Notes: Execution time was measured with the unix `time` command, shown in second
 
 (b). Human (hg38) x0.3 (1Gb)
 
-Notes: Recall is defined as: a proportion of reads whose originating region, represented by (spos, epos) coordinate pair on the reference, has at least one non-zero-length intersection with its alignments. Precision is defined as: a proportion of alignment records which has a non-zero-length intersection with its originating region. The recall and precision pairs were calculated from the output sam files, filtered with different mapping quality thresholds between 0 and 60. Duplicate alignments were not filtered out from the output sam files. Program version information: minialign-0.4.4, GraphMap-0.4.0, BLASR-0014a57 (the last commit with the SAM output), and BWA-MEM-0.7.15-r1142-dirty. Read set was generated by the PBSIM-1.0.3-nfree with the parameters (len-mean, len-SD, acc-mean, acc-SD) set to (10k, 10k, 0.8, 0.2) without ALT / random contigs. Reads were mapped onto the corresponding reference genomes including ALT / random contigs. Arguments passed to the programs; minialign: `-t4 -xpacbio`, GraphMap: `-t 4`, BLASR: `--nproc 4`, and BWA-MEM: `-t4 -xpacbio`. Calculation time and peak RAM usages are shown in the table below.
+Notes: Recall is defined as: a proportion of reads whose originating region, represented by (spos, epos) coordinate pair on the reference, has at least one non-zero-length intersection with its alignments. Precision is defined as: a proportion of alignment records which has a non-zero-length intersection with its originating region. The recall and precision pairs were calculated from the output sam files, filtered with different mapping quality thresholds between 0 and 60. Duplicate alignments were not filtered out from the output sam files. Program version information: minialign-0.4.6, GraphMap-0.4.0, BLASR-0014a57 (the last commit with the SAM output), and BWA-MEM-0.7.15-r1142-dirty. Read set was generated by the PBSIM-1.0.3-nfree with the parameters (len-mean, len-SD, acc-mean, acc-SD) set to (10k, 10k, 0.8, 0.2) without ALT / random contigs. Reads were mapped onto the corresponding reference genomes including ALT / random contigs. Arguments passed to the programs; minialign: `-t4 -xpacbio`, GraphMap: `-t 4`, BLASR: `--nproc 4`, and BWA-MEM: `-t4 -xpacbio`. Calculation time and peak RAM usages are shown in the table below.
 
 |     Time (sec.) / Peak RAM (GB)       |  minialign  |   GraphMap  |    BLASR    |   BWA-MEM   |
 |:-------------------------------------:|:-----------:|:-----------:|:-----------:|:-----------:|
-| D.melanogaster (dm6) x10 sim. (1.4Gb) |  60.9 / 2.2 |  6482 / 4.3 | 30081 / 1.0 | 37292 / 0.5 |
-| Human (hg38) x0.3 sim. (1Gb)          |   98.4 / 12 |           - |           - | 34529 / 5.5 |
+| D.melanogaster (dm6) x10 sim. (1.4Gb) |  51.3 / 2.2 |  6482 / 4.3 | 30081 / 1.0 | 37292 / 0.5 |
+| Human (hg38) x0.3 sim. (1Gb)          |   87.4 / 12 |           - |           - | 34529 / 5.5 |
 
 ### Effect of read length and score threshold on recall
 
@@ -191,6 +196,7 @@ $ minialign -X -l index.mai read1.fa read2.fa ... readN.fa > out.sam	# map read[
 
 ## Updates
 
+* 2016/2/21 (0.4.6) Fix bugs in the indexing routines and the hashmap. Remove `samsplit`. Index file format is modified (now compressed by deflate).
 * 2016/2/9 (0.4.5) Add support for BLAST6 / BLASR1 / BLASR4 / PAF formats. Change the default output format to PAF in the all-versus-all mode. Add support for NH, IH, XS, and NM tags in the sam format. Replaced internal implementations (hashmap and queue) to eliminate overheads.
 * 2016/1/25 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags), change -xpacbio scoring params to -a1 -b2 -p2 -q1 (performed better on recent PacBio reads).
 * 2016/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.

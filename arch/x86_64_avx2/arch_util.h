@@ -208,7 +208,7 @@
 /* compare and swap (cas) */
 #if defined(__GNUC__)
 #  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470
-#    define cas(ptr, cmp, val)	({ \
+#    define cas(ptr, cmp, val) ({ \
 		uint8_t _res; \
 		__asm__ volatile ("lock cmpxchg %[src], %[dst]\n\tsete %[res]" \
 			: [dst]"+m"(*ptr), [res]"=a"(_res) \
@@ -216,8 +216,12 @@
 			: "memory", "cc"); \
 		_res; \
 	})
+#    define fence() ({ \
+		__asm__ volatile ("mfence"); \
+	})
 #  else											/* > 4.7 */
 #    define cas(ptr, cmp, val)	__atomic_compare_exchange_n(ptr, cmp, val, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)
+#    define fence()				__sync_synchronize()
 #  endif
 #else
 #  error "atomic compare-and-exchange is not supported in this version of compiler."
