@@ -1931,12 +1931,12 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 		gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
 		if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
 		_puts(b, "\t*\t0\t0\t");
-		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
-		else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
+		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); } }
+		else { for (int64_t k = qs; k < qe; k++) { _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); } }
 		_t(b);
 		if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
-			if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, t->qual[k-1]); }
-			else { for (int64_t k = qs; k < qe; k++) _put(b, t->qual[k]); }
+			if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, t->qual[k-1]); } }
+			else { for (int64_t k = qs; k < qe; k++) { _put(b, t->qual[k]); } }
 		} else {
 			_put(b, '*');
 		}
