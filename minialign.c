@@ -259,7 +259,7 @@ static uint64_t kh_get(kh_t *h, uint64_t key)
 	return (int64_t)-1;
 }
 
-static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
+static const uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 {
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
@@ -1656,7 +1656,7 @@ static const gaba_alignment_t *mm_extend(
 	gaba_section_t rr = { .id = (ref->rid<<1)+1, .len = ref->l_seq, .base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim) };
 	gaba_pos_pair_t p = {0};
 	gaba_dp_flush(dp, lim, lim);
-	uint64_t key = (uint64_t)ref->rid<<32, *pval;
+	uint64_t key = (uint64_t)ref->rid<<32;
 	gaba_alignment_t *a = NULL;
 	for (uint64_t i = sidx; i < eidx && i < l_coef; ++i) {
 		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) continue;	// skip head
@@ -1678,7 +1678,7 @@ static const gaba_alignment_t *mm_extend(
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
 		key |= p.apos - (p.bpos>>1);
-		if ((pval = kh_get_ptr(pos, key)) != NULL) return 0;	// already evaluated
+		if (kh_get_ptr(pos, key) != NULL) return 0;	// already evaluated
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
 		if ((m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1)) == NULL) goto _abort;
@@ -1934,12 +1934,12 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 		gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
 		if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
 		_puts(b, "\t*\t0\t0\t");
-		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
-		else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
+		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); } }
+		else { for (int64_t k = qs; k < qe; k++) { _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); } }
 		_t(b);
 		if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
-			if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, t->qual[k-1]); }
-			else { for (int64_t k = qs; k < qe; k++) _put(b, t->qual[k]); }
+			if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, t->qual[k-1]); } }
+			else { for (int64_t k = qs; k < qe; k++) { _put(b, t->qual[k]); } }
 		} else {
 			_put(b, '*');
 		}
