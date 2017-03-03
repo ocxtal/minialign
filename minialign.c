@@ -1096,7 +1096,7 @@ static mm_mapopt_t *mm_mapopt_init(void)
 		/* -R */ .rg_line = NULL, .rg_id = NULL,
 
 		/* -S, -E */.sidx = 0, .eidx = 3,
-		.hlim = 5000, .llim = 5000, .blim = 0, .elim = 200,
+		.hlim = 6500, .llim = 6500, .blim = 0, .elim = 200,
 		.batch_size = 1024 * 1024,
 		.outbuf_size = 512 * 1024
 	};
