@@ -259,7 +259,7 @@ static uint64_t kh_get(kh_t *h, uint64_t key)
 	return (int64_t)-1;
 }
 
-static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
+static const uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 {
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
@@ -1653,7 +1653,7 @@ static const gaba_alignment_t *mm_extend(
 	gaba_section_t rr = { .id = (ref->rid<<1)+1, .len = ref->l_seq, .base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim) };
 	gaba_pos_pair_t p = {0};
 	gaba_dp_flush(dp, lim, lim);
-	uint64_t key = (uint64_t)ref->rid<<32, *pval;
+	uint64_t key = (uint64_t)ref->rid<<32;
 	gaba_alignment_t *a = NULL;
 	for (uint64_t i = sidx; i < eidx && i < l_coef; ++i) {
 		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) continue;	// skip head
@@ -1675,7 +1675,7 @@ static const gaba_alignment_t *mm_extend(
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
 		key |= p.apos - (p.bpos>>1);
-		if ((pval = kh_get_ptr(pos, key)) != NULL) return 0;	// already evaluated
+		if (kh_get_ptr(pos, key) != NULL) return 0;	// already evaluated
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
 		if ((m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1)) == NULL) goto _abort;
