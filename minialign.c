@@ -2234,7 +2234,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 					"    $ minialign -l <index.mai> <reads.{fa,fq,bam}> > mapping.sam\n"
 					"\n"
 					"  all-versus-all alignment in a read set:\n"
-					"    $ minialign -X -xava <reads.fa> [<reads.fa> ...] | samsplit <prefix>\n"
+					"    $ minialign -X -xava <reads.fa> [<reads.fa> ...] > allvsall.paf\n"
 					"\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  Global:\n");
