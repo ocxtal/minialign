@@ -1673,7 +1673,7 @@ static const gaba_alignment_t *mm_extend(
 			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
 			if ((f = gaba_dp_fill(dp, f, r, q) ) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
-		} while(!(flag & f->status));
+		} while (!(flag & f->status));
 		// find max
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
@@ -1688,7 +1688,7 @@ static const gaba_alignment_t *mm_extend(
 			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
 			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
-		} while(!(flag & f->status));
+		} while (!(flag & f->status));
 		if (m->max < min) { key &= 0xffffffff00000000; continue; }
 		// convert alignment to cigar
 		a = gaba_dp_trace(dp, NULL, m, GABA_TRACE_PARAMS( .lmm = lmm ));	// might be NULL
