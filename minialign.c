@@ -1671,7 +1671,7 @@ static const gaba_alignment_t *mm_extend(
 		do {
 			if (f->status & GABA_STATUS_UPDATE_A) flag |= GABA_STATUS_UPDATE_A, r = t;
 			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
-			if ((f = gaba_dp_fill(dp, f, r, q) ) == NULL) goto _abort;
+			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
 		} while (!(flag & f->status));
 		// find max
