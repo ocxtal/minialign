@@ -2221,6 +2221,7 @@ static void posixly_correct()
 
 static void mm_print_help(const mm_mapopt_t *opt)
 {
+	if (mm_verbose == 0) return;
 	fprintf(stderr, "\n"
 					"  minialign - fast aligner for PacBio and Nanopore long reads\n"
 					"\n"
@@ -2260,9 +2261,10 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -s INT       minimum alignment score [%d]\n", opt->min);
 	fprintf(stderr, "    -m INT       minimum alignment score ratio [%1.2f]\n", opt->min_ratio);
 	fprintf(stderr, "  Output:\n");
-	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf} [sam]\n");
+	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf} [%s]\n",
+		(const char *[]){ "sam", "blast6", "blasr1", "blasr4", "paf" }[opt->flag>>56]);
 	fprintf(stderr, "    -Q           include quality string\n");
-	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" []\n");
+	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" [%s]\n", opt->rg_line? opt->rg_line : "");
 	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,} []\n");
 	fprintf(stderr, "                   (RG is also inferred from -R)\n");
 	fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
@@ -2280,6 +2282,7 @@ static int mm_mapopt_load_preset(mm_mapopt_t *o, const char *arg)
 		o->k = 14; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.3;
 		o->flag |= MM_AVA | MM_PAF;
 	} else {
+		if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, arg);
 		return 1;
 	}
 	return 0;
@@ -2293,6 +2296,10 @@ static int mm_mapopt_parse_threshs(mm_mapopt_t *o, const char *arg)
 		while (*p && *p != ',') p++;
 		if (!*p || o->n_frq >= 16) break;
 		p++;
+	}
+	for (uint64_t i = 0; i < o->n_frq; ++i) {
+		if (o->frq[i] < 0.0 || o->frq[i] > 1.0)
+			fprintf(stderr, "[M::%s] Warning: Invalid threshold `%f' parsed from `%s'.\n", __func__, o->frq[i], arg);
 	}
 	return 0;
 }
@@ -2353,6 +2360,7 @@ static uint64_t mm_mapopt_parse_format(const char *arg)
 	else if (strcmp(arg, "blasr1") == 0) return MM_BLASR1;
 	else if (strcmp(arg, "blasr4") == 0) return MM_BLASR4;
 	else if (strcmp(arg, "paf") == 0) return MM_PAF;
+	else if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Unknown output format: `%s'.\n", __func__, arg);
 	return 0;
 }
 
@@ -2366,14 +2374,8 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 
 		if (ch == 'k') o->k = atoi(optarg);
 		else if (ch == 'w') o->w = atoi(optarg);
-		else if (ch == 'f') {
-			if (mm_mapopt_parse_threshs(o, optarg) && mm_verbose >= 3)
-				fprintf(stderr, "[M::%s] Warning: Invalid thresholds: `%s'.\n", __func__, optarg);
-		}
-		else if (ch == 'x') {
-			if (mm_mapopt_load_preset(o, optarg) && mm_verbose >= 3)
-				fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, optarg);
-		}
+		else if (ch == 'f') mm_mapopt_parse_threshs(o, optarg);
+		else if (ch == 'x') mm_mapopt_load_preset(o, optarg);
 		else if (ch == 'B') o->b = atoi(optarg);
 		else if (ch == 't') o->n_threads = atoi(optarg);
 		else if (ch == 'V') mm_verbose = atoi(optarg);
@@ -2429,7 +2431,7 @@ int main(int argc, char *argv[])
 	}
 	if (!fnr && v.n == 0) { mm_print_help(opt); ret = 1; goto _final; }
 	if (!fnw && ((fnr && v.n == 0) || (!fnr && v.n == 1 && !(opt->flag&MM_AVA)))) {
-		fprintf(stderr, "[M::%s] query-side input redirected to stdin.\n", __func__);
+		if (mm_verbose >= 3) fprintf(stderr, "[M::%s] query-side input redirected to stdin.\n", __func__);
 		kv_push(void*, v, "-");
 	}
 	if (opt->w >= 16) opt->w = (int)(.6666667 * opt->k + .499);
