@@ -259,7 +259,7 @@ static uint64_t kh_get(kh_t *h, uint64_t key)
 	return (int64_t)-1;
 }
 
-static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
+static const uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 {
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
@@ -1064,6 +1064,7 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 #define MM_BLASR1		( 0x02ULL<<56 )
 #define MM_BLASR4		( 0x03ULL<<56 )
 #define MM_PAF			( 0x04ULL<<56 )
+#define MM_MHAP 		( 0x05ULL<<56 )
 
 typedef struct {
 	uint32_t sidx, eidx, n_threads, min, k, w, b;
@@ -1656,7 +1657,7 @@ static const gaba_alignment_t *mm_extend(
 	gaba_section_t rr = { .id = (ref->rid<<1)+1, .len = ref->l_seq, .base = gaba_rev((const uint8_t*)ref->seq+ref->l_seq-1, lim) };
 	gaba_pos_pair_t p = {0};
 	gaba_dp_flush(dp, lim, lim);
-	uint64_t key = (uint64_t)ref->rid<<32, *pval;
+	uint64_t key = (uint64_t)ref->rid<<32;
 	gaba_alignment_t *a = NULL;
 	for (uint64_t i = sidx; i < eidx && i < l_coef; ++i) {
 		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) continue;	// skip head
@@ -1671,14 +1672,14 @@ static const gaba_alignment_t *mm_extend(
 		do {
 			if (f->status & GABA_STATUS_UPDATE_A) flag |= GABA_STATUS_UPDATE_A, r = t;
 			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
-			if ((f = gaba_dp_fill(dp, f, r, q) ) == NULL) goto _abort;
+			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
-		} while(!(flag & f->status));
+		} while (!(flag & f->status));
 		// find max
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
 		key |= p.apos - (p.bpos>>1);
-		if ((pval = kh_get_ptr(pos, key)) != NULL) return 0;	// already evaluated
+		if (kh_get_ptr(pos, key) != NULL) return 0;	// already evaluated
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
 		if ((m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1)) == NULL) goto _abort;
@@ -1688,7 +1689,7 @@ static const gaba_alignment_t *mm_extend(
 			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
 			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
-		} while(!(flag & f->status));
+		} while (!(flag & f->status));
 		if (m->max < min) { key &= 0xffffffff00000000; continue; }
 		// convert alignment to cigar
 		a = gaba_dp_trace(dp, NULL, m, GABA_TRACE_PARAMS( .lmm = lmm ));	// might be NULL
@@ -1934,12 +1935,12 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 		gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
 		if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
 		_puts(b, "\t*\t0\t0\t");
-		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); }
-		else { for (int64_t k = qs; k < qe; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); }
+		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); } }
+		else { for (int64_t k = qs; k < qe; k++) { _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); } }
 		_t(b);
 		if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
-			if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) _put(b, t->qual[k-1]); }
-			else { for (int64_t k = qs; k < qe; k++) _put(b, t->qual[k]); }
+			if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, t->qual[k-1]); } }
+			else { for (int64_t k = qs; k < qe; k++) { _put(b, t->qual[k]); } }
 		} else {
 			_put(b, '*');
 		}
@@ -2025,7 +2026,7 @@ static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, uint32_t n_re
 
 		_puts(b, t->name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
 		_puts(b, r->name); _sp(b);
-		_put(b, '-'); _putn(b, a->score); _sp(b); _putfi(int32_t, b, mid, 4); _sp(b);
+		_put(b, '-'); _putn(b, a->score); _sp(b); _putfi(int32_t, b, mid, 4); _sp(b);	// add '-' before the number to negate score
 		_put(b, '0'); _sp(b); _putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
 		_put(b, s->bid&0x01? '0' : '1'); _sp(b); _putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
 		_putn(b, (mapq>>(MAPQ_DEC - 2)) + ((mapq>>(MAPQ_DEC + 2)) & ~0x01)); _cr(b);
@@ -2047,6 +2048,27 @@ static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 		_puts(b, t->name); _t(b); _putn(b, t->l_seq); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
 		_puts(b, r->name); _t(b); _putn(b, r->l_seq); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
 		_putn(b, dcnt - a->xcnt); _t(b); _putn(b, dcnt + a->gecnt); _t(b); _putn(b, mapq>>MAPQ_DEC); _cr(b);
+	}
+	return;
+}
+
+// qname rname 1-idt score qd qs qe ql rd rs rd rl
+static void mm_print_mapped_mhap(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
+{
+	for (uint64_t j = 0; j < n_reg; ++j) {
+		const gaba_alignment_t *a = _aln(reg[j]);
+		const mm_idx_t *mi = b->mi;
+		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+		const gaba_path_section_t *s = &a->sec[0];
+		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
+		int32_t mid = 1000000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
+		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
+		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
+
+		_puts(b, t->name); _sp(b); _puts(b, r->name); _sp(b);
+		_putfi(int32_t, b, 1.0-mid, 4); _sp(b); _putn(b, a->score); _sp(b);
+		_put(b, '0'); _sp(b); _putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
+		_put(b, s->bid&0x01? '0' : '1'); _sp(b); _putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _cr(b);
 	}
 	return;
 }
@@ -2151,7 +2173,8 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 		[MM_BLAST6>>56] = { .mapped = mm_print_mapped_blast6 },
 		[MM_BLASR1>>56] = { .mapped = mm_print_mapped_blasr1 },
 		[MM_BLASR4>>56] = { .mapped = mm_print_mapped_blasr4 },
-		[MM_PAF>>56] = { .mapped = mm_print_mapped_paf }
+		[MM_PAF>>56] = { .mapped = mm_print_mapped_paf },
+		[MM_MHAP>>56] = { .mapped = mm_print_mapped_mhap }
 	};
 
 	// init output buf and printer
@@ -2221,6 +2244,7 @@ static void posixly_correct()
 
 static void mm_print_help(const mm_mapopt_t *opt)
 {
+	if (mm_verbose == 0) return;
 	fprintf(stderr, "\n"
 					"  minialign - fast aligner for PacBio and Nanopore long reads\n"
 					"\n"
@@ -2237,7 +2261,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 					"    $ minialign -l <index.mai> <reads.{fa,fq,bam}> > mapping.sam\n"
 					"\n"
 					"  all-versus-all alignment in a read set:\n"
-					"    $ minialign -X -xava <reads.fa> [<reads.fa> ...] | samsplit <prefix>\n"
+					"    $ minialign -X -xava <reads.fa> [<reads.fa> ...] > allvsall.paf\n"
 					"\n");
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  Global:\n");
@@ -2260,9 +2284,10 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -s INT       minimum alignment score [%d]\n", opt->min);
 	fprintf(stderr, "    -m INT       minimum alignment score ratio [%1.2f]\n", opt->min_ratio);
 	fprintf(stderr, "  Output:\n");
-	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf} [sam]\n");
+	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf,mhap} [%s]\n",
+		(const char *[]){ "sam", "blast6", "blasr1", "blasr4", "paf", "mhap" }[opt->flag>>56]);
 	fprintf(stderr, "    -Q           include quality string\n");
-	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" []\n");
+	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" [%s]\n", opt->rg_line? opt->rg_line : "");
 	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,} []\n");
 	fprintf(stderr, "                   (RG is also inferred from -R)\n");
 	fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
@@ -2280,6 +2305,7 @@ static int mm_mapopt_load_preset(mm_mapopt_t *o, const char *arg)
 		o->k = 14; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.3;
 		o->flag |= MM_AVA | MM_PAF;
 	} else {
+		if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, arg);
 		return 1;
 	}
 	return 0;
@@ -2293,6 +2319,10 @@ static int mm_mapopt_parse_threshs(mm_mapopt_t *o, const char *arg)
 		while (*p && *p != ',') p++;
 		if (!*p || o->n_frq >= 16) break;
 		p++;
+	}
+	for (uint64_t i = 0; i < o->n_frq; ++i) {
+		if (o->frq[i] < 0.0 || o->frq[i] > 1.0)
+			fprintf(stderr, "[M::%s] Warning: Invalid threshold `%f' parsed from `%s'.\n", __func__, o->frq[i], arg);
 	}
 	return 0;
 }
@@ -2353,6 +2383,8 @@ static uint64_t mm_mapopt_parse_format(const char *arg)
 	else if (strcmp(arg, "blasr1") == 0) return MM_BLASR1;
 	else if (strcmp(arg, "blasr4") == 0) return MM_BLASR4;
 	else if (strcmp(arg, "paf") == 0) return MM_PAF;
+	else if (strcmp(arg, "mhap") == 0) return MM_MHAP;
+	else if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Unknown output format: `%s'.\n", __func__, arg);
 	return 0;
 }
 
@@ -2366,14 +2398,8 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 
 		if (ch == 'k') o->k = atoi(optarg);
 		else if (ch == 'w') o->w = atoi(optarg);
-		else if (ch == 'f') {
-			if (mm_mapopt_parse_threshs(o, optarg) && mm_verbose >= 3)
-				fprintf(stderr, "[M::%s] Warning: Invalid thresholds: `%s'.\n", __func__, optarg);
-		}
-		else if (ch == 'x') {
-			if (mm_mapopt_load_preset(o, optarg) && mm_verbose >= 3)
-				fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, optarg);
-		}
+		else if (ch == 'f') mm_mapopt_parse_threshs(o, optarg);
+		else if (ch == 'x') mm_mapopt_load_preset(o, optarg);
 		else if (ch == 'B') o->b = atoi(optarg);
 		else if (ch == 't') o->n_threads = atoi(optarg);
 		else if (ch == 'V') mm_verbose = atoi(optarg);
@@ -2429,7 +2455,7 @@ int main(int argc, char *argv[])
 	}
 	if (!fnr && v.n == 0) { mm_print_help(opt); ret = 1; goto _final; }
 	if (!fnw && ((fnr && v.n == 0) || (!fnr && v.n == 1 && !(opt->flag&MM_AVA)))) {
-		fprintf(stderr, "[M::%s] query-side input redirected to stdin.\n", __func__);
+		if (mm_verbose >= 3) fprintf(stderr, "[M::%s] query-side input redirected to stdin.\n", __func__);
 		kv_push(void*, v, "-");
 	}
 	if (opt->w >= 16) opt->w = (int)(.6666667 * opt->k + .499);
