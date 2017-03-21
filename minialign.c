@@ -1730,12 +1730,10 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 
 			for (uint64_t j = 0; j < p; ++j) {
 				const gaba_path_section_t *t = &_aln(reg[j])->sec[0];
-				// fprintf(stderr, "lb(%d), ub(%d), t(%d, %d)\n", lb, ub, t->bpos, t->bpos + t->blen);
 				if (t->bpos + t->blen < ub) lb = MAX2(lb, t->bpos + t->blen);
 				else ub = MIN2(ub, t->bpos);
 				if (2*(ub - lb) < span) {	// covered by j
-					// fprintf(stderr, "i(%llu) is covered by j(%llu), span(%d), lb(%d), ub(%d), swap q(%llu) and i(%llu)\n", i, j, span, lb, ub, q-1, i);
-					// _reg(reg[j])->sub_score = MAX2(_reg(reg[j])->sub_score, _reg(reg[i])->score);1706
+					// _reg(reg[j])->sub_score = MAX2(_reg(reg[j])->sub_score, _reg(reg[i])->score);
 					q--; _swap_128(i, q); i--; reg[q].u32[0] |= 0x100<<16;
 					goto _loop_tail;
 				}
@@ -1743,11 +1741,7 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 			max = MAX2(max, ((uint64_t)(2*(ub - lb) - span)<<32) | i);
 		_loop_tail:;
 		}
-		// fprintf(stderr, "p(%llu), q(%llu), max(%llu)\n", p, q, max);
-		if (max&0xffffffff) {
-			// fprintf(stderr, "place max spanned (%llu) at p(%llu)\n", max&0xffffffff, p);
-			_swap_128(p, max&0xffffffff); reg[p].u32[0] |= 0x800<<16;
-		}	// move to head, mark supplementary
+		if (max&0xffffffff) { _swap_128(p, max&0xffffffff); reg[p].u32[0] |= 0x800<<16; }	// move to head, mark supplementary
 	}
 	p = MIN2(p, q);
 	#undef _swap_128
@@ -1772,7 +1766,6 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 
 	// calc mapq for secondary (repetitive) alignments
 	double tpe = MIN2(1.0 - tpc, 1.0);
-	if (n_reg > 1) fprintf(stderr, "p(%llu), n_reg(%u), usc(%d), lsc(%d), tpe(%1.9f)\n", p, n_reg, usc, lsc, tpe);
 	for (uint64_t i = p; i < n_reg; ++i) {
 		reg[i].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(1.0 - tpe * (double)(_aln(reg[i])->score - lsc + 1) / (double)tsc));
 	}
