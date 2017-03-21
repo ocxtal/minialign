@@ -1072,7 +1072,7 @@ typedef struct {
 	double min_ratio;
 	int32_t m, x, gi, ge, xdrop, llim, hlim, elim, blim;
 	uint32_t n_frq;
-	float frq[16];
+	double frq[16];
 	uint16_v tags;
 	uint64_t batch_size, outbuf_size;
 	char *rg_line, *rg_id;
@@ -1228,7 +1228,7 @@ static const v2u32_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, uint64_t *
 	}
 }
 
-static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, float f)
+static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, double f)
 {
 	uint64_t n = 0;
 	uint32_t thres;
@@ -2050,7 +2050,7 @@ static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint32_t n_re
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t mid = 100000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
+		int32_t mid = 100000.0 * (double)(dcnt - a->xcnt) / (double)slen;	// percent identity
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen+1 : r->l_seq-s->apos;
 		uint32_t re = s->bid&0x01? r->l_seq-s->apos : r->l_seq-s->apos-s->alen+1;
 		uint32_t qs = t->l_seq-s->bpos-s->blen+1, qe = t->l_seq-s->bpos;
@@ -2059,8 +2059,8 @@ static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint32_t n_re
 		_putfi(int32_t, b, mid, 3); _t(b); _putn(b, slen); _t(b); _putn(b, a->xcnt); _t(b); _putn(b, a->gicnt); _t(b);
 		_putn(b, qs); _t(b); _putn(b, qe); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
 
-		float bit = 1.85 * (float)a->score - 0.02;	// fixme, lambda and k should be calcd from the scoring params
-		int32_t e = 1000.0 * (float)r->l_seq * (float)t->l_seq * pow(2.0, -bit);	// fixme, lengths are not corrected
+		double bit = 1.85 * (double)a->score - 0.02;	// fixme, lambda and k should be calcd from the scoring params
+		int32_t e = 1000.0 * (double)r->l_seq * (double)t->l_seq * pow(2.0, -bit);	// fixme, lengths are not corrected
 		_putfi(int32_t, b, e, 3); _t(b); _putn(b, (int32_t)bit); _cr(b);
 	}
 	return;
@@ -2075,7 +2075,7 @@ static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, uint32_t n_re
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t mid = 1000000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
+		int32_t mid = 1000000.0 * (double)(dcnt - a->xcnt) / (double)slen;	// percent identity
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
@@ -2100,7 +2100,7 @@ static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, uint32_t n_re
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t mid = 1000000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
+		int32_t mid = 1000000.0 * (double)(dcnt - a->xcnt) / (double)slen;	// percent identity
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
@@ -2141,7 +2141,7 @@ static void mm_print_mapped_mhap(mm_align_t *b, const bseq_t *t, uint32_t n_reg,
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t mid = 1000000.0 * (float)(dcnt - a->xcnt) / (float)slen;	// percent identity
+		int32_t mid = 1000000.0 * (double)(dcnt - a->xcnt) / (double)slen;	// percent identity
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
