@@ -1707,7 +1707,79 @@ _abort:;
 #define MAPQ_COEF	( 1<<MAPQ_DEC )
 #define _clip(x)	MAX2(0, MIN2(((uint32_t)(x)), 60 * MAPQ_COEF))
 #define _aln(x)		( (const gaba_alignment_t*)(x).u64[1] )
-static uint32_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+static uint64_t mm_prune_regs(const mm_mapopt_t *opt, void *lmm, uint32_t n_reg, mm128_t *reg)
+{
+	uint64_t q;
+	uint32_t min = (uint32_t)(_aln(reg[0])->score * opt->min_ratio);
+	for (q = n_reg; _aln(reg[q-1])->score < min; --q) {}
+	for (uint64_t i = q; i < n_reg; ++i) { lmm_free(lmm, (void*)reg[i].u64[1]); }		// destroy gaba_alignment_t objects
+	return q;
+}
+
+#if 1
+static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+{
+	// collect supplementaries
+	#define _swap_128(x, y)	{ mm128_t _tmp = reg[x]; reg[x] = reg[y]; reg[y] = _tmp; }
+	uint64_t p, q;
+	for (p = 1, q = n_reg; p < q; ++p) {
+		uint64_t max = 0;
+		for (uint64_t i = p; i < q; ++i) {
+			const gaba_path_section_t *s = &_aln(reg[i])->sec[0];
+			int32_t lb = s->bpos, ub = s->bpos + s->blen, span = ub - lb;
+
+			for (uint64_t j = 0; j < p; ++j) {
+				const gaba_path_section_t *t = &_aln(reg[j])->sec[0];
+				// fprintf(stderr, "lb(%d), ub(%d), t(%d, %d)\n", lb, ub, t->bpos, t->bpos + t->blen);
+				if (t->bpos + t->blen < ub) lb = MAX2(lb, t->bpos + t->blen);
+				else ub = MIN2(ub, t->bpos);
+				if (2*(ub - lb) < span) {	// covered by j
+					// fprintf(stderr, "i(%llu) is covered by j(%llu), span(%d), lb(%d), ub(%d), swap q(%llu) and i(%llu)\n", i, j, span, lb, ub, q-1, i);
+					// _reg(reg[j])->sub_score = MAX2(_reg(reg[j])->sub_score, _reg(reg[i])->score);1706
+					q--; _swap_128(i, q); i--; reg[q].u32[0] |= 0x100<<16;
+					goto _loop_tail;
+				}
+			}
+			max = MAX2(max, ((uint64_t)(2*(ub - lb) - span)<<32) | i);
+		_loop_tail:;
+		}
+		// fprintf(stderr, "p(%llu), q(%llu), max(%llu)\n", p, q, max);
+		if (max&0xffffffff) {
+			// fprintf(stderr, "place max spanned (%llu) at p(%llu)\n", max&0xffffffff, p);
+			_swap_128(p, max&0xffffffff); reg[p].u32[0] |= 0x800<<16;
+		}	// move to head, mark supplementary
+	}
+	p = MIN2(p, q);
+	#undef _swap_128
+
+	// extract shortest repeat element
+	int32_t usc = 0, lsc = INT32_MAX, tsc = 0;
+	for (uint64_t i = p; i < n_reg; ++i) {
+		usc = MAX2(usc, _aln(reg[i])->score);
+		lsc = MIN2(lsc, _aln(reg[i])->score);
+		tsc += _aln(reg[i])->score;
+	}
+	lsc = (lsc==INT32_MAX)? 0 : lsc;
+
+	// calc mapq for primary and supplementary alignments
+	double tpc = 1.0;
+	for (uint64_t i = 0; i < p; ++i) {
+		uint32_t score = _aln(reg[0])->score;
+		double elen = (double)gaba_plen(_aln(reg[i])->sec) / 2.0, pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
+		double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * (score - usc), pe = 1.0 / (ulen * ulen + (double)(n_reg-p+1));
+		reg[i].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe)); tpc *= 1.0 - pe;
+	}
+
+	// calc mapq for secondary (repetitive) alignments
+	double tpe = MIN2(1.0 - tpc, 1.0);
+	if (n_reg > 1) fprintf(stderr, "p(%llu), n_reg(%u), usc(%d), lsc(%d), tpe(%1.9f)\n", p, n_reg, usc, lsc, tpe);
+	for (uint64_t i = p; i < n_reg; ++i) {
+		reg[i].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(1.0 - tpe * (double)(_aln(reg[i])->score - lsc + 1) / (double)tsc));
+	}
+	return;
+}
+#else
+static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	uint32_t i, score = _aln(reg[0])->score, min = score * opt->min_ratio;
 	uint32_t ssc = (n_reg>1)? _aln(reg[1])->score : 0, bsc = (n_reg>1)? _aln(reg[n_reg-1])->score : 0, tsc = 0;
@@ -1716,12 +1788,13 @@ static uint32_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg
 
 	for (i = 1; i < n_reg; ++i) tsc += _aln(reg[i])->score - bsc + 1;
 	reg[0].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe));
+	if (n_reg > 1) fprintf(stderr, "n_reg(%u), usc(%d), lsc(%d), pe(%1.9f)\n", n_reg, ssc, bsc, pe);
 	for (i = 1; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i)
 		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * MAPQ_COEF * log10(1.0 - pe * (double)(score - bsc + 1) / (double)tsc));
-	return i;
+	return;
 }
-
-static uint32_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+#endif
+static void mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	uint32_t i, score, min = _aln(reg[0])->score * opt->min_ratio;
 	for (i = 0; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i) {
@@ -1729,7 +1802,7 @@ static uint32_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg
 		double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * score, pe = 1.0 / (ulen + 1);
 		reg[i].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe)) | ((i == 0? 0 : 0x800)<<16);
 	}
-	return i;
+	return;
 }
 #undef _clip
 #undef _aln
@@ -1791,9 +1864,16 @@ static const mm128_t *mm_align_seq(
 	}
 	*n_reg = reg.n;
 	if (reg.n == 0) return 0;
+	#if 0
 	radix_sort_128x(reg.a, reg.a + reg.n);
 	*n_reg = ((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
 	for (uint64_t i = *n_reg; i < reg.n; ++i) { lmm_free(lmm, (void*)reg.a[i].u64[1]); }
+	#else
+	radix_sort_128x(reg.a, reg.a + reg.n);
+	reg.n = mm_prune_regs(opt, lmm, reg.n, reg.a);
+	((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
+	*n_reg = reg.n;
+	#endif
 	return reg.a;
 }
 
