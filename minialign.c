@@ -1719,6 +1719,8 @@ static uint64_t mm_prune_regs(const mm_mapopt_t *opt, void *lmm, uint32_t n_reg,
 #if 1
 static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
+	// clear sub_score
+	for (uint64_t i = 0; i < n_reg; ++i) reg[i].u32[1] = 0;
 	// collect supplementaries
 	#define _swap_128(x, y)	{ mm128_t _tmp = reg[x]; reg[x] = reg[y]; reg[y] = _tmp; }
 	uint64_t p, q;
@@ -1734,6 +1736,7 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 				else ub = MIN2(ub, t->bpos);
 				if (2*(ub - lb) < span) {	// covered by j
 					// _reg(reg[j])->sub_score = MAX2(_reg(reg[j])->sub_score, _reg(reg[i])->score);
+					reg[j].u32[1] = MAX2(reg[j].u32[1], reg[i].u32[1]);
 					q--; _swap_128(i, q); i--; reg[q].u32[0] |= 0x100<<16;
 					goto _loop_tail;
 				}
@@ -1794,6 +1797,7 @@ static void mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 		double elen = (double)gaba_plen(_aln(reg[i])->sec) / 2.0, pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
 		double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * score, pe = 1.0 / (ulen + 1);
 		reg[i].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe)) | ((i == 0? 0 : 0x800)<<16);
+		reg[i].u32[1] = 0;	// clear sub_score
 	}
 	return;
 }
@@ -1862,9 +1866,9 @@ static const mm128_t *mm_align_seq(
 	*n_reg = ((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
 	for (uint64_t i = *n_reg; i < reg.n; ++i) { lmm_free(lmm, (void*)reg.a[i].u64[1]); }
 	#else
-	radix_sort_128x(reg.a, reg.a + reg.n);
-	reg.n = mm_prune_regs(opt, lmm, reg.n, reg.a);
-	((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
+	radix_sort_128x(reg.a, reg.a + reg.n);	// sort by score in reverse order
+	reg.n = mm_prune_regs(opt, lmm, reg.n, reg.a);	// prune alignment whose score is less than min_score threshold
+	((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);	// calc mapq, reg.u32[1] now holds sub_score
 	*n_reg = reg.n;
 	#endif
 	return reg.a;
