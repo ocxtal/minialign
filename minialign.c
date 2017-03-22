@@ -170,7 +170,7 @@ static kh_t *kh_init(uint64_t size)
 	size = size < KH_SIZE? KH_SIZE : (0x8000000000000000>>(lzcnt(size - 1) - 1));
 	h->mask = size - 1; h->max = size; h->cnt = 0; h->ub = size * KH_THRESH;
 	h->a = malloc(sizeof(mm128_t) * size);
-	for (uint64_t i = 0; i < size; ++i) h->a[i].u64[0] = (int64_t)-2, h->a[i].u64[1] = 0;
+	for (uint64_t i = 0; i < size; ++i) h->a[i].u64[0] = UINT64_MAX-1, h->a[i].u64[1] = 0;
 	return h;
 }
 
@@ -208,7 +208,7 @@ static void kh_clear(kh_t *h)
 {
 	if (h == 0) { return; }
 	h->mask = KH_SIZE - 1; h->cnt = 0; h->ub = KH_SIZE * KH_THRESH;
-	for (uint64_t i = 0; i < KH_SIZE; ++i) h->a[i].u64[0] = (int64_t)-2, h->a[i].u64[1] = 0;
+	for (uint64_t i = 0; i < KH_SIZE; ++i) h->a[i].u64[0] = UINT64_MAX-1, h->a[i].u64[1] = 0;
 	return;
 }
 
@@ -234,11 +234,11 @@ static void kh_extend(kh_t *h)
 	uint64_t prev_size = h->mask + 1, size = 2 * prev_size, mask = size - 1;
 	h->mask = mask; h->ub = size * KH_THRESH;
 	if (size > h->max) { h->a = realloc(h->a, sizeof(mm128_t) * size); h->max = size; }
-	for (uint64_t i = 0; i < prev_size; ++i) h->a[i + prev_size].u64[0] = (int64_t)-2, h->a[i + prev_size].u64[1] = 0;
+	for (uint64_t i = 0; i < prev_size; ++i) h->a[i + prev_size].u64[0] = UINT64_MAX-1, h->a[i + prev_size].u64[1] = 0;
 	for (uint64_t i = 0; i < size; ++i) {
 		uint64_t k = h->a[i].u64[0];	// key
 		if (k + 2 < 2 || (k & mask) == i) continue;
-		uint64_t v = h->a[i].u64[1]; h->a[i].u64[0] = (int64_t)-1;	// moved
+		uint64_t v = h->a[i].u64[1]; h->a[i].u64[0] = UINT64_MAX;	// moved
 		kh_put_intl(h->a, k, v, mask);
 	}
 	return;
@@ -258,8 +258,8 @@ static uint64_t kh_get(kh_t *h, uint64_t key)
 	do {
 		if ((k = h->a[pos].u64[0]) == key) return h->a[pos].u64[1];
 		pos = mask & (pos + 1);
-	} while (k + 1 < (int64_t)-1);	// !is_empty(k) || is_moved(k)
-	return (int64_t)-1;
+	} while (k + 1 < UINT64_MAX);	// !is_empty(k) || is_moved(k)
+	return UINT64_MAX;
 }
 
 static const uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
@@ -268,7 +268,7 @@ static const uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 	do {
 		if ((k = h->a[pos].u64[0]) == key) return &h->a[pos].u64[1];
 		pos = mask & (pos + 1);
-	} while (k + 1 < (int64_t)-1);	// !is_empty(k) || is_moved(k)
+	} while (k + 1 < UINT64_MAX);	// !is_empty(k) || is_moved(k)
 	return NULL;
 }
 /* end of hash.c */
@@ -299,12 +299,12 @@ typedef struct pt_s {
 	pt_thread_t c[];	// [0] is reserved for master
 } pt_t;
 
-#define PT_EMPTY	( (void *)((int64_t)-1) )
-#define PT_EXIT		( (void *)((int64_t)-2) )
+#define PT_EMPTY	( (void *)(UINT64_MAX) )
+#define PT_EXIT		( (void *)(UINT64_MAX-1) )
 
 uint64_t pt_enq(pt_q_t *q, uint64_t tid, void *elem)
 {
-	uint64_t z, ret = (int64_t)-1;
+	uint64_t z, ret = UINT64_MAX;
 	do { z = 0xffffffff; } while (!cas(&q->lock, &z, tid));
 	uint64_t head = q->head, tail = q->tail, size = q->size;
 	if (((head + 1) % size) != tail) {
@@ -1073,10 +1073,10 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 typedef struct {
 	uint32_t sidx, eidx, n_threads, min, k, w, b;
 	uint64_t flag;
-	double min_ratio;
+	float min_ratio;
 	int32_t m, x, gi, ge, xdrop, llim, hlim, elim, blim;
 	uint32_t n_frq;
-	double frq[16];
+	float frq[16];
 	uint16_v tags;
 	uint64_t batch_size, outbuf_size;
 	char *rg_line, *rg_id;
@@ -1311,6 +1311,7 @@ static void mm_idx_drain_intl(mm_idx_pipeline_t *q, mm_idx_step_t *s)
 	uint64_t hidx = s->seq[0].rid-q->mi->base_rid, n_req = s->seq[s->n_seq-1].rid+1-q->mi->base_rid;
 	q->mi->s.n = MAX2(q->mi->s.n, n_req);
 	kv_reserve(mm_idx_seq_t, q->mi->s, q->mi->s.n);
+	fprintf(stderr, "id(%u), hidx(%lu), n_seq(%u), n_req(%lu)\n", s->id, hidx, s->n_seq, n_req);
 
 	const bseq_t *src = s->seq;
 	mm_idx_seq_t *dst = &q->mi->s.a[hidx];
@@ -1343,6 +1344,7 @@ static void mm_idx_drain(uint32_t tid, void *arg, void *item)
 			mm_idx_drain_intl(q, s);
 		}
 	#else
+		#warning "weak ordering"
 		mm_idx_drain_intl(q, s);
 	#endif
 	return;
@@ -1702,8 +1704,14 @@ static const gaba_alignment_t *mm_extend(
 		// find max
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
-		key |= p.apos - (p.bpos>>1);
-		if (kh_get_ptr(pos, key) != NULL) return 0;	// already evaluated
+		key |= (uint32_t)(p.apos - (p.bpos>>1));
+		// fprintf(stderr, "key(%lx)\n", key);
+		if (kh_get_ptr(pos, key) != NULL) {
+			// fprintf(stderr, "hit\n");
+			return 0;	// already evaluated
+		}
+		// fprintf(stderr, "put(%lx)\n", key);
+		kh_put(pos, key, (uintptr_t)NULL);	// mark evaluated
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
 		if ((m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1)) == NULL) goto _abort;
@@ -1720,7 +1728,10 @@ static const gaba_alignment_t *mm_extend(
 		break;
 	}
 	// record head
-	kh_put(pos, key, (uintptr_t)a);
+	if (a) {
+		// fprintf(stderr, "record(%lx), score(%ld)\n", key, a->score);
+		kh_put(pos, key, (uintptr_t)a);
+	}
 	return a;
 _abort:;
 	oom_abort(__func__);
@@ -1857,6 +1868,12 @@ static const mm128_t *mm_align_seq(
 				mm_expand(b->resc.a[j].u32[1], (const v2u32_t*)b->resc.a[j].u64[1], qid, b->resc.a[j].u32[0], thresh, &b->coef);
 		}
 		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
+
+		// fprintf(stderr, "==== i(%lu)\n", i);
+		for (uint64_t k = 0; k < b->coef.n; ++k) {
+			// fprintf(stderr, "rid(%u), rs(%d), qs(%d), coef(%d)\n", b->coef.a[k].u32[1], (int32_t)b->coef.a[k].u32[2], (int32_t)b->coef.a[k].u32[3], (int32_t)b->coef.a[k].u32[0] - 0x40000000);
+		}
+
 		mm_chain(b->coef.n, b->coef.a, opt->llim, opt->hlim, min>>2, &b->intv);
 		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
 		if (b->intv.a == 0) continue;
