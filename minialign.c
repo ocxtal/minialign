@@ -3,6 +3,9 @@
 #define _POSIX_C_SOURCE		200112L
 #define _DARWIN_C_SOURCE	_DARWIN_C_FULL
 
+/* set non-zero value to ensure order of streamed objects */
+#define STRICT_STREAM_ORDERING		( 1 )
+
 #include <assert.h>
 #include <getopt.h>
 #include <inttypes.h>
@@ -528,7 +531,7 @@ static void pg_destroy(pg_t *pg)
 	}
 	uint64_t z = 0;
 	fwrite(&z, sizeof(uint64_t), 1, pg->fp);	/* terminator */
-	pt_destroy(pg->pt); free(pg);
+	pt_destroy(pg->pt); kv_hq_destroy(pg->hq); free(pg);
 	return;
 }
 
@@ -1258,12 +1261,14 @@ static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, double f)
 
 typedef struct {
 	uint64_t batch_size;
+	uint32_t icnt, ocnt;
 	bseq_file_t *fp;
 	mm_idx_t *mi;
+	kvec_t(mm128_t) hq;
 } mm_idx_pipeline_t;
 
 typedef struct {
-    uint32_t n_seq;
+    uint32_t id, n_seq;
 	const bseq_t *seq;	// const!
 	void *base;
 	uint64_t size;
@@ -1278,6 +1283,7 @@ static void *mm_idx_source(uint32_t tid, void *arg)
 	uint64_t size;
 	void *base;
 
+	s->id = q->icnt++;
 	s->seq = bseq_read(q->fp, q->batch_size, &s->n_seq, &base, &size);
 	if (s->seq == 0) { free(s), s = 0; return 0; }
 
@@ -1299,12 +1305,8 @@ static void *mm_idx_worker(uint32_t tid, void *arg, void *item)
 	return s;
 }
 
-static void mm_idx_drain(uint32_t tid, void *arg, void *item)
+static void mm_idx_drain_intl(mm_idx_pipeline_t *q, mm_idx_step_t *s)
 {
-	set_info(tid, "[mm_idx_drain] dump minimizers to pool");
-	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
-	mm_idx_step_t *s = (mm_idx_step_t*)item;
-
 	uint64_t hidx = s->seq[0].rid-q->mi->base_rid, n_req = s->seq[s->n_seq-1].rid+1-q->mi->base_rid;
 	q->mi->s.n = MAX2(q->mi->s.n, n_req);
 	kv_reserve(mm_idx_seq_t, q->mi->s, q->mi->s.n);
@@ -1324,6 +1326,24 @@ static void mm_idx_drain(uint32_t tid, void *arg, void *item)
 	}
 
 	free((void*)s->seq); free(s->a.a); free(s);
+	return;
+}
+
+static void mm_idx_drain(uint32_t tid, void *arg, void *item)
+{
+	set_info(tid, "[mm_idx_drain] dump minimizers to pool");
+	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
+	mm_idx_step_t *s = (mm_idx_step_t*)item;
+
+	#if STRICT_STREAM_ORDERING != 0
+		kv_hq_push(mm128_t, incq_comp, q->hq, ((mm128_t){.u64 = {s->id, (uintptr_t)s}}));
+		while (q->hq.n > 1 && q->hq.a[1].u64[0] == q->ocnt) {
+			s = (mm_idx_step_t*)kv_hq_pop(mm128_t, incq_comp, q->hq).u64[1]; q->ocnt++;
+			mm_idx_drain_intl(q, s);
+		}
+	#else
+		mm_idx_drain_intl(q, s);
+	#endif
 	return;
 }
 
@@ -1381,16 +1401,18 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 
 	set_info(0, "[mm_idx_gen] initialize index object");
 	pl.batch_size = opt->batch_size;
+	pl.icnt = pl.ocnt = 0;
 	pl.fp = fp;
 	if (pl.fp == 0) return 0;
 	pl.mi = mm_idx_init(opt->w, opt->k, opt->b); pl.mi->circular = (opt->flag&MM_CIRCULAR)!=0; pl.mi->base_rid = pl.fp->base_rid;
+	kv_hq_init(pl.hq);
 
 	p = (mm_idx_pipeline_t**)calloc(opt->n_threads, sizeof(mm_idx_pipeline_t*));
 	for (uint64_t i = 0; i < opt->n_threads; ++i) p[i] = &pl;
 
 	pt_t *pt = pt_init(opt->n_threads);
 	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
-	free(p);
+	free(p); kv_hq_destroy(pl.hq);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
@@ -1520,7 +1542,9 @@ struct mm_align_s {
 	const mm_mapopt_t *opt;
 	uint64_t *occ;
 	uint32_t n_occ;
+	uint32_t icnt, ocnt;
 	bseq_file_t *fp;
+	kvec_t(mm128_t) hq;
 	mm_printer_t printer;
 	gaba_t *gaba;
 	void **t;	// mm_tbuf_t **
@@ -1529,7 +1553,7 @@ struct mm_align_s {
 
 typedef struct {
 	// query sequences
-	uint32_t n_seq;
+	uint32_t id, n_seq;
 	const bseq_t *seq;	// const!
 	void *base;
 	uint64_t size;
@@ -1716,7 +1740,7 @@ static uint64_t mm_prune_regs(const mm_mapopt_t *opt, void *lmm, uint32_t n_reg,
 	return q;
 }
 
-#if 1
+#if 0
 static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	// clear sub_score
@@ -1784,7 +1808,7 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 
 	for (i = 1; i < n_reg; ++i) tsc += _aln(reg[i])->score - bsc + 1;
 	reg[0].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe));
-	if (n_reg > 1) fprintf(stderr, "n_reg(%u), usc(%d), lsc(%d), pe(%1.9f)\n", n_reg, ssc, bsc, pe);
+	// if (n_reg > 1) fprintf(stderr, "n_reg(%u), usc(%d), lsc(%d), pe(%1.9f)\n", n_reg, ssc, bsc, pe);
 	for (i = 1; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i)
 		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * MAPQ_COEF * log10(1.0 - pe * (double)(score - bsc + 1) / (double)tsc));
 	return;
@@ -2165,6 +2189,7 @@ static void *mm_align_source(uint32_t tid, void *arg)
 
 	s->lmm = lmm_init(NULL, 512 * 1024);
 	if (s->lmm == 0) return 0;
+	s->id = b->icnt++;
 	s->seq = bseq_read(b->fp, b->opt->batch_size, &s->n_seq, &s->base, &s->size);
 	if (s->seq == 0) lmm_clean(s->lmm), free(s), s = 0;
 	return s;
@@ -2187,12 +2212,8 @@ static void *mm_align_worker(uint32_t tid, void *arg, void *item)
 	return s;
 }
 
-static void mm_align_drain(uint32_t tid, void *arg, void *item)
+static void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 {
-	set_info(tid, "[mm_align_drain] dump alignments to sam records");
-	mm_align_t *b = (mm_align_t*)arg;
-	mm_align_step_t *s = (mm_align_step_t*)item;
-
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
 		mm128_t *r = (mm128_t*)s->reg.a[i].u64[0];
 		uint32_t n_reg = s->reg.a[i].u64[1];
@@ -2205,6 +2226,24 @@ static void mm_align_drain(uint32_t tid, void *arg, void *item)
 		free(r);
 	}
 	free(s->reg.a); free(s->base); free((void*)s->seq); lmm_clean(s->lmm); free(s);
+	return;
+}
+
+static void mm_align_drain(uint32_t tid, void *arg, void *item)
+{
+	set_info(tid, "[mm_align_drain] dump alignments to sam records");
+	mm_align_t *b = (mm_align_t*)arg;
+	mm_align_step_t *s = (mm_align_step_t*)item;
+
+	#if STRICT_STREAM_ORDERING != 0
+		kv_hq_push(mm128_t, incq_comp, b->hq, ((mm128_t){.u64 = {s->id, (uintptr_t)s}}));
+		while (b->hq.n > 1 && b->hq.a[1].u64[0] == b->ocnt) {
+			s = (mm_align_step_t*)kv_hq_pop(mm128_t, incq_comp, b->hq).u64[1]; b->ocnt++;
+			mm_align_drain_intl(b, s);
+		}
+	#else
+		mm_align_drain_intl(b, s);
+	#endif
 	return;
 }
 
@@ -2235,7 +2274,7 @@ static void mm_align_destroy(mm_align_t *b)
 	assert(b != 0);
 	fwrite(b->base, sizeof(uint8_t), b->p - b->base, stdout);
 	for (uint64_t i = 0; i < b->opt->n_threads; ++i) mm_tbuf_destroy((mm_tbuf_t*)b->t[i]);
-	free(b->base); free(b->occ); free(b->t); gaba_clean(b->gaba); pt_destroy(b->pt); // ptask_clean(b->pt);
+	free(b->base); kv_hq_destroy(b->hq); free(b->occ); free(b->t); gaba_clean(b->gaba); pt_destroy(b->pt);
 	free(b);
 	return;
 }
@@ -2254,11 +2293,14 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 		[MM_MHAP>>56] = { .mapped = mm_print_mapped_mhap }
 	};
 
-	// init output buf and printer
 	mm_align_t *b = calloc(1, sizeof(mm_align_t));
 	if (b == 0) return 0;
+
+	// init output queue, buf and printer
 	b->tail = (b->base = b->p = malloc(sizeof(uint8_t) * opt->outbuf_size)) + opt->outbuf_size;
 	if (b->base == 0) goto _fail;
+	b->icnt = b->ocnt = 0;
+	kv_hq_init(b->hq);
 	b->printer = printer[opt->flag>>56];
 	if (!b->printer.mapped) goto _fail;
 
