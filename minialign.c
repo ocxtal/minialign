@@ -1093,15 +1093,15 @@ static mm_mapopt_t *mm_mapopt_init(void)
 	mm_mapopt_t *opt = calloc(1, sizeof(mm_mapopt_t));
 	*opt = (mm_mapopt_t){
 		/* -f, -k, -w, -b, -T */ .k = 15, .w = 16, .b = 14, .flag = 0,
-		/* -a, -b, -p, -q */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
+		/* -a, -b, -p, -q, -Y */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
 		/* -s, -m */ .min = 50, .min_ratio = 0.3,
 		/* -f */ .n_frq = 3, .frq[0] = 0.05, .frq[1] = 0.01, .frq[2] = 0.001,
 		/* -t */ .n_threads = 1,
 		/* -R */ .rg_line = NULL, .rg_id = NULL,
 
 		/* -S, -E */.sidx = 0, .eidx = 3,
-		.hlim = 6500, .llim = 6500, .blim = 0, .elim = 200,
-		.batch_size = 1024 * 1024,
+		.hlim = 7000, .llim = 7000, .blim = 0, .elim = 200,
+		.batch_size = 512 * 1024,
 		.outbuf_size = 512 * 1024
 	};
 	return opt;
