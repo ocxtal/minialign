@@ -1568,7 +1568,6 @@ typedef struct mm_tbuf_s { // per-thread buffer
 	mm128_v resc; // also used as query minimizer vector
 	mm128_v coef; // Hough transform coefficient
 	v2u32_v intv; // intervals on sorted coef
-	// poshash_t *pos;
 	kh_t *pos;
 	gaba_dp_t *dp;	// alignment work
 } mm_tbuf_t;
@@ -1672,7 +1671,7 @@ static uint64_t mm_rescue(const mm_idx_seq_t *ref, uint64_t l_coef, mm128_t *coe
 
 static const gaba_alignment_t *mm_extend(
 	const mm_idx_seq_t *ref, uint32_t l_coef, mm128_t *coef, uint32_t k, uint32_t min, uint32_t sidx, uint32_t eidx,
-	gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, kh_t *pos/*poshash_t *pos*/, lmm_t *lmm)
+	gaba_dp_t *dp, gaba_section_t *qf, gaba_section_t *qr, gaba_section_t *t, kh_t *pos, lmm_t *lmm)
 {
 	const uint32_t mask = 0x7fffffff;
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
