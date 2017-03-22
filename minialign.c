@@ -380,6 +380,7 @@ static int pt_set_worker(pt_t *pt, pt_worker_t wfp, void **warg)
 	return 0;
 }
 
+// sfp and dfp are called in the same thread
 static int pt_stream(pt_t *pt, pt_source_t sfp, void *sarg, pt_worker_t wfp, void **warg, pt_drain_t dfp, void *darg)
 {
 	if (pt_set_worker(pt, wfp, warg)) return -1;
