@@ -1431,6 +1431,43 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 	return pl.mi;
 }
 
+#if 0
+static void mm_idx_cmp(const mm_mapopt_t *opt, const mm_idx_t *m1, const mm_idx_t *m2)
+{
+	for (uint64_t i = 0; i < 1ULL<<opt->b; ++i) {
+		mm_idx_bucket_t *bkt1 = &m1->bkt[i], *bkt2 = &m2->bkt[i];
+		if (bkt1 == NULL || bkt2 == NULL) {
+			if (bkt1 == NULL && bkt2 == NULL) continue;
+			if (bkt1) fprintf(stderr, "i(%lu), bkt1 is instanciated but bkt2 is not\n", i);
+			if (bkt2) fprintf(stderr, "i(%lu), bkt2 is instanciated but bkt1 is not\n", i);
+			continue;
+		}
+
+		if (bkt1->n != bkt2->n) fprintf(stderr, "i(%lu), array size differs(%lu, %lu)\n", i, bkt1->n, bkt2->n);
+		for (uint64_t j = 0; j < MIN2(bkt1->n, bkt2->n); ++j) {
+			if (bkt1->p[j] != bkt2->p[j]) fprintf(stderr, "i(%lu), array differs at j(%lu), (%lu, %lu)\n", i, j, bkt1->p[j], bkt2->p[j]);
+		}
+
+		kh_t *h1 = bkt1->h, *h2 = bkt2->h;
+		if (h1 == NULL || h2 == NULL) {
+			if (h1 == NULL && h2 == NULL) continue;
+			if (h1) fprintf(stderr, "i(%lu), h1 is instanciated but h2 is not\n", i);
+			if (h2) fprintf(stderr, "i(%lu), h2 is instanciated but h1 is not\n", i);
+			continue;
+		}
+		if (h1->mask != h2->mask) fprintf(stderr, "i(%lu), hash size differs(%u, %u)\n", i, h1->mask, h2->mask);
+		if (h1->max != h2->max) fprintf(stderr, "i(%lu), hash max differs(%u, %u)\n", i, h1->max, h2->max);
+		if (h1->cnt != h2->cnt) fprintf(stderr, "i(%lu), hash cnt differs(%u, %u)\n", i, h1->cnt, h2->cnt);
+		if (h1->ub != h2->ub) fprintf(stderr, "i(%lu), hash ub differs(%u, %u)\n", i, h1->ub, h2->ub);
+		for (uint64_t j = 0; j < MIN2(h1->mask, h2->mask)+1; ++j) {
+			if (h1->a[j].u64[0] != h2->a[j].u64[0]) fprintf(stderr, "i(%lu), hash key differs at j(%lu), (%lu, %lu)\n", i, j, h1->a[j].u64[0], h2->a[j].u64[0]);
+			if (h1->a[j].u64[1] != h2->a[j].u64[1]) fprintf(stderr, "i(%lu), hash val differs at j(%lu), (%lu, %lu)\n", i, j, h1->a[j].u64[1], h2->a[j].u64[1]);
+		}
+
+	}
+}
+#endif
+
 /*************
  * index I/O *
  *************/
