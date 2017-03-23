@@ -1783,7 +1783,7 @@ static uint64_t mm_prune_regs(const mm_mapopt_t *opt, void *lmm, uint32_t n_reg,
 	return q;
 }
 
-#if 0
+#if 1
 static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	// clear sub_score
