@@ -1561,14 +1561,11 @@ _mm_idx_load_fail:
 /* end of index.c */
 
 /* map.c */
-/**************************
- * Multi-threaded mapping *
- **************************/
 typedef struct mm_align_s mm_align_t;
 typedef struct {
 	void (*header)(mm_align_t*);
 	void (*unmapped)(mm_align_t*, const bseq_t*);
-	void (*mapped)(mm_align_t*, const bseq_t*, uint32_t, const mm128_t*);
+	void (*mapped)(mm_align_t*, const bseq_t*, uint64_t, const mm128_t*);	// nreg contains #regs in lower 32bit, #uniq in higher 32bit
 } mm_printer_t;
 
 struct mm_align_s {
@@ -1784,7 +1781,7 @@ static uint64_t mm_prune_regs(const mm_mapopt_t *opt, void *lmm, uint32_t n_reg,
 }
 
 #if 1
-static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	// collect supplementaries
 	#define _swap_128(x, y)	{ mm128_t _tmp = reg[x]; reg[x] = reg[y]; reg[y] = _tmp; }
@@ -1835,7 +1832,7 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 	for (uint64_t i = p; i < n_reg; ++i) {
 		reg[i].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(1.0 - tpe * (double)(_aln(reg[i])->score - lsc + 1) / (double)tsc));
 	}
-	return;
+	return p;
 }
 #else
 static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
@@ -1853,7 +1850,7 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 	return;
 }
 #endif
-static void mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+static uint64_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	uint32_t i, score, min = _aln(reg[0])->score * opt->min_ratio;
 	for (i = 0; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i) {
@@ -1861,7 +1858,7 @@ static void mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 		double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x), ulen = ec * score, pe = 1.0 / (ulen + 1);
 		reg[i].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe)) | ((i == 0? 0 : 0x800)<<16);
 	}
-	return;
+	return n_reg;
 }
 #undef _clip
 #undef _aln
@@ -1935,9 +1932,8 @@ static const mm128_t *mm_align_seq(
 	for (uint64_t i = *n_reg; i < reg.n; ++i) { lmm_free(lmm, (void*)reg.a[i].u64[1]); }
 	#else
 	radix_sort_128x(reg.a, reg.a + reg.n);	// sort by score in reverse order
-	reg.n = mm_prune_regs(opt, lmm, reg.n, reg.a);	// prune alignment whose score is less than min_score threshold
-	((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);	// calc mapq, reg.u32[1] now holds sub_score
-	*n_reg = reg.n;
+	*n_reg = reg.n = mm_prune_regs(opt, lmm, reg.n, reg.a);	// prune alignment whose score is less than min_score threshold
+	*n_reg |= ((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a)<<32;
 	#endif
 	return reg.a;
 }
@@ -2004,6 +2000,7 @@ static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 }
 
 #define _t(b)			_put(b, '\t')
+#define _c(b)			_put(b, ',')
 #define _sp(b)			_put(b, ' ')
 #define _cr(b)			_put(b, '\n')
 static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
@@ -2063,33 +2060,55 @@ static int mm_cigar_printer(void *_b, int64_t len, char c)
 #define _aln(x)		( (const gaba_alignment_t*)(x).u64[1] )
 #define _mapq(x)	( (x).u32[0] & 0xffff )
 #define _flag(x)	( (x).u32[0]>>16 )
-static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
+static void mm_print_mapped_sam_core(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
 {
+	const gaba_path_section_t *s = &a->sec[0];
+	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
+	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
+
+	_puts(b, t->name); _t(b); _putn(b, flag); _t(b); _puts(b, r->name); _t(b);
+	_putn(b, rs+1); _t(b); _putn(b, mapq>>MAPQ_DEC); _t(b);
+	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
+	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
+	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
+	_puts(b, "\t*\t0\t0\t");
+	if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); } }
+	else { for (int64_t k = qs; k < qe; k++) { _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); } }
+	_t(b);
+	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
+		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, t->qual[k-1]); } }
+		else { for (int64_t k = qs; k < qe; k++) { _put(b, t->qual[k]); } }
+	} else {
+		_put(b, '*');
+	}
+	return;
+}
+
+static void mm_print_sam_supp(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
+{
+	// rname,pos,strand,CIGAR,mapQ,NM;
+	const gaba_path_section_t *s = &a->sec[0];
+	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
+	_puts(b, r->name); _c(b); _putn(b, rs+1); _c(b); _put(b, (flag&0x04)? '-' : '+'); _c(b);
+	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
+	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
+	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); } _c(b);
+	_putn(b, mapq); _c(b); _putn(b, a->xcnt + a->gecnt); _put(b, ';');
+}
+
+static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
+{
+	uint32_t n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
 	for (uint64_t j = 0; j < n_reg; ++j) {
 		uint16_t mapq = _mapq(reg[j]), flag = _flag(reg[j]);
 		const gaba_alignment_t *a = _aln(reg[j]);
 		const mm_idx_t *mi = b->mi;
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
-		const gaba_path_section_t *s = &a->sec[0];
-		uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
-		uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
 
-		_puts(b, t->name); _t(b); _putn(b, flag); _t(b); _puts(b, r->name); _t(b);
-		_putn(b, rs+1); _t(b); _putn(b, mapq>>MAPQ_DEC); _t(b);
-		if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
-		gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
-		if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
-		_puts(b, "\t*\t0\t0\t");
-		if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); } }
-		else { for (int64_t k = qs; k < qe; k++) { _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); } }
-		_t(b);
-		if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
-			if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, t->qual[k-1]); } }
-			else { for (int64_t k = qs; k < qe; k++) { _put(b, t->qual[k]); } }
-		} else {
-			_put(b, '*');
-		}
-		// mm_print_tags(b, t, a, flag, idx);
+		// print body
+		mm_print_mapped_sam_core(b, r, t, a, mapq, flag);
+
 		// print tags
 		uint64_t f = b->opt->flag;
 		if (f & 0x01ULL<<MM_RG) { _puts(b, "\tRG:Z:"); _puts(b, b->opt->rg_id); }
@@ -2098,7 +2117,11 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 		if (f & 0x01ULL<<MM_AS) { _puts(b, "\tAS:i:"); _putn(b, a->score); }
 		if ((f & 0x01ULL<<MM_XS) && j == 0) { _puts(b, "\tXS:i:"); _putn(b, n_reg>1? _aln(reg[1])->score : 0); }
 		if (f & 0x01ULL<<MM_NM) { _puts(b, "\tNM:i:"); _putn(b, a->xcnt + a->gecnt); }
-		if (f & 0x01ULL<<MM_SA) { }
+		if (f & 0x01ULL<<MM_SA && j == 0 && n_uniq > 1) {
+			_puts(b, "\tSA:Z:");
+			for (uint64_t k = 1; k < n_uniq; ++k)
+				mm_print_sam_supp(b, &mi->s.a[(_aln(reg[k])->sec->aid>>1) - mi->base_rid], t, _aln(reg[k]), _mapq(reg[k]), _flag(reg[k]));
+		}
 		if (j == 0) mm_restore_tags(b, t);
 		_cr(b);
 	}
@@ -2107,9 +2130,9 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 
 #define _putd(b, _id)		_put(b, (_id)&0x01? '+' : '-');
 // qname rname idt len #x #gi qs qe rs re e-value bitscore
-static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
+static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
-	for (uint64_t j = 0; j < n_reg; ++j) {
+	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
 		const gaba_alignment_t *a = _aln(reg[j]);
 		const mm_idx_t *mi = b->mi;
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
@@ -2132,9 +2155,9 @@ static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint32_t n_re
 }
 
 // qname rname qd rd score idt rs re rl qs qe ql #cells
-static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
+static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
-	for (uint64_t j = 0; j < n_reg; ++j) {
+	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
 		const gaba_alignment_t *a = _aln(reg[j]);
 		const mm_idx_t *mi = b->mi;
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
@@ -2156,9 +2179,9 @@ static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, uint32_t n_re
 }
 
 // qname rname score idt qd qs qe ql rd rs re rl mapq
-static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
+static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
-	for (uint64_t j = 0; j < n_reg; ++j) {
+	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
 		uint16_t mapq = _mapq(reg[j]);
 		const gaba_alignment_t *a = _aln(reg[j]);
 		const mm_idx_t *mi = b->mi;
@@ -2180,9 +2203,9 @@ static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, uint32_t n_re
 }
 
 // qname ql qs qe qd rname rl rs re #m block_len mapq
-static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
+static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
-	for (uint64_t j = 0; j < n_reg; ++j) {
+	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
 		uint16_t mapq = _mapq(reg[j]);
 		const gaba_alignment_t *a = _aln(reg[j]);
 		const mm_idx_t *mi = b->mi;
@@ -2198,9 +2221,9 @@ static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, uint32_t n_reg, 
 }
 
 // qname rname 1-idt score qd qs qe ql rd rs rd rl
-static void mm_print_mapped_mhap(mm_align_t *b, const bseq_t *t, uint32_t n_reg, const mm128_t *reg)
+static void mm_print_mapped_mhap(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
-	for (uint64_t j = 0; j < n_reg; ++j) {
+	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
 		const gaba_alignment_t *a = _aln(reg[j]);
 		const mm_idx_t *mi = b->mi;
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
@@ -2219,6 +2242,7 @@ static void mm_print_mapped_mhap(mm_align_t *b, const bseq_t *t, uint32_t n_reg,
 }
 #undef _d
 #undef _t
+#undef _c
 #undef _cr
 #undef _put
 #undef _putn
@@ -2260,13 +2284,13 @@ static void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 {
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
 		mm128_t *r = (mm128_t*)s->reg.a[i].u64[0];
-		uint32_t n_reg = s->reg.a[i].u64[1];
+		uint64_t n_reg = s->reg.a[i].u64[1];	// n_reg in lower 32bit, n_uniq in higher 32bit
 		if (r == 0) {
 			if (b->printer.unmapped) b->printer.unmapped(b, &s->seq[i]);
 			continue;
 		}
 		b->printer.mapped(b, &s->seq[i], n_reg, r);
-		for (uint64_t j = 0; j < n_reg; ++j) { lmm_free(s->lmm, (void*)r[j].u64[1]); }
+		for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) { lmm_free(s->lmm, (void*)r[j].u64[1]); }
 		free(r);
 	}
 	free(s->reg.a); free(s->base); free((void*)s->seq); lmm_clean(s->lmm); free(s);
