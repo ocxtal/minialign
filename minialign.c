@@ -375,7 +375,7 @@ static int pt_set_worker(pt_t *pt, pt_worker_t wfp, void **warg)
 {
 	void *item;
 	if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) { pt_enq(pt->c->in, pt->c->tid, item); return -1; }
-	for (uint64_t i = 0; i < pt->nth; ++i) pt->c[i].wfp = wfp, pt->c[i].warg = warg[i];
+	for (uint64_t i = 0; i < pt->nth; ++i) pt->c[i].wfp = wfp, pt->c[i].warg = warg? warg[i] : NULL;
 	fence();
 	return 0;
 }
@@ -391,10 +391,10 @@ static int pt_stream(pt_t *pt, pt_source_t sfp, void *sarg, pt_worker_t wfp, voi
 		if (++bal < ub) continue;
 		while (bal > lb) {
 			if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(pt->c->tid, darg, item), bal--;
-			if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) dfp(pt->c->tid, darg, wfp(pt->c->tid, *warg, item)), bal--;
+			if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) dfp(pt->c->tid, darg, wfp(pt->c->tid, warg? *warg : NULL, item)), bal--;
 		}
 	}
-	while ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) pt_enq(pt->c->out, pt->c->tid, wfp(pt->c->tid, *warg, item));
+	while ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) pt_enq(pt->c->out, pt->c->tid, wfp(pt->c->tid, warg? *warg : NULL, item));
 	while (bal > 0) if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) dfp(pt->c->tid, darg, item), bal--;
 	return 0;
 }
@@ -403,7 +403,7 @@ static int pt_parallel(pt_t *pt, pt_worker_t wfp, void **warg, void **src, void 
 {
 	if (pt_set_worker(pt, wfp, warg)) return -1;
 	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, src? src[i] : NULL);
-	void *res = wfp(pt->c->tid, warg[0], src? src[0] : NULL); if (dst && dst[0]) dst[0] = res;
+	void *res = wfp(pt->c->tid, warg? warg[0] : NULL, src? src[0] : NULL); if (dst && dst[0]) dst[0] = res;
 	for (uint64_t i = 1; i < pt->nth; ++i) {
 		while ((res = pt_deq(pt->c->out, pt->c->tid)) == PT_EMPTY) sched_yield();
 		if (dst && dst[i]) dst[i] = res;
@@ -1427,7 +1427,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->n_threads;
 		qq[i] = &q[i];
 	}
-	pt_parallel(pt, mm_idx_post, (void**)qq, NULL, NULL);
+	pt_parallel(pt, mm_idx_post, NULL, (void**)qq, NULL);
 	pt_destroy(pt);
 
 	free(q); free(qq);
