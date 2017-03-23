@@ -1172,14 +1172,14 @@ typedef struct { size_t n, m; mm_idx_seq_t *a; } mm_idx_seq_v;
 
 typedef struct {
 	mm128_v a;   // (minimizer, position) array
-	int32_t n;   // size of the _p_ array
+	uint64_t n;   // size of the _p_ array
 	uint64_t *p; // position array for minimizers appearing >1 times
-	void *h;     // hash table indexing _p_ and minimizers appearing once
+	kh_t *h;     // hash table indexing _p_ and minimizers appearing once
 } mm_idx_bucket_t;
 
 typedef struct {
 	uint64_t mask;
-	mm_idx_bucket_t *B;
+	mm_idx_bucket_t *bkt;
 	mm_idx_seq_v s;
 	uint8_t b, w, k, circular;
 	uint32_t base_rid;
@@ -1194,7 +1194,7 @@ static mm_idx_t *mm_idx_init(uint32_t w, uint32_t k, uint32_t b)
 {
 	mm_idx_t *mi = (mm_idx_t*)calloc(1, sizeof(mm_idx_t));
 	mi->w = w<1? 1 : w, mi->k = k; mi->b = MIN2(k*2, b); mi->mask = (1<<mi->b) - 1;
-	mi->B = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t));
+	mi->bkt = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t));
 	return mi;
 }
 
@@ -1202,11 +1202,11 @@ static void mm_idx_destroy(mm_idx_t *mi)
 {
 	if (mi == 0) return;
 	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
-		free(mi->B[i].p);
-		free(mi->B[i].a.a);
-		kh_destroy((kh_t*)mi->B[i].h);
+		free(mi->bkt[i].p);
+		free(mi->bkt[i].a.a);
+		kh_destroy((kh_t*)mi->bkt[i].h);
 	}
-	free(mi->B);
+	free(mi->bkt);
 	for (uint64_t i = 0; i < mi->base.n; ++i) free(mi->base.a[i]);
 	free(mi->base.a); free(mi->size.a);
 	free(mi->s.a); free(mi->a.a); free(mi);
@@ -1214,7 +1214,7 @@ static void mm_idx_destroy(mm_idx_t *mi)
 
 static const v2u32_t *mm_idx_get(const mm_idx_t *mi, uint64_t minier, uint64_t *n)
 {
-	mm_idx_bucket_t *b = &mi->B[minier & mi->mask];
+	mm_idx_bucket_t *b = &mi->bkt[minier & mi->mask];
 	kh_t *h = (kh_t*)b->h;
 	const uint64_t *p;
 	if (h == NULL || (p = kh_get_ptr(h, minier>>mi->b)) == NULL) {
@@ -1237,11 +1237,11 @@ static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, double f)
 	set_info(0, "[mm_idx_cal_max_occ] calculate occurrence thresholds");
 	if (f <= 0.) return UINT32_MAX;
 	for (uint64_t i = (n = 0); i < 1ULL<<mi->b; ++i)
-		if (mi->B[i].h) n += kh_cnt((kh_t*)mi->B[i].h);
+		if (mi->bkt[i].h) n += kh_cnt((kh_t*)mi->bkt[i].h);
 	
 	uint32_t *a = (uint32_t*)malloc(n * sizeof(uint32_t));
 	for (uint64_t i = (n = 0); i < 1ULL<<mi->b; ++i) {
-		kh_t *h = (kh_t*)mi->B[i].h;
+		kh_t *h = (kh_t*)mi->bkt[i].h;
 		if (h == 0) continue;
 		for (uint64_t k = 0; k < kh_size(h); ++k) {
 			if (!kh_exist(h, k)) continue;
@@ -1319,7 +1319,7 @@ static void mm_idx_drain_intl(mm_idx_pipeline_t *q, mm_idx_step_t *s)
 	}
 	uint64_t mask = q->mi->mask;
 	for (uint64_t i = 0; i < s->a.n; ++i) {
-		mm128_v *p = &q->mi->B[s->a.a[i].u64[0]&mask].a;
+		mm128_v *p = &q->mi->bkt[s->a.a[i].u64[0]&mask].a;
 		kv_push(mm128_t, *p, s->a.a[i]);
 	}
 
@@ -1353,11 +1353,11 @@ typedef struct {
 static void *mm_idx_post(uint32_t tid, void *arg, void *item)
 {
 	set_info(tid, "[mm_idx_post] indexing postprocess");
-	mm_idx_post_t *q = (mm_idx_post_t*)arg;
+	mm_idx_post_t *q = (mm_idx_post_t*)item;
 	mm_idx_t *mi = q->mi;
 
 	for (uint64_t i = q->from; i < q->to; ++i) {
-		mm_idx_bucket_t *b = &mi->B[i];
+		mm_idx_bucket_t *b = &mi->bkt[i];
 		if (b->a.n == 0) continue;
 
 		// sort by minimizer
@@ -1451,7 +1451,7 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t n_threads)
 	pgwrite(pg, x, sizeof(uint32_t) * 3);
 	pgwrite(pg, y, sizeof(uint64_t) * 2);
 	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
-		mm_idx_bucket_t *b = &mi->B[i];
+		mm_idx_bucket_t *b = &mi->bkt[i];
 		pgwrite(pg, &b->n, sizeof(uint32_t) * 1);
 		pgwrite(pg, b->p, sizeof(uint64_t) * b->n);
 		kh_dump((kh_t*)b->h, pg, (khwrite_t)pgwrite);
@@ -1492,7 +1492,7 @@ static mm_idx_t *mm_idx_load(FILE *fp, uint32_t n_threads)
 	if (pgread(pg, y, sizeof(uint64_t) * 2) != sizeof(uint64_t) * 2) return 0;
 	mi = mm_idx_init(x[0], x[1], x[2]); mi->s.n = y[0]; bsize = y[1];
 	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
-		mm_idx_bucket_t *b = &mi->B[i];
+		mm_idx_bucket_t *b = &mi->bkt[i];
 		if (pgread(pg, &b->n, sizeof(uint32_t) * 1) != sizeof(uint32_t) * 1) goto _mm_idx_load_fail;
 		b->p = (uint64_t*)malloc(b->n * sizeof(uint64_t));
 		if (pgread(pg, b->p, sizeof(uint64_t) * b->n) != sizeof(uint64_t) * (size_t)b->n) goto _mm_idx_load_fail;
