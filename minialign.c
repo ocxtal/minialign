@@ -650,10 +650,7 @@ static bam_header_t *bam_read_header(gzFile fp)
 	int magic_len;
 	// read "BAM1"
 	magic_len = gzread(fp, buf, 4);
-	if (magic_len != 4 || strncmp(buf, "BAM\001", 4) != 0) {
-		// fprintf(stderr, "[bam_read_header] invalid BAM binary header (this is not a BAM file).\n");
-		return NULL;
-	}
+	if (magic_len != 4 || strncmp(buf, "BAM\001", 4) != 0) return NULL;
 	header = calloc(1, sizeof(bam_header_t));
 	// read plain text and the number of reference sequences
 	if (gzread(fp, &header->l_text, 4) != 4) goto _bam_read_header_fail;
@@ -1311,7 +1308,6 @@ static void mm_idx_drain_intl(mm_idx_pipeline_t *q, mm_idx_step_t *s)
 	uint64_t hidx = s->seq[0].rid-q->mi->base_rid, n_req = s->seq[s->n_seq-1].rid+1-q->mi->base_rid;
 	q->mi->s.n = MAX2(q->mi->s.n, n_req);
 	kv_reserve(mm_idx_seq_t, q->mi->s, q->mi->s.n);
-	fprintf(stderr, "id(%u), hidx(%lu), n_seq(%u), n_req(%lu)\n", s->id, hidx, s->n_seq, n_req);
 
 	const bseq_t *src = s->seq;
 	mm_idx_seq_t *dst = &q->mi->s.a[hidx];
@@ -1344,7 +1340,6 @@ static void mm_idx_drain(uint32_t tid, void *arg, void *item)
 			mm_idx_drain_intl(q, s);
 		}
 	#else
-		#warning "weak ordering"
 		mm_idx_drain_intl(q, s);
 	#endif
 	return;
