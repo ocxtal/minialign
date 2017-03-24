@@ -1060,6 +1060,7 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 #define MM_AVA			( 0x01ULL<<48 )
 #define MM_KEEP_QUAL	( 0x02ULL<<48 )
 #define MM_CIRCULAR		( 0x04ULL<<48 )
+#define MM_OMIT_REP		( 0x08ULL<<48 )		// omit secondary records
 
 #define MM_BLAST6		( 0x01ULL<<56 )
 #define MM_BLASR1		( 0x02ULL<<56 )
@@ -2098,9 +2099,10 @@ static void mm_print_sam_supp(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t
 
 static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
-	uint32_t n_uniq = n_reg>>32;
+	const uint64_t f = b->opt->flag;
+	const uint32_t n_uniq = n_reg>>32;
 	n_reg &= 0xffffffff;
-	for (uint64_t j = 0; j < n_reg; ++j) {
+	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
 		uint16_t mapq = _mapq(reg[j]), flag = _flag(reg[j]);
 		const gaba_alignment_t *a = _aln(reg[j]);
 		const mm_idx_t *mi = b->mi;
@@ -2110,19 +2112,19 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, 
 		mm_print_mapped_sam_core(b, r, t, a, mapq, flag);
 
 		// print tags
-		uint64_t f = b->opt->flag;
 		if (f & 0x01ULL<<MM_RG) { _puts(b, "\tRG:Z:"); _puts(b, b->opt->rg_id); }
-		if (f & 0x01ULL<<MM_NH) { _puts(b, "\tNH:i:"); _putn(b, n_reg); }
+		if (f & 0x01ULL<<MM_NH) { _puts(b, "\tNH:i:"); _putn(b, n_reg); }	// (f & MM_OMIT_REP)? n_uniq : n_reg
 		if (f & 0x01ULL<<MM_IH) { _puts(b, "\tIH:i:"); _putn(b, j); }
 		if (f & 0x01ULL<<MM_AS) { _puts(b, "\tAS:i:"); _putn(b, a->score); }
-		if ((f & 0x01ULL<<MM_XS) && j == 0) { _puts(b, "\tXS:i:"); _putn(b, n_reg>1? _aln(reg[1])->score : 0); }
+		if ((f & 0x01ULL<<MM_XS) && (flag & 0x900) == 0) { _puts(b, "\tXS:i:"); _putn(b, n_reg>1? _aln(reg[1])->score : 0); }
 		if (f & 0x01ULL<<MM_NM) { _puts(b, "\tNM:i:"); _putn(b, a->xcnt + a->gecnt); }
-		if (f & 0x01ULL<<MM_SA && j == 0 && n_uniq > 1) {
+		if (f & 0x01ULL<<MM_SA && (flag & 0x900) == 0 && n_uniq > 1) {
 			_puts(b, "\tSA:Z:");
 			for (uint64_t k = 1; k < n_uniq; ++k)
 				mm_print_sam_supp(b, &mi->s.a[(_aln(reg[k])->sec->aid>>1) - mi->base_rid], t, _aln(reg[k]), _mapq(reg[k]), _flag(reg[k]));
+			j = n_uniq;		// skip supplementary records when SA tag is enabled
 		}
-		if (j == 0) mm_restore_tags(b, t);
+		if ((flag & 0x900) == 0) mm_restore_tags(b, t);
 		_cr(b);
 	}
 	return;
@@ -2473,10 +2475,12 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "  Output:\n");
 	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf,mhap} [%s]\n",
 		(const char *[]){ "sam", "blast6", "blasr1", "blasr4", "paf", "mhap" }[opt->flag>>56]);
+	fprintf(stderr, "    -P           omit secondary (repetitive) alignments\n");
 	fprintf(stderr, "    -Q           include quality string\n");
 	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" [%s]\n", opt->rg_line? opt->rg_line : "");
-	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,} []\n");
-	fprintf(stderr, "                   (RG is also inferred from -R)\n");
+	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,XS,NM,NH,IH,SA} []\n");
+	fprintf(stderr, "                   RG is also inferred from -R\n");
+	fprintf(stderr, "                   supp. records are omitted when SA tag is enabled\n");
 	fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
 	fprintf(stderr, "\n");
 	return;
@@ -2579,7 +2583,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 {
 	while (optind < argc) {
 		int ch;
-		if ((ch = getopt(argc, argv, "k:w:f:c:x:B:t:V:d:l:Xs:m:r:a:b:p:q:L:H:I:J:S:E:Y:O:QR:T:U:vh")) < 0) {
+		if ((ch = getopt(argc, argv, "k:w:f:c:x:B:t:V:d:l:Xs:m:r:a:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
 			kv_push(void*, *v, argv[optind]); optind++; continue;
 		}
 
@@ -2612,6 +2616,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 'E') o->eidx = atoi(optarg);
 		else if (ch == 'Y') o->xdrop = atoi(optarg);
 		else if (ch == 'O') o->flag &= ~(0xffULL<<56), o->flag |= mm_mapopt_parse_format(optarg);
+		else if (ch == 'P') o->flag |= MM_OMIT_REP;
 		else if (ch == 'Q') o->flag |= MM_KEEP_QUAL;
 		else if (ch == 'R') mm_mapopt_parse_rg(o, optarg);
 		else if (ch == 'T') o->flag |= mm_mapopt_parse_tags(optarg, NULL);
