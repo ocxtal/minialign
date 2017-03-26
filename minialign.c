@@ -1961,21 +1961,21 @@ static const mm128_t *mm_align_seq(
 #define _putfi(type, _buf, _n, _c) ({ \
 	uint64_t _b = 0; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) { _b += _m % 10, _m /= 10; _i++; _b <<= 4; } \
+	while (_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_i += (_i==0); _i += (_c - _i + 1 > 0)? _c - _i + 1 : 0; \
 	_flush(_buf, _i + 1); \
-	for (int64_t _j = _i; _j > (_c); _j--) { _b>>=4; *(_buf)->p++ = (_b&0x0f) + '0'; } \
+	for (int64_t _j = _i; _j > (_c); _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	*(_buf)->p++ = '.'; \
-	for (int64_t _j = (_c); _j > 0; _j--) { _b>>=4; *(_buf)->p++ = (_b&0x0f) + '0'; } \
+	for (int64_t _j = (_c); _j > 0; _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	_i; \
 })
 #define _puti(type, _buf, _n) ({ \
 	uint64_t _b = 0; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) { _b += _m % 10, _m /= 10; _i++; _b <<= 4; } \
+	while (_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_i += (_i==0); \
 	_flush(_buf, _i); \
-	for (int64_t _j = _i; _j > 0; _j--) { _b>>=4; *(_buf)->p++ = (_b&0x0f) + '0'; } \
+	for (int64_t _j = _i; _j > 0; _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	_i; \
 })
 #define _putn(_buf, _n) _puti(uint32_t, _buf, _n)
