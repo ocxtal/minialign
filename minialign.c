@@ -1942,10 +1942,10 @@ static const mm128_t *mm_align_seq(
 #undef _s
 #undef _m
 
-#define BUF_SIZE	( 512 * 1024 )
+#define BUF_SIZE8	( 512 * 1024 )
 #define _put(_buf, _c) { \
 	*(_buf)->p++ = (_c); \
-	if ((uintptr_t)(_buf)->p >= (uintptr_t)(_buf)->tail) { \
+	if (_unlikely((uintptr_t)(_buf)->p >= (uintptr_t)(_buf)->tail)) { \
 		fwrite((_buf)->base, sizeof(uint8_t), (_buf)->p - (_buf)->base, stdout); \
 		(_buf)->p = (_buf)->base; \
 	} \
@@ -1982,6 +1982,7 @@ static const mm128_t *mm_align_seq(
 #define MM_XS			( 5 )		// i: suboptimal score
 #define MM_NM 			( 6 )		// i: editdist to the reference
 #define MM_SA			( 7 )		// Z: supplementary records
+#define MM_MD			( 8 )		// Z: mismatch positions
 
 static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 {
@@ -2097,6 +2098,127 @@ static void mm_print_sam_supp(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t
 	_putn(b, mapq); _c(b); _putn(b, a->xcnt + a->gecnt); _put(b, ';');
 }
 
+static inline
+uint64_t parse_load_uint64(
+	uint64_t const *ptr,
+	int64_t pos)
+{
+	int64_t rem = pos & 63;
+	uint64_t a = (ptr[pos>>6]>>rem) | ((ptr[(pos>>6) + 1]<<(63 - rem))<<1);
+	debug("load arr(%llx)", a);
+	return(a);
+}
+
+void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, const gaba_alignment_t *a, uint16_t flag)
+{
+	/*
+	 * print MD tag
+	 * note: this operation requires head-to-tail comparison of two sequences,
+	 *       which may result in several percent performance degradation.
+	 */
+	const gaba_path_section_t *s = &a->sec[0];
+	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
+	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
+
+	_puts(b, "\tMD:Z:");
+	const uint32_t *ptr = &a->path->array[((a->path->len-1)>>5) - 1];
+	uint64_t rem = ((a->path->len-1)&0x1f) + 1;
+	uint64_t arr = _loadu_u64(ptr)<<(64 - rem), macc = 0;
+	const uint8_t *rp = &r->seq[rs], *qp = &t->seq[qs], *tp = &t->seq[qe];
+	while (qp < tp) {
+		// suppose each indel block is shorter than 32 bases
+		int64_t xarr = (((int64_t)arr)>>62) ^ 0x01;
+		if (xarr < 0) {			// is_ins
+			const uint64_t scnt = lzcnt(~arr);
+			arr <<= scnt; qp += scnt;
+		} else if (xarr > 0) {	// is_del
+			const uint64_t scnt = lzcnt(arr);
+			arr <<= scnt; rp += scnt;
+			if (macc) { _putn(b, (int32_t)macc); }
+			_put(b, '^');
+			for (uint64_t i = 0; i < scnt; ++i) { _put(b, *rp); rp++; }
+		}
+		// match or mismatch
+		uint64_t acnt = 64;
+		while (acnt == 64) {
+			arr |= _loadu_u64(ptr)>>rem;
+			acnt = lzcnt(arr^0x5555555555555555)>>1;
+			v32i8_t rv = _loadu_v32i8(rp), qv = _loadu_v32i8(qp);
+			uint64_t mmask = ~((uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all)<<32;
+			uint64_t mcnt = lzcnt(mmask);
+			macc += mcnt;
+			if (mcnt == acnt) continue;
+			if (macc) { _putn(b, (int32_t)macc); }
+			rp += macc; qp += macc;
+			uint64_t xlen = MIN2(lzcnt(~mmask<<mcnt), acnt - mcnt);
+			for (uint64_t i = 0; i < xlen; ++i) { _put(b, *rp); rp++; qp++; }
+			arr <<= 2*xlen; macc = 0;
+			ptr -= (int64_t)(rem - xlen) < 0; rem = (rem - xlen) & 0x1f;
+		}
+	}
+	return;
+}
+
+#if 0
+static inline
+uint64_t parse_load_uint64(
+	uint64_t const *ptr,
+	int64_t pos)
+{
+	int64_t rem = pos & 63;
+	uint64_t a = (ptr[pos>>6]>>rem) | ((ptr[(pos>>6) + 1]<<(63 - rem))<<1);
+	debug("load arr(%llx)", a);
+	return(a);
+}
+
+uint64_t suffix(gaba_dp_print_cigar_reverse)(
+	gaba_dp_printer_t printer,
+	void *fp,
+	uint32_t const *path,
+	uint32_t offset,
+	uint32_t len)
+{
+	int64_t clen = 0;
+
+	/* convert path to uint64_t pointer */
+	uint64_t const *p = (uint64_t const *)((uint64_t)path & ~(sizeof(uint64_t) - 1));
+	uint64_t ofs = (int64_t)offset + (((uint64_t)path & sizeof(uint32_t)) ? -32 : -64);
+	uint64_t idx = len;
+
+	debug("path(%p, %x), p(%p, %llx), idx(%lld), mod(%lld)",
+		path, *path, p, *p, idx, idx % 64);
+
+	while(1) {
+		uint64_t sidx = idx;
+		while(1) {
+			uint64_t m = _parse_count_match_reverse(parse_load_uint64(p, idx + ofs));
+			uint64_t a = MIN2(m, idx) & ~0x01;
+			idx -= a;
+			if(a < 64) { break; }
+
+			debug("bulk match");
+		}
+		uint64_t m = (sidx - idx)>>1;
+		if(m > 0) {
+			clen += printer(fp, m, 'M');
+			debug("match m(%lld)", m);
+		}
+		if(idx == 0) { break; }
+
+		uint64_t arr;
+		uint64_t g = MIN2(
+			_parse_count_gap_reverse(arr = parse_load_uint64(p, idx + ofs)),
+			idx);
+		if(g > 0) {
+			clen += printer(fp, g, 'D' + ((char)(((int64_t)arr)>>63) & ('I' - 'D')));
+			debug("gap g(%lld)", g);
+		}
+		if((idx -= g) <= 1) { break; }
+	}
+	return(clen);
+}
+#endif
+
 static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
 	const uint64_t f = b->opt->flag;
@@ -2124,6 +2246,7 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, 
 				mm_print_sam_supp(b, &mi->s.a[(_aln(reg[k])->sec->aid>>1) - mi->base_rid], t, _aln(reg[k]), _mapq(reg[k]), _flag(reg[k]));
 			j = n_uniq;		// skip supplementary records when SA tag is enabled
 		}
+		if (f & 0x01ULL<<MM_MD) mm_print_sam_md(b, r, t, a, flag);
 		if ((flag & 0x900) == 0) mm_restore_tags(b, t);
 		_cr(b);
 	}
@@ -2478,7 +2601,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -P           omit secondary (repetitive) alignments\n");
 	fprintf(stderr, "    -Q           include quality string\n");
 	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" [%s]\n", opt->rg_line? opt->rg_line : "");
-	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,XS,NM,NH,IH,SA} []\n");
+	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []\n");
 	fprintf(stderr, "                   RG is also inferred from -R\n");
 	fprintf(stderr, "                   supp. records are omitted when SA tag is enabled\n");
 	fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
@@ -2534,6 +2657,7 @@ static uint64_t mm_mapopt_parse_tags(const char *p, uint16_v *buf)
 			else if (strncmp(p, "XS", 2) == 0) flag |= 0x01ULL<<MM_XS;
 			else if (strncmp(p, "NM", 2) == 0) flag |= 0x01ULL<<MM_NM;
 			else if (strncmp(p, "SA", 2) == 0) flag |= 0x01ULL<<MM_SA;
+			else if (strncmp(p, "MD", 2) == 0) flag |= 0x01ULL<<MM_MD;
 		}
 		if (*q == '\0') break;
 		p = q + 1;
