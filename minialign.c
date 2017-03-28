@@ -4,7 +4,7 @@
 #define _DARWIN_C_SOURCE	_DARWIN_C_FULL
 
 /* set non-zero value to ensure order of streamed objects */
-#define STRICT_STREAM_ORDERING		( 1 )
+#define STRICT_STREAM_ORDERING		( 0 )
 
 #include <assert.h>
 #include <getopt.h>
