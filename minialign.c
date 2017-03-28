@@ -830,6 +830,7 @@ static void bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *
 	return;
 }
 
+#if 1
 static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
 	bseq_t *s;
@@ -863,7 +864,7 @@ static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	mem->a[mem->n++] = '\0';
 	return;
 }
-
+#else
 static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
 	bseq_t *s;
@@ -933,6 +934,7 @@ static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	mem->a[mem->n++] = '\0';
 	return;
 }
+#endif
 
 static bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n, void **base, uint64_t *size)
 {
