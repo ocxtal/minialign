@@ -1739,12 +1739,7 @@ static const gaba_alignment_t *mm_extend(
 		p = gaba_dp_search_max(dp, m);
 		// check duplicate
 		key |= (uint32_t)(p.apos - (p.bpos>>1));
-		// fprintf(stderr, "key(%lx)\n", key);
-		if (kh_get_ptr(pos, key) != NULL) {
-			// fprintf(stderr, "hit\n");
-			return 0;	// already evaluated
-		}
-		// fprintf(stderr, "put(%lx)\n", key);
+		if (kh_get_ptr(pos, key) != NULL) return 0;	// already evaluated
 		kh_put(pos, key, (uintptr_t)NULL);	// mark evaluated
 		// downward extension from max
 		gaba_dp_flush_stack(dp, stack);
@@ -1762,10 +1757,7 @@ static const gaba_alignment_t *mm_extend(
 		break;
 	}
 	// record head
-	if (a) {
-		// fprintf(stderr, "record(%lx), score(%ld)\n", key, a->score);
-		kh_put(pos, key, (uintptr_t)a);
-	}
+	if (a) kh_put(pos, key, (uintptr_t)a);
 	return a;
 _abort:;
 	oom_abort(__func__);
@@ -1897,11 +1889,6 @@ static const mm128_t *mm_align_seq(
 				mm_expand(b->resc.a[j].u32[1], (const v2u32_t*)b->resc.a[j].u64[1], qid, b->resc.a[j].u32[0], thresh, &b->coef);
 		}
 		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
-
-		// fprintf(stderr, "==== i(%lu)\n", i);
-		for (uint64_t k = 0; k < b->coef.n; ++k) {
-			// fprintf(stderr, "rid(%u), rs(%d), qs(%d), coef(%d)\n", b->coef.a[k].u32[1], (int32_t)b->coef.a[k].u32[2], (int32_t)b->coef.a[k].u32[3], (int32_t)b->coef.a[k].u32[0] - 0x40000000);
-		}
 
 		mm_chain(b->coef.n, b->coef.a, opt->llim, opt->hlim, min>>2, &b->intv);
 		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
