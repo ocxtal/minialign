@@ -2163,7 +2163,7 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 				rb = rp;
 			}
 		}
-		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); } rb = rp;
+		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); }
 	} else {
 		const uint8_t *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[qs];
 		while (pos > ofs) {
@@ -2193,7 +2193,7 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 				rb = rp;
 			}
 		}
-		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); } rb = rp;
+		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); }
 	}
 	#undef _load
 	return;
