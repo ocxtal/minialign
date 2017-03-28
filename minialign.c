@@ -2199,66 +2199,6 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 	return;
 }
 
-#if 0
-static inline
-uint64_t parse_load_uint64(
-	uint64_t const *ptr,
-	int64_t pos)
-{
-	int64_t rem = pos & 63;
-	uint64_t a = (ptr[pos>>6]>>rem) | ((ptr[(pos>>6) + 1]<<(63 - rem))<<1);
-	debug("load arr(%llx)", a);
-	return(a);
-}
-
-uint64_t suffix(gaba_dp_print_cigar_reverse)(
-	gaba_dp_printer_t printer,
-	void *fp,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len)
-{
-	int64_t clen = 0;
-
-	/* convert path to uint64_t pointer */
-	uint64_t const *p = (uint64_t const *)((uint64_t)path & ~(sizeof(uint64_t) - 1));
-	uint64_t ofs = (int64_t)offset + (((uint64_t)path & sizeof(uint32_t)) ? -32 : -64);
-	uint64_t idx = len;
-
-	debug("path(%p, %x), p(%p, %llx), idx(%lld), mod(%lld)",
-		path, *path, p, *p, idx, idx % 64);
-
-	while(1) {
-		uint64_t sidx = idx;
-		while(1) {
-			uint64_t m = _parse_count_match_reverse(parse_load_uint64(p, idx + ofs));
-			uint64_t a = MIN2(m, idx) & ~0x01;
-			idx -= a;
-			if(a < 64) { break; }
-
-			debug("bulk match");
-		}
-		uint64_t m = (sidx - idx)>>1;
-		if(m > 0) {
-			clen += printer(fp, m, 'M');
-			debug("match m(%lld)", m);
-		}
-		if(idx == 0) { break; }
-
-		uint64_t arr;
-		uint64_t g = MIN2(
-			_parse_count_gap_reverse(arr = parse_load_uint64(p, idx + ofs)),
-			idx);
-		if(g > 0) {
-			clen += printer(fp, g, 'D' + ((char)(((int64_t)arr)>>63) & ('I' - 'D')));
-			debug("gap g(%lld)", g);
-		}
-		if((idx -= g) <= 1) { break; }
-	}
-	return(clen);
-}
-#endif
-
 static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
 	const uint64_t f = b->opt->flag;
