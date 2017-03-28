@@ -31,6 +31,10 @@
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
 #define MIN2(x,y) 		( (x) < (y) ? (x) : (y) )
 
+/* _likely, _unlikely */
+#define _likely(x)		__builtin_expect(!!(x), 1)
+#define _unlikely(x)	__builtin_expect(!!(x), 0)
+
 /* timer */
 int mm_verbose = 3;
 double mm_realtime0;
@@ -1942,36 +1946,50 @@ static const mm128_t *mm_align_seq(
 #undef _s
 #undef _m
 
-#define BUF_SIZE8	( 512 * 1024 )
-#define _put(_buf, _c) { \
-	*(_buf)->p++ = (_c); \
-	if ((uintptr_t)(_buf)->p >= (uintptr_t)(_buf)->tail) { \
+#define BUF_SIZE	( 512 * 1024 )
+// flush the buffer if there is no room for (margin + 1) bytes
+#define _flush(_buf, _margin) { \
+	if (_unlikely((uintptr_t)(_buf)->p + (_margin) >= (uintptr_t)(_buf)->tail)) { \
 		fwrite((_buf)->base, sizeof(uint8_t), (_buf)->p - (_buf)->base, stdout); \
 		(_buf)->p = (_buf)->base; \
 	} \
 }
+#define _put(_buf, _c) { \
+	_flush(_buf, 1); \
+	*(_buf)->p++ = (_c); \
+}
 #define _putfi(type, _buf, _n, _c) ({ \
-	uint8_t _b[16] = {0}; \
+	uint64_t _b = 0; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) _b[_i++] = _m % 10, _m /= 10; \
-	_i += (_i==0); \
-	_i += (_c - _i + 1 > 0)? _c - _i + 1 : 0; \
-	for (int64_t _j = _i; _j > (_c); _j--) { _put(_buf, _b[_j-1]+'0'); } \
-	_put(_buf, '.'); \
-	for (int64_t _j = (_c); _j > 0; _j--) { _put(_buf, _b[_j-1]+'0'); } \
+	while (_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
+	_i += (_i==0); _i += (_c - _i + 1 > 0)? _c - _i + 1 : 0; \
+	_flush(_buf, _i + 1); \
+	for (int64_t _j = _i; _j > (_c); _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
+	*(_buf)->p++ = '.'; \
+	for (int64_t _j = (_c); _j > 0; _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	_i; \
 })
 #define _puti(type, _buf, _n) ({ \
-	uint8_t _b[16] = {0}; \
+	uint64_t _b = 0; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) _b[_i++] = _m % 10, _m /= 10; \
+	while (_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_i += (_i==0); \
-	for (int64_t _j = _i; _j > 0; _j--) { _put(_buf, _b[_j-1]+'0'); } \
+	_flush(_buf, _i); \
+	for (int64_t _j = _i; _j > 0; _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	_i; \
 })
 #define _putn(_buf, _n) _puti(uint32_t, _buf, _n)
 #define _puts(_buf, _s) { \
 	for (const uint8_t *_q = (const uint8_t*)(_s); *_q; _q++) { _put(_buf, *_q); } \
+}
+#define _putsn(_buf, _s, _l) { \
+	_flush(_buf, _l); \
+	for (const uint8_t *_q = (const uint8_t*)(_s), *_t = _q + (_l); _q < _t; _q++) *(_buf)->p++ = *(_q); \
+}
+#define _putsk(_buf, _s) { \
+	const uint64_t _l = strlen(_s); \
+	_flush(_buf, _l); \
+	for (const uint8_t *_q = (const uint8_t*)(_s), *_t = _q + (_l); _q < _t; _q++) *(_buf)->p++ = *(_q); \
 }
 
 #define MM_RG			( 0 )		// Z: read group
@@ -2030,20 +2048,20 @@ static void mm_restore_tags(mm_align_t *b, const bseq_t *t)
 static void mm_print_header_sam(mm_align_t *b)
 {
 	const mm_idx_t *mi = b->mi;
-	_puts(b, "@HD\tVN:1.0\tSO:unsorted\n");
+	_putsk(b, "@HD\tVN:1.0\tSO:unsorted\n");
 	for (uint64_t i = 0; i < mi->s.n; ++i) {
-		_puts(b, "@SQ\tSN:"); _puts(b, mi->s.a[i].name);
-		_puts(b, "\tLN:"); _putn(b, mi->s.a[i].l_seq);
+		_putsk(b, "@SQ\tSN:"); _putsn(b, mi->s.a[i].name, mi->s.a[i].l_name);
+		_putsk(b, "\tLN:"); _putn(b, mi->s.a[i].l_seq);
 		_cr(b);
 	}
 	if (b->opt->flag & 0x01ULL<<MM_RG) { _puts(b, b->opt->rg_line); _cr(b); }
-	_puts(b, "@PG\tID:minialign\tPN:minialign\n");
+	_putsk(b, "@PG\tID:minialign\tPN:minialign\n");
 	return;
 }
 
 static void mm_print_unmapped_sam(mm_align_t *b, const bseq_t *t)
 {
-	_puts(b, t->name); _puts(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");
+	_putsn(b, t->name, t->l_name); _putsk(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");
 	for (uint64_t k = 0; k < t->l_seq; k++) _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]);
 	_t(b);
 	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') { _puts(b, t->qual); }
@@ -2068,12 +2086,12 @@ static void mm_print_mapped_sam_core(mm_align_t *b, const mm_idx_seq_t *r, const
 	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
 	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
 
-	_puts(b, t->name); _t(b); _putn(b, flag); _t(b); _puts(b, r->name); _t(b);
+	_putsn(b, t->name, t->l_name); _t(b); _putn(b, flag); _t(b); _putsn(b, r->name, r->l_name); _t(b);
 	_putn(b, rs+1); _t(b); _putn(b, mapq>>MAPQ_DEC); _t(b);
 	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
 	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); }
-	_puts(b, "\t*\t0\t0\t");
+	_putsk(b, "\t*\t0\t0\t");
 	if (flag&0x10) { for (int64_t k = t->l_seq-qs; k > t->l_seq-qe; k--) { _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k-1]]); } }
 	else { for (int64_t k = qs; k < qe; k++) { _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); } }
 	_t(b);
@@ -2091,7 +2109,7 @@ static void mm_print_sam_supp(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t
 	// rname,pos,strand,CIGAR,mapQ,NM;
 	const gaba_path_section_t *s = &a->sec[0];
 	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
-	_puts(b, r->name); _c(b); _putn(b, rs+1); _c(b); _put(b, (flag&0x04)? '-' : '+'); _c(b);
+	_putsn(b, r->name, r->l_name); _c(b); _putn(b, rs+1); _c(b); _put(b, (flag&0x04)? '-' : '+'); _c(b);
 	if (hl) { _putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S'); }
 	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->path->array, 0, a->path->len);
 	if (tl) { _putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S'); } _c(b);
@@ -2214,14 +2232,14 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, 
 		mm_print_mapped_sam_core(b, r, t, a, mapq, flag);
 
 		// print tags
-		if (f & 0x01ULL<<MM_RG) { _puts(b, "\tRG:Z:"); _puts(b, b->opt->rg_id); }
-		if (f & 0x01ULL<<MM_NH) { _puts(b, "\tNH:i:"); _putn(b, n_reg); }	// (f & MM_OMIT_REP)? n_uniq : n_reg
-		if (f & 0x01ULL<<MM_IH) { _puts(b, "\tIH:i:"); _putn(b, j); }
-		if (f & 0x01ULL<<MM_AS) { _puts(b, "\tAS:i:"); _putn(b, a->score); }
-		if ((f & 0x01ULL<<MM_XS) && (flag & 0x900) == 0) { _puts(b, "\tXS:i:"); _putn(b, n_reg>1? _aln(reg[1])->score : 0); }
-		if (f & 0x01ULL<<MM_NM) { _puts(b, "\tNM:i:"); _putn(b, a->xcnt + a->gecnt); }
+		if (f & 0x01ULL<<MM_RG) { _putsk(b, "\tRG:Z:"); _puts(b, b->opt->rg_id); }
+		if (f & 0x01ULL<<MM_NH) { _putsk(b, "\tNH:i:"); _putn(b, n_reg); }	// (f & MM_OMIT_REP)? n_uniq : n_reg
+		if (f & 0x01ULL<<MM_IH) { _putsk(b, "\tIH:i:"); _putn(b, j); }
+		if (f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->score); }
+		if ((f & 0x01ULL<<MM_XS) && (flag & 0x900) == 0) { _putsk(b, "\tXS:i:"); _putn(b, n_reg>1? _aln(reg[1])->score : 0); }
+		if (f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, a->xcnt + a->gecnt); }
 		if (f & 0x01ULL<<MM_SA && (flag & 0x900) == 0 && n_uniq > 1) {
-			_puts(b, "\tSA:Z:");
+			_putsk(b, "\tSA:Z:");
 			for (uint64_t k = 1; k < n_uniq; ++k)
 				mm_print_sam_supp(b, &mi->s.a[(_aln(reg[k])->sec->aid>>1) - mi->base_rid], t, _aln(reg[k]), _mapq(reg[k]), _flag(reg[k]));
 			j = n_uniq;		// skip supplementary records when SA tag is enabled
@@ -2248,7 +2266,7 @@ static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint64_t n_re
 		uint32_t re = s->bid&0x01? r->l_seq-s->apos : r->l_seq-s->apos-s->alen+1;
 		uint32_t qs = t->l_seq-s->bpos-s->blen+1, qe = t->l_seq-s->bpos;
 
-		_puts(b, t->name); _t(b); _puts(b, r->name); _t(b);
+		_putsn(b, t->name, t->l_name); _t(b); _putsn(b, r->name, r->l_name); _t(b);
 		_putfi(int32_t, b, mid, 3); _t(b); _putn(b, slen); _t(b); _putn(b, a->xcnt); _t(b); _putn(b, a->gicnt); _t(b);
 		_putn(b, qs); _t(b); _putn(b, qe); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
 
@@ -2272,8 +2290,8 @@ static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, uint64_t n_re
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
-		_puts(b, t->name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
-		_puts(b, r->name); _sp(b); _put(b, '0'); _sp(b); _put(b, s->bid&0x01? '0' : '1'); _sp(b);
+		_putsn(b, t->name, t->l_name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
+		_putsn(b, r->name, r->l_name); _sp(b); _put(b, '0'); _sp(b); _put(b, s->bid&0x01? '0' : '1'); _sp(b);
 		_put(b, '-'); _putn(b, a->score); _sp(b);	// score in negative
 		_putfi(int32_t, b, mid, 4); _sp(b);
 		_putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
@@ -2297,8 +2315,8 @@ static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, uint64_t n_re
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
-		_puts(b, t->name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
-		_puts(b, r->name); _sp(b);
+		_putsn(b, t->name, t->l_name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
+		_putsn(b, r->name, r->l_name); _sp(b);
 		_put(b, '-'); _putn(b, a->score); _sp(b); _putfi(int32_t, b, mid, 4); _sp(b);	// add '-' before the number to negate score
 		_put(b, '0'); _sp(b); _putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
 		_put(b, s->bid&0x01? '0' : '1'); _sp(b); _putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
@@ -2318,8 +2336,8 @@ static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, uint64_t n_reg, 
 		const gaba_path_section_t *s = &a->sec[0];
 		uint32_t dcnt = (a->path->len - a->gecnt)>>1;
 		uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
-		_puts(b, t->name); _t(b); _putn(b, t->l_seq); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
-		_puts(b, r->name); _t(b); _putn(b, r->l_seq); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
+		_putsn(b, t->name, t->l_name); _t(b); _putn(b, t->l_seq); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
+		_putsn(b, r->name, r->l_name); _t(b); _putn(b, r->l_seq); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
 		_putn(b, dcnt - a->xcnt); _t(b); _putn(b, dcnt + a->gecnt); _t(b); _putn(b, mapq>>MAPQ_DEC); _cr(b);
 	}
 	return;
@@ -2338,7 +2356,7 @@ static void mm_print_mapped_mhap(mm_align_t *b, const bseq_t *t, uint64_t n_reg,
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
-		_puts(b, t->name); _sp(b); _puts(b, r->name); _sp(b);
+		_putsn(b, t->name, t->l_name); _sp(b); _putsn(b, r->name, r->l_name); _sp(b);
 		_putfi(int32_t, b, 1.0-mid, 4); _sp(b); _putn(b, a->score); _sp(b);
 		_put(b, '0'); _sp(b); _putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
 		_put(b, s->bid&0x01? '0' : '1'); _sp(b); _putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _cr(b);
@@ -2352,6 +2370,8 @@ static void mm_print_mapped_mhap(mm_align_t *b, const bseq_t *t, uint64_t n_reg,
 #undef _put
 #undef _putn
 #undef _puts
+#undef _putsn
+#undef _putsk
 #undef _aln
 
 static void *mm_align_source(uint32_t tid, void *arg)
