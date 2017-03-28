@@ -1945,7 +1945,7 @@ static const mm128_t *mm_align_seq(
 #define BUF_SIZE8	( 512 * 1024 )
 #define _put(_buf, _c) { \
 	*(_buf)->p++ = (_c); \
-	if (_unlikely((uintptr_t)(_buf)->p >= (uintptr_t)(_buf)->tail)) { \
+	if ((uintptr_t)(_buf)->p >= (uintptr_t)(_buf)->tail) { \
 		fwrite((_buf)->base, sizeof(uint8_t), (_buf)->p - (_buf)->base, stdout); \
 		(_buf)->p = (_buf)->base; \
 	} \
@@ -2117,45 +2117,85 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 	 *       which may result in several percent performance degradation.
 	 */
 	const gaba_path_section_t *s = &a->sec[0];
-	uint32_t rs = r->l_seq-s->apos-s->alen, hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;
-	uint32_t qs = (flag&0x900)? hl : 0, qe = t->l_seq - ((flag&0x900)? tl : 0);
+	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
+
+	#define _load(_ptr, _pos) ({ \
+		uint64_t _rem = (_pos) & 0x3f; \
+		((_ptr)[(_pos)>>6]>>_rem) | (((_ptr)[((_pos)>>6) + 1]<<(63 - _rem))<<1); \
+	})
 
 	_puts(b, "\tMD:Z:");
-	const uint32_t *ptr = &a->path->array[((a->path->len-1)>>5) - 1];
-	uint64_t rem = ((a->path->len-1)&0x1f) + 1;
-	uint64_t arr = _loadu_u64(ptr)<<(64 - rem), macc = 0;
-	const uint8_t *rp = &r->seq[rs], *qp = &t->seq[qs], *tp = &t->seq[qe];
-	while (qp < tp) {
-		// suppose each indel block is shorter than 32 bases
-		int64_t xarr = (((int64_t)arr)>>62) ^ 0x01;
-		if (xarr < 0) {			// is_ins
-			const uint64_t scnt = lzcnt(~arr);
-			arr <<= scnt; qp += scnt;
-		} else if (xarr > 0) {	// is_del
-			const uint64_t scnt = lzcnt(arr);
-			arr <<= scnt; rp += scnt;
-			if (macc) { _putn(b, (int32_t)macc); }
-			_put(b, '^');
-			for (uint64_t i = 0; i < scnt; ++i) { _put(b, *rp); rp++; }
+	uint64_t const *p = (uint64_t const *)((uint64_t)a->path->array & ~(sizeof(uint64_t) - 1));
+	int64_t const ofs = ((uint64_t)a->path->array & sizeof(uint32_t))? -32 : -64;
+	int64_t pos = a->path->len + ofs;
+
+	if (flag&0x10) {
+		static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
+			0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
+			0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
+		};
+		const v32i8_t cv = _from_v16i8_v32i8(_load_v16i8(comp));
+		const uint8_t *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[(uint64_t)t->l_seq-qs-32];
+		while (pos > ofs) {
+			// suppose each indel block is shorter than 32 bases
+			uint64_t arr = _load(p, pos), cnt = lzcnt(~arr);	// count #ins
+			pos -= cnt; qp -= cnt;
+			if (((((int64_t)arr)>>62)^0x01) > 0) {				// is_del
+				pos -= (cnt = lzcnt(arr) - 1);
+				_putn(b, (int32_t)(rp-rb));
+				_put(b, '^');
+				for (uint64_t i = 0; i < cnt; ++i) { _put(b, " AC G   T"[*rp]); rp++; }
+				rb = rp;
+			}
+			// match or mismatch
+			uint64_t acnt = 32;
+			while (acnt == 32) {
+				arr = _load(p, pos); acnt = lzcnt(arr^0x5555555555555555)>>1;
+				v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _swap_v32i8(_loadu_v32i8(qp));
+				uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
+				uint64_t mcnt = tzcnt(~mmask);
+				pos -= 2*mcnt; rp += mcnt; qp -= mcnt;
+				if (mcnt == acnt) continue;
+				_putn(b, (int32_t)(rp-rb));
+				pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp -= cnt;
+				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, " AC G   T"[*rp]); _put(b, '0'); rp++; }
+				_put(b, " AC G   T"[*rp]); rp++;
+				rb = rp;
+			}
 		}
-		// match or mismatch
-		uint64_t acnt = 64;
-		while (acnt == 64) {
-			arr |= _loadu_u64(ptr)>>rem;
-			acnt = lzcnt(arr^0x5555555555555555)>>1;
-			v32i8_t rv = _loadu_v32i8(rp), qv = _loadu_v32i8(qp);
-			uint64_t mmask = ~((uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all)<<32;
-			uint64_t mcnt = lzcnt(mmask);
-			macc += mcnt;
-			if (mcnt == acnt) continue;
-			if (macc) { _putn(b, (int32_t)macc); }
-			rp += macc; qp += macc;
-			uint64_t xlen = MIN2(lzcnt(~mmask<<mcnt), acnt - mcnt);
-			for (uint64_t i = 0; i < xlen; ++i) { _put(b, *rp); rp++; qp++; }
-			arr <<= 2*xlen; macc = 0;
-			ptr -= (int64_t)(rem - xlen) < 0; rem = (rem - xlen) & 0x1f;
+		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); } rb = rp;
+	} else {
+		const uint8_t *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[qs];
+		while (pos > ofs) {
+			// suppose each indel block is shorter than 32 bases
+			uint64_t arr = _load(p, pos), cnt = lzcnt(~arr);
+			pos -= cnt; qp += cnt;
+			if (((((int64_t)arr)>>62)^0x01) > 0) {	// is_del
+				pos -= (cnt = lzcnt(arr) - 1);
+				_putn(b, (int32_t)(rp-rb));
+				_put(b, '^');
+				for (uint64_t i = 0; i < cnt; ++i) { _put(b, " AC G   T"[*rp]); rp++; }
+				rb = rp;
+			}
+			// match or mismatch
+			uint64_t acnt = 32;
+			while (acnt == 32) {
+				arr = _load(p, pos); acnt = lzcnt(arr^0x5555555555555555)>>1;
+				v32i8_t rv = _loadu_v32i8(rp), qv = _loadu_v32i8(qp);
+				uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
+				uint64_t mcnt = tzcnt(~mmask);
+				pos -= 2*mcnt; rp += mcnt; qp += mcnt;
+				if (mcnt == acnt) continue;
+				_putn(b, (int32_t)(rp-rb));
+				pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp += cnt;
+				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, " AC G   T"[*rp]); _put(b, '0'); rp++; }
+				_put(b, " AC G   T"[*rp]); rp++;
+				rb = rp;
+			}
 		}
+		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); } rb = rp;
 	}
+	#undef _load
 	return;
 }
 
