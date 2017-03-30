@@ -2130,9 +2130,8 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 	})
 
 	_puts(b, "\tMD:Z:");
-	uint64_t const *p = (uint64_t const *)((uint64_t)a->path->array & ~(sizeof(uint64_t) - 1));
-	int64_t const ofs = ((uint64_t)a->path->array & sizeof(uint32_t))? -32 : -64;
-	int64_t pos = a->path->len + ofs;
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->path->len;
 
 	if (flag&0x10) {
 		static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
@@ -2141,7 +2140,7 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 		};
 		const v32i8_t cv = _from_v16i8_v32i8(_load_v16i8(comp));
 		const uint8_t *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[(uint64_t)t->l_seq-qs-32];
-		while (pos > ofs) {
+		while (pos > 0) {
 			// suppose each indel block is shorter than 32 bases
 			uint64_t arr = _load(p, pos), cnt = lzcnt(~arr);	// count #ins
 			pos -= cnt; qp -= cnt;
@@ -2149,7 +2148,7 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 				pos -= (cnt = lzcnt(arr) - 1);
 				_putn(b, (int32_t)(rp-rb));
 				_put(b, '^');
-				for (uint64_t i = 0; i < cnt; ++i) { _put(b, " AC G   T"[*rp]); rp++; }
+				for (uint64_t i = 0; i < cnt; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++; }
 				rb = rp;
 			}
 			// match or mismatch
@@ -2158,20 +2157,20 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 				arr = _load(p, pos); acnt = lzcnt(arr^0x5555555555555555)>>1;
 				v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _swap_v32i8(_loadu_v32i8(qp));
 				uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
-				uint64_t mcnt = tzcnt(~mmask);
+				uint64_t mcnt = MIN2(pos>>1, tzcnt(~mmask));
 				pos -= 2*mcnt; rp += mcnt; qp -= mcnt;
-				if (mcnt == acnt) continue;
+				if (mcnt >= acnt) continue;
 				_putn(b, (int32_t)(rp-rb));
 				pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp -= cnt;
-				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, " AC G   T"[*rp]); _put(b, '0'); rp++; }
-				_put(b, " AC G   T"[*rp]); rp++;
+				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); _put(b, '0'); rp++; }
+				_put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++;
 				rb = rp;
 			}
 		}
 		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); }
 	} else {
 		const uint8_t *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[qs];
-		while (pos > ofs) {
+		while (pos > 0) {
 			// suppose each indel block is shorter than 32 bases
 			uint64_t arr = _load(p, pos), cnt = lzcnt(~arr);
 			pos -= cnt; qp += cnt;
@@ -2179,7 +2178,7 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 				pos -= (cnt = lzcnt(arr) - 1);
 				_putn(b, (int32_t)(rp-rb));
 				_put(b, '^');
-				for (uint64_t i = 0; i < cnt; ++i) { _put(b, " AC G   T"[*rp]); rp++; }
+				for (uint64_t i = 0; i < cnt; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++; }
 				rb = rp;
 			}
 			// match or mismatch
@@ -2188,13 +2187,13 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 				arr = _load(p, pos); acnt = lzcnt(arr^0x5555555555555555)>>1;
 				v32i8_t rv = _loadu_v32i8(rp), qv = _loadu_v32i8(qp);
 				uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
-				uint64_t mcnt = tzcnt(~mmask);
+				uint64_t mcnt = MIN2(pos>>1, tzcnt(~mmask));
 				pos -= 2*mcnt; rp += mcnt; qp += mcnt;
 				if (mcnt == acnt) continue;
 				_putn(b, (int32_t)(rp-rb));
 				pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp += cnt;
-				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, " AC G   T"[*rp]); _put(b, '0'); rp++; }
-				_put(b, " AC G   T"[*rp]); rp++;
+				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); _put(b, '0'); rp++; }
+				_put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++;
 				rb = rp;
 			}
 		}
