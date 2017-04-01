@@ -4,7 +4,7 @@
 #define _DARWIN_C_SOURCE	_DARWIN_C_FULL
 
 /* set non-zero value to ensure order of streamed objects */
-#define STRICT_STREAM_ORDERING		( 1 )
+#define STRICT_STREAM_ORDERING		( 0 )
 
 #include <getopt.h>
 #include <inttypes.h>
@@ -2549,6 +2549,7 @@ static const mm128_t *mm_align_seq(
 #define MM_XS			( 5 )		// i: suboptimal score
 #define MM_NM 			( 6 )		// i: editdist to the reference
 #define MM_SA			( 7 )		// Z: supplementary records
+#define MM_MD			( 8 )		// Z: mismatch positions
 
 static uint64_t mm_print_num(mm_align_t *b, uint8_t type, const uint8_t *p)
 {
@@ -2682,6 +2683,106 @@ static void mm_print_sam_supp(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t
 	_putn(b, mapq); _c(b); _putn(b, a->xcnt + a->gecnt); _put(b, ';');
 }
 
+static inline
+uint64_t parse_load_uint64(
+	uint64_t const *ptr,
+	int64_t pos)
+{
+	int64_t rem = pos & 63;
+	uint64_t a = (ptr[pos>>6]>>rem) | ((ptr[(pos>>6) + 1]<<(63 - rem))<<1);
+	debug("load arr(%llx)", a);
+	return(a);
+}
+
+void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, const gaba_alignment_t *a, uint16_t flag)
+{
+	/*
+	 * print MD tag
+	 * note: this operation requires head-to-tail comparison of two sequences,
+	 *       which may result in several percent performance degradation.
+	 */
+	const gaba_path_section_t *s = &a->sec[0];
+	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
+
+	#define _load(_ptr, _pos) ({ \
+		uint64_t _rem = (_pos) & 0x3f; \
+		((_ptr)[(_pos)>>6]>>_rem) | (((_ptr)[((_pos)>>6) + 1]<<(63 - _rem))<<1); \
+	})
+
+	_puts(b, "\tMD:Z:");
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->path->len;
+
+	if (flag&0x10) {
+		static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
+			0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
+			0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
+		};
+		const v32i8_t cv = _from_v16i8_v32i8(_load_v16i8(comp));
+		const uint8_t *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[(uint64_t)t->l_seq-qs-32];
+		while (pos > 0) {
+			// suppose each indel block is shorter than 32 bases
+			uint64_t arr = _load(p, pos), cnt = lzcnt(~arr);	// count #ins
+			pos -= cnt; qp -= cnt;
+			if (((((int64_t)arr)>>62)^0x01) > 0) {				// is_del
+				pos -= (cnt = lzcnt(arr) - 1);
+				_putn(b, (int32_t)(rp-rb));
+				_put(b, '^');
+				for (uint64_t i = 0; i < cnt; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++; }
+				rb = rp;
+			}
+			// match or mismatch
+			uint64_t acnt = 32;
+			while (acnt == 32) {
+				arr = _load(p, pos); acnt = lzcnt(arr^0x5555555555555555)>>1;
+				v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _swap_v32i8(_loadu_v32i8(qp));
+				uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
+				uint64_t mcnt = MIN2(pos>>1, tzcnt(~mmask));
+				pos -= 2*mcnt; rp += mcnt; qp -= mcnt;
+				if (mcnt >= acnt) continue;
+				_putn(b, (int32_t)(rp-rb));
+				pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp -= cnt;
+				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); _put(b, '0'); rp++; }
+				_put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++;
+				rb = rp;
+			}
+		}
+		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); }
+	} else {
+		const uint8_t *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[qs];
+		while (pos > 0) {
+			// suppose each indel block is shorter than 32 bases
+			uint64_t arr = _load(p, pos), cnt = lzcnt(~arr);
+			pos -= cnt; qp += cnt;
+			if (((((int64_t)arr)>>62)^0x01) > 0) {	// is_del
+				pos -= (cnt = lzcnt(arr) - 1);
+				_putn(b, (int32_t)(rp-rb));
+				_put(b, '^');
+				for (uint64_t i = 0; i < cnt; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++; }
+				rb = rp;
+			}
+			// match or mismatch
+			uint64_t acnt = 32;
+			while (acnt == 32) {
+				arr = _load(p, pos); acnt = lzcnt(arr^0x5555555555555555)>>1;
+				v32i8_t rv = _loadu_v32i8(rp), qv = _loadu_v32i8(qp);
+				uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
+				uint64_t mcnt = MIN2(pos>>1, tzcnt(~mmask));
+				pos -= 2*mcnt; rp += mcnt; qp += mcnt;
+				if (mcnt == acnt) continue;
+				_putn(b, (int32_t)(rp-rb));
+				pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp += cnt;
+				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); _put(b, '0'); rp++; }
+				_put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++;
+				rb = rp;
+			}
+		}
+		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); }
+	}
+	#undef _load
+	return;
+}
+
 static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
 	const uint64_t f = b->opt->flag;
@@ -2709,6 +2810,7 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, 
 				mm_print_sam_supp(b, &mi->s.a[(_aln(reg[k])->sec->aid>>1) - mi->base_rid], t, _aln(reg[k]), _mapq(reg[k]), _flag(reg[k]));
 			j = n_uniq;		// skip supplementary records when SA tag is enabled
 		}
+		if (f & 0x01ULL<<MM_MD) mm_print_sam_md(b, r, t, a, flag);
 		if ((flag & 0x900) == 0) mm_restore_tags(b, t);
 		_cr(b);
 	}
@@ -3062,7 +3164,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -P           omit secondary (repetitive) alignments\n");
 	fprintf(stderr, "    -Q           include quality string\n");
 	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" [%s]\n", opt->rg_line? opt->rg_line : "");
-	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,XS,NM,NH,IH,SA} []\n");
+	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []\n");
 	fprintf(stderr, "                   RG is also inferred from -R\n");
 	fprintf(stderr, "                   supp. records are omitted when SA tag is enabled\n");
 	fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
@@ -3118,6 +3220,7 @@ static uint64_t mm_mapopt_parse_tags(const char *p, uint16_v *buf)
 			else if (strncmp(p, "XS", 2) == 0) flag |= 0x01ULL<<MM_XS;
 			else if (strncmp(p, "NM", 2) == 0) flag |= 0x01ULL<<MM_NM;
 			else if (strncmp(p, "SA", 2) == 0) flag |= 0x01ULL<<MM_SA;
+			else if (strncmp(p, "MD", 2) == 0) flag |= 0x01ULL<<MM_MD;
 		}
 		if (*q == '\0') break;
 		p = q + 1;
