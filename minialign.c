@@ -876,7 +876,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	}
 	#define _fetch(_pv, _adv) ({ \
 		if (fp->p + 32 >= fp->tail) { \
-			_store_v32i8(fp->base + 32, _loadu_v32i8(fp->p)); \
+			_storeu_v32i8(fp->base + 32, _loadu_v32i8(fp->p)); \
 			_reload(fp->tail - fp->p, _pv); \
 		} \
 		v32i8_t r = _loadu_v32i8(fp->p); fp->p += (_adv); r; \
