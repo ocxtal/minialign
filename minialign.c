@@ -373,13 +373,16 @@ unittest() {
 	// dump
 	const char *filename = "./minialign.unittest.kh.tmp";
 	gzFile fp = gzopen(filename, "w");
+	assert((void*)fp != NULL);
 	kh_dump(h, (void*)fp, (khwrite_t)gzwrite);
 	gzclose(fp);
 	kh_destroy(h);
 
 	// restore
 	fp = gzopen(filename, "r");
+	assert((void*)fp != NULL);
 	h = kh_load((void*)fp, (khread_t)gzread);
+	assert(h != NULL);
 	gzclose(fp);
 
 	const uint64_t *p;
@@ -526,14 +529,13 @@ static int pt_stream(pt_t *pt, pt_source_t sfp, void *sarg, pt_worker_t wfp, voi
 	return 0;
 }
 
-static int pt_parallel(pt_t *pt, pt_worker_t wfp, void **warg, void **src, void **dst)
+static int pt_parallel(pt_t *pt, pt_worker_t wfp, void **warg, void **item)
 {
 	if (pt_set_worker(pt, wfp, warg)) return -1;
-	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, src? src[i] : NULL);
-	void *res = wfp(pt->c->tid, warg? warg[0] : NULL, src? src[0] : NULL); if (dst) dst[0] = res;
+	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, item? item[i] : NULL);
+	wfp(pt->c->tid, warg? warg[0] : NULL, item? item[0] : NULL);
 	for (uint64_t i = 1; i < pt->nth; ++i) {
-		while ((res = pt_deq(pt->c->out, pt->c->tid)) == PT_EMPTY) sched_yield();
-		if (dst) dst[i] = res;
+		while (pt_deq(pt->c->out, pt->c->tid) == PT_EMPTY) sched_yield();
 	}
 	return 0;
 }
@@ -568,10 +570,9 @@ unittest() {
 	assert(icnt == 1024, "icnt(%lu)", icnt);
 	assert(ocnt == 512*1025, "ocnt(%lu)", ocnt);
 
-	uint64_t s[4] = { 0 }, *sp[1] = { &s[0] }, *dp[1];
-	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp, (void**)dp);
+	uint64_t s[4] = { 0 }, *sp[1] = { &s[0] };
+	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp);
 	assert(s[0] == 1, "d[0](%lu)", s[0]);
-	assert(dp[0] == sp[0], "sp[0](%p), dp[0](%p)", sp[0], dp[0]);
 	pt_destroy(pt);
 }
 
@@ -584,11 +585,10 @@ unittest() {
 	assert(icnt == 1024, "icnt(%lu)", icnt);
 	assert(ocnt == 512*1025, "ocnt(%lu)", ocnt);
 
-	uint64_t s[4] = { 0,1,2,3 }, *sp[4] = { &s[0],&s[1],&s[2],&s[3] }, *dp[4];
-	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp, (void**)dp);
+	uint64_t s[4] = { 0,1,2,3 }, *sp[4] = { &s[0],&s[1],&s[2],&s[3] };
+	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp);
 	for (uint64_t i = 0; i < 4; i++) {
 		assert(s[i] == (i+1), "i(%lu), d[i](%lu)", i, s[i]);
-		assert(dp[i] == sp[i], "i(%lu), sp[i](%p), dp[i](%p)", i, sp[i], dp[i]);
 	}
 	pt_destroy(pt);
 }
@@ -789,6 +789,77 @@ static uint64_t pgwrite(pg_t *pg, void *src, uint64_t len)
 	return len;
 }
 
+unittest() {
+	const uint64_t size = 1024 * 1024 * 1024;
+	uint8_t *p = malloc(size);
+	for (uint64_t i = 0; i < size; i++) p[i] = i & 0xff;
+
+	const char *filename = "./minialign.unittest.pt.tmp";
+	FILE *fp = fopen(filename, "w");
+	assert(fp != NULL);
+	pg_t *pg = pg_init(fp, 1);
+	assert(pg != NULL);
+
+	for (uint64_t i = 0; i < 3; i++) {
+		uint64_t l = pgwrite(pg, p, size);
+		assert(l == size, "l(%lu), size(%lu)", l, size);
+	}
+	pg_destroy(pg);
+	fclose(fp);
+
+
+	fp = fopen(filename, "r");
+	assert(fp != NULL);
+	pg = pg_init(fp, 1);
+	assert(pg != NULL);
+
+	for (uint64_t i = 0; i < 3; i++) {
+		uint64_t l = pgread(pg, p, size);
+		assert(l == size, "l(%lu), size(%lu)", l, size);
+		for (uint64_t j = 0; j < size; j++) {
+			assert(p[j] == (j&0xff), "j(%lu), p[j](%lu)", j, j&0xff);
+		}
+	}
+	pg_destroy(pg);
+	fclose(fp);
+	remove(filename);
+}
+
+unittest() {
+	const uint64_t size = 1024 * 1024 * 1024;
+	uint8_t *p = malloc(size);
+	for (uint64_t i = 0; i < size; i++) p[i] = i & 0xff;
+
+	const char *filename = "./minialign.unittest.pt.tmp";
+	FILE *fp = fopen(filename, "w");
+	assert(fp != NULL);
+	pg_t *pg = pg_init(fp, 4);
+	assert(pg != NULL);
+
+	for (uint64_t i = 0; i < 3; i++) {
+		uint64_t l = pgwrite(pg, p, size);
+		assert(l == size, "l(%lu), size(%lu)", l, size);
+	}
+	pg_destroy(pg);
+	fclose(fp);
+
+
+	fp = fopen(filename, "r");
+	assert(fp != NULL);
+	pg = pg_init(fp, 4);
+	assert(pg != NULL);
+
+	for (uint64_t i = 0; i < 3; i++) {
+		uint64_t l = pgread(pg, p, size);
+		assert(l == size, "l(%lu), size(%lu)", l, size);
+		for (uint64_t j = 0; j < size; j++) {
+			assert(p[j] == (j&0xff), "j(%lu), p[j](%lu)", j, j&0xff);
+		}
+	}
+	pg_destroy(pg);
+	fclose(fp);
+	remove(filename);
+}
 /* end of queue.c */
 
 /* bamlite.c in bwa */
@@ -1710,7 +1781,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->n_threads;
 		qq[i] = &q[i];
 	}
-	pt_parallel(pt, mm_idx_post, NULL, (void**)qq, NULL);
+	pt_parallel(pt, mm_idx_post, NULL, (void**)qq);
 	pt_destroy(pt);
 
 	free(q); free(qq);
