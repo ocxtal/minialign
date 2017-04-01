@@ -365,6 +365,39 @@ unittest() {
 	kh_destroy(h);
 }
 
+unittest() {
+	kh_t *h = kh_init(0);
+	const uint64_t kmask = mm_rand64(), vmask = mm_rand64(), cnt = 1024 * 1024;
+	for (uint64_t i = 0; i < cnt; i++) kh_put(h, i^kmask, i^vmask);
+
+	// dump
+	const char *filename = "./minialign.unittest.kh.tmp";
+	gzFile fp = gzopen(filename, "w");
+	kh_dump(h, (void*)fp, (khwrite_t)gzwrite);
+	gzclose(fp);
+	kh_destroy(h);
+
+	// restore
+	fp = gzopen(filename, "r");
+	h = kh_load((void*)fp, (khread_t)gzread);
+	gzclose(fp);
+
+	const uint64_t *p;
+	assert(kh_cnt(h) == cnt, "cnt(%lu)", kh_cnt(h));
+	for (uint64_t i = 0; i < cnt; i++) {
+		p = kh_get_ptr(h, i^kmask);
+		assert(p != NULL, "i(%lu)", i);
+		assert(*p == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
+		assert(kh_get(h, i^kmask) == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
+	}
+	for (uint64_t i = cnt; i < 2*cnt; i++) {
+		p = kh_get_ptr(h, i^kmask);
+		assert(p == NULL);
+		assert(kh_get(h, i^kmask) == UINT64_MAX);
+	}
+	kh_destroy(h);
+	remove(filename);
+}
 /* end of hash.c */
 
 /* queue.c */
