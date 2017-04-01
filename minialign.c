@@ -3,8 +3,14 @@
 #define _POSIX_C_SOURCE		200112L
 #define _DARWIN_C_SOURCE	_DARWIN_C_FULL
 
-/* set non-zero value to ensure order of streamed objects */
+/* set non-zero value to ensure order of output lines */
 #define STRICT_STREAM_ORDERING		( 0 )
+
+/* collect suppementary alignments, set to zero for compatibility with 0.4.x */
+#define COLLECT_SUPPLEMENTARY		( 1 )
+
+/* max #threads, set larger value if needed */
+#define MAX_THREADS					( 64 )
 
 #include <getopt.h>
 #include <inttypes.h>
@@ -23,8 +29,7 @@
 #include "sassert.h"
 
 /* global consts */
-#define MM_VERSION		"0.4.7-rc1"
-#define MAX_THREADS		( 64 )
+#define MM_VERSION		"0.5.0-rc1"
 
 /* max, min */
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
@@ -59,7 +64,7 @@ typedef struct {
 	void *_pad[14];
 } mm_info_t;
 _static_assert(sizeof(mm_info_t) == 128);	// fits in a cache line
-mm_info_t info[MAX_THREADS] __attribute__(( aligned(64) ));
+mm_info_t info[MAX_THREADS+1] __attribute__(( aligned(64) ));
 
 #define enable_info(t)		{ info[t].enabled = 1; }
 #define disable_info(t)		{ info[t].enabled = 0; }
@@ -69,7 +74,7 @@ static void oom_abort(const char *name)
 	struct rusage r;
 	getrusage(RUSAGE_SELF, &r);
 	fprintf(stderr, "[M::%s] ERROR: Out of memory. (maxrss: %ld MB)\n", name, r.ru_maxrss);
-	for (uint64_t i = 0; i < MAX_THREADS; ++i) {
+	for (uint64_t i = 0; i < MAX_THREADS+1; ++i) {
 		if (info[i].enabled)
 			fprintf(stderr, "[M::%s]  thread %" PRIu64 ": %s\n", name, i, info[i].msg? info[i].msg : "No information available.");
 	}
@@ -1595,7 +1600,7 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 #define MM_MHAP 		( 0x05ULL<<56 )
 
 typedef struct {
-	uint32_t sidx, eidx, n_threads, min, k, w, b;
+	uint32_t sidx, eidx, nth, min, k, w, b;
 	uint64_t flag;
 	float min_ratio;
 	int32_t m, x, gi, ge, xdrop, llim, hlim, elim, blim;
@@ -1621,7 +1626,7 @@ static mm_mapopt_t *mm_mapopt_init(void)
 		/* -a, -b, -p, -q, -Y */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
 		/* -s, -m */ .min = 50, .min_ratio = 0.3,
 		/* -f */ .n_frq = 3, .frq[0] = 0.05, .frq[1] = 0.01, .frq[2] = 0.001,
-		/* -t */ .n_threads = 1,
+		/* -t */ .nth = 1,
 		/* -R */ .rg_line = NULL, .rg_id = NULL,
 
 		/* -S, -E */.sidx = 0, .eidx = 3,
@@ -1661,7 +1666,7 @@ static int mm_mapopt_check(mm_mapopt_t *opt, int (*_fprintf)(FILE*,const char*,.
 			_fprintf(_fp, "[M::%s] ERROR: Frequency thresholds must be inside [0.0,1.0] and descending.\n", __func__), ret = 1;
 	if (ret) return(ret);
 
-	if (opt->n_threads < 1) _fprintf(_fp, "[M::%s] ERROR: Thread counts must be > 0.\n", __func__), ret = 1;
+	if (opt->nth < 1 || opt->nth > MAX_THREADS) _fprintf(_fp, "[M::%s] ERROR: Thread counts must be inside [1,%u]. For larger values, recompile is needed.\n", __func__, MAX_THREADS), ret = 1;
 	if (opt->batch_size < 64 * 1024) _fprintf(_fp, "[M::%s] ERROR: Batch size must be > 64k.\n", __func__), ret = 1;
 	if (opt->outbuf_size < 64 * 1024) _fprintf(_fp, "[M::%s] ERROR: Output buffer size must be > 64k.\n", __func__), ret = 1;
 	if (ret) return(ret);
@@ -1930,21 +1935,21 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 	pl.mi = mm_idx_init(opt->w, opt->k, opt->b); pl.mi->circular = (opt->flag&MM_CIRCULAR)!=0; pl.mi->base_rid = pl.fp->base_rid;
 	kv_hq_init(pl.hq);
 
-	p = (mm_idx_pipeline_t**)calloc(opt->n_threads, sizeof(mm_idx_pipeline_t*));
-	for (uint64_t i = 0; i < opt->n_threads; ++i) p[i] = &pl;
+	p = (mm_idx_pipeline_t**)calloc(opt->nth, sizeof(mm_idx_pipeline_t*));
+	for (uint64_t i = 0; i < opt->nth; ++i) p[i] = &pl;
 
-	pt_t *pt = pt_init(opt->n_threads);
+	pt_t *pt = pt_init(opt->nth);
 	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
 	free(p); kv_hq_destroy(pl.hq);
 	if (mm_verbose >= 3)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
-	mm_idx_post_t *q = (mm_idx_post_t*)calloc(opt->n_threads, sizeof(mm_idx_post_t));
-	mm_idx_post_t **qq = (mm_idx_post_t**)calloc(opt->n_threads, sizeof(mm_idx_post_t*));
-	for (uint64_t i = 0; i < opt->n_threads; ++i) {
+	mm_idx_post_t *q = (mm_idx_post_t*)calloc(opt->nth, sizeof(mm_idx_post_t));
+	mm_idx_post_t **qq = (mm_idx_post_t**)calloc(opt->nth, sizeof(mm_idx_post_t*));
+	for (uint64_t i = 0; i < opt->nth; ++i) {
 		q[i].mi = pl.mi;
-		q[i].from = (1ULL<<pl.mi->b)*i/opt->n_threads;
-		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->n_threads;
+		q[i].from = (1ULL<<pl.mi->b)*i/opt->nth;
+		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->nth;
 		qq[i] = &q[i];
 	}
 	pt_parallel(pt, mm_idx_post, NULL, (void**)qq);
@@ -1999,7 +2004,7 @@ static void mm_idx_cmp(const mm_mapopt_t *opt, const mm_idx_t *m1, const mm_idx_
 
 #define MM_IDX_MAGIC "MAI\6"		/* minialign index version 6, differs from minimap index signature */
 
-static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t n_threads)
+static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t nth)
 {
 	uint32_t x[3];
 	uint64_t size = 0, y[2];
@@ -2008,7 +2013,7 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t n_threads)
 	for (uint64_t i = (size = 0); i < mi->size.n; ++i) size += mi->size.a[i];
 	x[0] = mi->w, x[1] = mi->k, x[2] = mi->b; y[0] = mi->s.n, y[1] = size;
 
-	pg_t *pg = pg_init(fp, n_threads);
+	pg_t *pg = pg_init(fp, nth);
 	pgwrite(pg, MM_IDX_MAGIC, sizeof(char) * 4);
 	pgwrite(pg, x, sizeof(uint32_t) * 3);
 	pgwrite(pg, y, sizeof(uint64_t) * 2);
@@ -2039,7 +2044,7 @@ static void mm_idx_dump(FILE *fp, const mm_idx_t *mi, uint32_t n_threads)
 	return;
 }
 
-static mm_idx_t *mm_idx_load(FILE *fp, uint32_t n_threads)
+static mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 {
 	char magic[4];
 	uint32_t x[3];
@@ -2047,7 +2052,7 @@ static mm_idx_t *mm_idx_load(FILE *fp, uint32_t n_threads)
 	mm_idx_t *mi;
 	set_info(0, "[mm_idx_load] load index from file (main thread)");
 
-	pg_t *pg = pg_init(fp, n_threads);
+	pg_t *pg = pg_init(fp, nth);
 	if (pgread(pg, magic, sizeof(char) * 4) != sizeof(char) * 4) return 0;
 	if (strncmp(magic, MM_IDX_MAGIC, 4) != 0) return 0;
 	if (pgread(pg, x, sizeof(uint32_t) * 3) != sizeof(uint32_t) * 3) return 0;
@@ -2298,7 +2303,7 @@ static uint64_t mm_prune_regs(const mm_mapopt_t *opt, void *lmm, uint32_t n_reg,
 	return q;
 }
 
-#if 1
+#if COLLECT_SUPPLEMENTARY != 0
 static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	// collect supplementaries
@@ -2353,7 +2358,7 @@ static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg
 	return p;
 }
 #else
-static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
+static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 {
 	uint32_t i, score = _aln(reg[0])->score, min = score * opt->min_ratio;
 	uint32_t ssc = (n_reg>1)? _aln(reg[1])->score : 0, bsc = (n_reg>1)? _aln(reg[n_reg-1])->score : 0, tsc = 0;
@@ -2365,7 +2370,7 @@ static void mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
 	// if (n_reg > 1) fprintf(stderr, "n_reg(%u), usc(%d), lsc(%d), pe(%1.9f)\n", n_reg, ssc, bsc, pe);
 	for (i = 1; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i)
 		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * MAPQ_COEF * log10(1.0 - pe * (double)(score - bsc + 1) / (double)tsc));
-	return;
+	return 1;
 }
 #endif
 static uint64_t mm_post_ava(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg)
@@ -3002,7 +3007,7 @@ _fail:
 static void mm_align_destroy(mm_align_t *b)
 {
 	fwrite(b->base, sizeof(uint8_t), b->p - b->base, stdout);
-	for (uint64_t i = 0; i < b->opt->n_threads; ++i) mm_tbuf_destroy((mm_tbuf_t*)b->t[i]);
+	for (uint64_t i = 0; i < b->opt->nth; ++i) mm_tbuf_destroy((mm_tbuf_t*)b->t[i]);
 	free(b->base); kv_hq_destroy(b->hq); free(b->occ); free(b->t); gaba_clean(b->gaba); pt_destroy(b->pt);
 	free(b);
 	return;
@@ -3048,9 +3053,9 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 	if ((b->gaba = gaba_init(&p)) == 0) goto _fail;
 
 	// initialize threads
-	if ((b->t = (void**)calloc(b->opt->n_threads, sizeof(mm_tbuf_t*))) == 0) goto _fail;
-	for (uint64_t i = 0; i < b->opt->n_threads; ++i) { if ((b->t[i] = (void*)mm_tbuf_init(b)) == 0) goto _fail; }
-	if ((b->pt = pt_init(b->opt->n_threads)) == 0) goto _fail;
+	if ((b->t = (void**)calloc(b->opt->nth, sizeof(mm_tbuf_t*))) == 0) goto _fail;
+	for (uint64_t i = 0; i < b->opt->nth; ++i) { if ((b->t[i] = (void*)mm_tbuf_init(b)) == 0) goto _fail; }
+	if ((b->pt = pt_init(b->opt->nth)) == 0) goto _fail;
 
 	// print sam header
 	if (b->printer.header) b->printer.header(b);
@@ -3112,7 +3117,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "Options:\n");
 	fprintf(stderr, "  Global:\n");
 	fprintf(stderr, "    -x STR       load preset params {pacbio,ont,ava} [ont]\n");
-	fprintf(stderr, "    -t INT       number of threads [%d]\n", opt->n_threads);
+	fprintf(stderr, "    -t INT       number of threads [%d]\n", opt->nth);
 	fprintf(stderr, "    -X           switch to all-versus-all alignment mode\n");
 	fprintf(stderr, "    -v           show version number [%s]\n", MM_VERSION);
 	fprintf(stderr, "  Indexing:\n");
@@ -3250,7 +3255,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 'f') mm_mapopt_parse_threshs(o, optarg);
 		else if (ch == 'x') mm_mapopt_load_preset(o, optarg);
 		else if (ch == 'B') o->b = atoi(optarg);
-		else if (ch == 't') o->n_threads = atoi(optarg);
+		else if (ch == 't') o->nth = atoi(optarg);
 		else if (ch == 'V') mm_verbose = atoi(optarg);
 		else if (ch == 'd') *fnw = optarg;
 		else if (ch == 'l') *fnr = optarg;
@@ -3326,7 +3331,7 @@ int main(int argc, char *argv[])
 
 		// load/generate index for this index-side iteration
 		if (fpr) {
-			mi = mm_idx_load(fpr, opt->n_threads);
+			mi = mm_idx_load(fpr, opt->nth);
 		} else {
 			fp = bseq_open((const char *)v.a[i], base_rid, opt->batch_size, 0, 0, NULL);
 			mi = mm_idx_gen(opt, fp);
@@ -3346,7 +3351,7 @@ int main(int argc, char *argv[])
 
 		// do the task
 		if (fpw) {
-			mm_idx_dump(fpw, mi, opt->n_threads);
+			mm_idx_dump(fpw, mi, opt->nth);
 		} else {
 			aln = mm_align_init(opt, mi);
 			for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < v.n; ++j) {
