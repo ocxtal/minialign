@@ -121,9 +121,6 @@ static void oom_abort(const char *name)
 #include "lmm.h"
 #include "arch/arch.h"
 
-#include "kseq.h"
-KSEQ_INIT(gzFile, gzread)
-
 /* minimap.h */
 typedef struct { uint32_t x[2]; } v2u32_t;
 typedef struct { uint32_t x[4]; } v4u32_t;
