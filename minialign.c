@@ -530,12 +530,67 @@ static int pt_parallel(pt_t *pt, pt_worker_t wfp, void **warg, void **src, void 
 {
 	if (pt_set_worker(pt, wfp, warg)) return -1;
 	for (uint64_t i = 1; i < pt->nth; ++i) pt_enq(pt->c->in, pt->c->tid, src? src[i] : NULL);
-	void *res = wfp(pt->c->tid, warg? warg[0] : NULL, src? src[0] : NULL); if (dst && dst[0]) dst[0] = res;
+	void *res = wfp(pt->c->tid, warg? warg[0] : NULL, src? src[0] : NULL); if (dst) dst[0] = res;
 	for (uint64_t i = 1; i < pt->nth; ++i) {
 		while ((res = pt_deq(pt->c->out, pt->c->tid)) == PT_EMPTY) sched_yield();
-		if (dst && dst[i]) dst[i] = res;
+		if (dst) dst[i] = res;
 	}
 	return 0;
+}
+
+static void *pt_unittest_source(uint32_t tid, void *arg)
+{
+	uint64_t *s = (uint64_t*)arg;
+	if (*s >= 1024) return NULL;
+	uint64_t *p = malloc(sizeof(uint64_t));
+	*p = *s; *s = *s + 1;
+	return p;
+}
+static void *pt_unittest_worker(uint32_t tid, void *arg, void *item)
+{
+	uint64_t *p = (uint64_t *)item, *a = (uint64_t *)arg;
+	*p += *a;
+	return p;
+}
+static void pt_unittest_drain(uint32_t tid, void *arg, void *item)
+{
+	uint64_t *d = (uint64_t*)arg, *p = (uint64_t*)item;
+	*d += *p;
+	free(item);
+}
+
+unittest() {
+	pt_t *pt = pt_init(1);
+	assert(pt != NULL);
+
+	uint64_t icnt = 0, ocnt = 0, inc = 1, *arr[1] = { &inc };
+	pt_stream(pt, pt_unittest_source, (void *)&icnt, pt_unittest_worker, (void**)arr, pt_unittest_drain, (void*)&ocnt);
+	assert(icnt == 1024, "icnt(%lu)", icnt);
+	assert(ocnt == 512*1025, "ocnt(%lu)", ocnt);
+
+	uint64_t s[4] = { 0 }, *sp[1] = { &s[0] }, *dp[1];
+	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp, (void**)dp);
+	assert(s[0] == 1, "d[0](%lu)", s[0]);
+	assert(dp[0] == sp[0], "sp[0](%p), dp[0](%p)", sp[0], dp[0]);
+	pt_destroy(pt);
+}
+
+unittest() {
+	pt_t *pt = pt_init(4);
+	assert(pt != NULL);
+
+	uint64_t icnt = 0, ocnt = 0, inc = 1, *arr[4] = { &inc, &inc, &inc, &inc };
+	pt_stream(pt, pt_unittest_source, (void *)&icnt, pt_unittest_worker, (void**)arr, pt_unittest_drain, (void*)&ocnt);
+	assert(icnt == 1024, "icnt(%lu)", icnt);
+	assert(ocnt == 512*1025, "ocnt(%lu)", ocnt);
+
+	uint64_t s[4] = { 0,1,2,3 }, *sp[4] = { &s[0],&s[1],&s[2],&s[3] }, *dp[4];
+	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp, (void**)dp);
+	for (uint64_t i = 0; i < 4; i++) {
+		assert(s[i] == (i+1), "i(%lu), d[i](%lu)", i, s[i]);
+		assert(dp[i] == sp[i], "i(%lu), sp[i](%p), dp[i](%p)", i, sp[i], dp[i]);
+	}
+	pt_destroy(pt);
 }
 
 /* stdio stream with multithreaded compression / decompression */
