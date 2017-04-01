@@ -684,12 +684,12 @@ _bam_read_header_fail:
 /* bseq.c */
 typedef struct {
 	gzFile fp;
-	kseq_t *ks;
 	bam_header_t *bh;
-	uint8_v buf;
+	uint8_t *p, *base, *tail;
+	uint64_t size;	// equal to batch_size
 	uint16_t *tags;
 	uint32_t l_tags, base_rid;
-	uint8_t is_eof, keep_qual, keep_comment;
+	uint8_t is_eof, delim, keep_qual, keep_comment;
 } bseq_file_t;
 
 // sam optional tags
@@ -710,12 +710,6 @@ typedef struct {
 _static_assert(sizeof(bseq_t) == 48);
 typedef struct { size_t n, m; bseq_t *a; } bseq_v;
 
-// ascii to 4bit conversion
-static unsigned char seq_nt4_table_4bit[32] = {
-	0, 1, 0, 2,  0, 0, 0, 4,  0, 0, 0, 0,  0, 0, 0, 0,
-	0, 0, 0, 0,  8, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,
-};
-
 static uint64_t bseq_search_tag(uint32_t l_tags, const uint16_t *tags, uint16_t t1, uint16_t t2)
 {
 	v32i16_t tv = _set_v32i16((t2<<8) | t1);
@@ -725,7 +719,7 @@ static uint64_t bseq_search_tag(uint32_t l_tags, const uint16_t *tags, uint16_t 
 	return 0;
 }
 
-static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_qual, uint32_t l_tags, const uint16_t *tags)
+static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint64_t batch_size, uint32_t keep_qual, uint32_t l_tags, const uint16_t *tags)
 {
 	int c;
 	bseq_file_t *fp;
@@ -735,15 +729,18 @@ static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint32_t keep_q
 	f = fn && strcmp(fn, "-")? gzopen(fn, "r") : gzdopen(fileno(stdin), "r");
 	if (f == 0) return 0;
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
-	fp->base_rid = base_rid; fp->keep_qual = keep_qual; fp->fp = f;
+	fp->base_rid = base_rid; fp->keep_qual = keep_qual; fp->fp = f; fp->bh = NULL; fp->delim = 0;
 	for (uint64_t i = 0; i < 4; i++) {	// allow some invalid spaces at the head
 		if ((c = gzgetc(fp->fp)) == 'B') {	// test bam signature
-			gzungetc(c, fp->fp), fp->bh = bam_read_header(fp->fp); break;
+			gzungetc(c, fp->fp); fp->bh = bam_read_header(fp->fp); break;
 		} else if (c == '>' || c == '@') {
-			gzungetc(c, fp->fp), fp->ks = kseq_init(fp->fp); break;
+			gzungetc(c, fp->fp); fp->delim = c; break;
 		}
 	}
-	if (!fp->bh && !fp->ks) { free(fp); return 0; }
+	if (!fp->bh && !fp->delim) { free(fp); return 0; }
+
+	// init buffer
+	fp->tail = fp->p = (fp->base = malloc((fp->size = batch_size) + 128)) + batch_size;
 
 	fp->tags = calloc(((fp->l_tags = l_tags) + 0x1f) & ~0x1f, sizeof(uint16_t));
 	if (l_tags && tags) memcpy(fp->tags, tags, l_tags * sizeof(uint16_t));
@@ -755,9 +752,7 @@ static uint32_t bseq_close(bseq_file_t *fp)
 {
 	if (fp == 0) return 0;
 	uint32_t base_rid = fp->base_rid;
-	kseq_destroy(fp->ks);
-	gzclose(fp->fp);
-	free(fp->tags); free(fp);
+	gzclose(fp->fp); bam_header_destroy(fp->bh); free(fp->base); free(fp->tags); free(fp);
 	return base_rid;
 }
 
@@ -782,7 +777,7 @@ static uint64_t bseq_save_tags(uint32_t l_tags, const uint16_t *tags, uint32_t l
 	return p - arr;
 }
 
-static void bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *mem)
+static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *mem)
 {
 	// parse bam
 	bseq_t *s;
@@ -790,13 +785,14 @@ static void bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *
 	uint32_t l_tag;
 	bam_core_t *c;
 
-	if (fp->buf.m < size) kv_reserve(uint8_t, fp->buf, size);
-	gzread(fp->fp, fp->buf.a, size);
-	if ((c = (bam_core_t*)fp->buf.a)->flag&0x900) return;	// skip supp/secondary
-	sname = fp->buf.a + sizeof(bam_core_t);
+	// if (fp->buf.m < size) kv_reserve(uint8_t, fp->buf, size);
+	if (fp->size < size) { fp->tail = (fp->base = fp->p = realloc(fp->base, fp->size = size)) + size; }
+	gzread(fp->fp, fp->p, size);
+	if ((c = (bam_core_t*)fp->p)->flag&0x900) return 0;	// skip supp/secondary
+	sname = fp->p + sizeof(bam_core_t);
 	sseq = sname + c->l_qname + sizeof(uint32_t)*c->n_cigar;
 	squal = sseq + (c->l_qseq+1) / 2;
-	stag = squal + c->l_qseq; l_tag = ((uint8_t*)fp->buf.a + size) - stag;
+	stag = squal + c->l_qseq; l_tag = ((uint8_t*)fp->p + size) - stag;
 
 	kv_pushp(bseq_t, *seq, &s);
 	kv_reserve(uint8_t, *mem, mem->n + c->l_qname + c->l_qseq + ((fp->keep_qual && *squal != 0xff)? c->l_qseq : 0) + (fp->l_tags? l_tag : 0) + 3);
@@ -827,10 +823,15 @@ static void bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8_v *
 	// if (fp->l_tags && l_tag) { memcpy(mem->a + mem->n, stag, l_tag); mem->n += l_tag; }
 	if (fp->l_tags && l_tag) mem->n += bseq_save_tags(fp->l_tags, fp->tags, l_tag, stag, mem->a + mem->n);
 	mem->a[mem->n++] = '\0';
-	return;
+	return 0;
 }
 
-#if 1
+static uint64_t bseq_read_sam(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
+{
+	return 0;
+}
+
+#if 0
 static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
 	bseq_t *s;
@@ -865,97 +866,131 @@ static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	return;
 }
 #else
-static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
+static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
-	bseq_t *s;
-	kseq_t *ks = fp->ks;
-
-	#define _fetch() ({ \
-		if (fp->p + 32 >= fp->tail) { \
-			_store_v32i8(fp->base, _loadu_v32i8(fp->p)); \
-			fp->p = fp->base + (ptrdiff_t)(fp->tail - fp->p); fp->tail = fp->p + fp->buf_size; \
-			fread(fp->p, sizeof(uint8_t), fp->buf_size, fp->fp); \
-		} \
-		vec_t _t = _load_v32i8(fp->p); \
-		fp->p += 32; \
-		_t; \
-	})
-	#define _push(_v, _l) ({ \
-		if (mem->n + 32 > mem->m) { \
-			mem->a = realloc(mem->a, (mem->m *= 2)); \
-		} \
-		_storeu_v32i8(mem->n, _v); mem->n += (_l); \
-	})
-
-	vec_t lf = _set_v32i8('\n'), ;	// '\n' mask
-
-	uint32_t len;
-	do {
-		vec_t t = _fetch();
-		len = tzcnt(((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(t, lf)) }).all);
-		_push(t, len);
-	} while (len == 32);
-	mem->a[mem->n++] = '\n';		// there is room for at least one byte, where '\n' resided previously
-
-	// one line must be longer than 32bytes
-	do {
-		vec_t t = _fetch();
-		uint32_t mask = ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(t, lf)) }).all;
-		len = popcnt(~mask);
-
-	} while ()
-
-
-	uint64_t l_tag = (fp->keep_comment && ks->comment.l)? ks->comment.l+3 : 0;
-	kv_pushp(bseq_t, *seq, &s);
-	kv_reserve(uint8_t, *mem, mem->n + ks->name.l + ks->seq.l + ((fp->keep_qual && ks->qual.l)? ks->seq.l : 0) + l_tag + 4);
-	s->l_seq = ks->seq.l;
-	s->rid = seq->n + fp->base_rid - 1;
-	s->l_name = ks->name.l;
-	s->l_tag = l_tag;	// comment is transferred to CO:Z: tag if bseq_open is initialized with "CO" tag option
-
-	s->name = (char *)mem->n;
-	memcpy(mem->a + mem->n, ks->name.s, ks->name.l); mem->n += ks->name.l;
-	mem->a[mem->n++] = '\0';
-
-	s->tag = (uint8_t *)mem->n;
-	if (fp->keep_comment && ks->comment.l) {
-		mem->a[mem->n++] = 'C'; mem->a[mem->n++] = 'O'; mem->a[mem->n++] = 'Z';
-		memcpy(mem->a + mem->n, ks->comment.s, ks->comment.l); mem->n += ks->comment.l;
+	#define _reload(_ofs, _pv) { \
+		uint64_t _o = (_ofs), _l; \
+		fp->p = fp->base + 32 + (_o); \
+		fp->tail = fp->p + (_l = gzread(fp->fp, fp->p, fp->size)); \
+		_storeu_v32i8(fp->p + _l, _pv); \
 	}
-	mem->a[mem->n++] = '\0';
+	#define _fetch(_pv, _adv) ({ \
+		if (fp->p + 32 >= fp->tail) { \
+			_store_v32i8(fp->base + 32, _loadu_v32i8(fp->p)); \
+			_reload(fp->tail - fp->p, _pv); \
+		} \
+		v32i8_t r = _loadu_v32i8(fp->p); fp->p += (_adv); r; \
+	})
+	#define _reserve(_size) { \
+		if (mem->n + (_size) > mem->m) mem->a = realloc(mem->a, (mem->m *= 2)); \
+	}
+	#define _push(_v, _l) ({ \
+		_reserve(64); _storeu_v32i8(mem->a + mem->n, _v); mem->n += (_l); \
+	})
+	#define _put(_c) { mem->a[mem->n++] = (_c); }
+	#define _match(_v1, _v2) ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all
+	#define _strip(_v) ({ \
+		v32i8_t _t = _fetch(_zero_v32i8(), 0); \
+		fp->p += tzcnt(~((uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_t, _v)) }).all)); \
+	})
+	#define _readline(_dv, _op) ({ \
+		const v32i8_t _lv = _set_v32i8('\n'); \
+		uint64_t dm, lm, base = mem->n; \
+		do { \
+			v32i8_t r = _fetch(_dv, 32); \
+			dm = _match(r, _dv); lm = _match(r, _lv); \
+			v32i8_t t = _op(r); _push(t, 32); \
+		} while ((dm | lm) == 0); \
+		uint64_t len = tzcnt(dm | lm); \
+		mem->n += len - 32; fp->p += len - 31 - ((dm>>len)&0x01); \
+		((dm>>len)&0x01)? mem->n-base+1 : 0; \
+	})
+	#define _id(x)		(x)
+	#define _trans(x)	( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
+	#define _beg()		( (uint8_t *)mem->n )
+	#define _term(_base) ({ \
+		uint64_t len = mem->n - (uint64_t)(_base); \
+		_put('\0'); len; \
+	})
 
-	s->seq = (uint8_t *)mem->n;
-	for (uint64_t i = 0; i < ks->seq.l; ++i) mem->a[mem->n++] = seq_nt4_table_4bit[0x1f&ks->seq.s[i]];
-	mem->a[mem->n++] = '\0';
+	const v32i8_t dv = _set_v32i8(fp->delim);
+	const v32i8_t sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0x0f);
+	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,0,8,2,0,1,0));
+	uint64_t acc;
 
-	s->qual = (uint8_t *)mem->n;
-	if (fp->keep_qual && ks->qual.l) { memcpy(mem->a + mem->n, ks->qual.s, ks->qual.l); mem->n += ks->qual.l; }
-	mem->a[mem->n++] = '\0';
-	return;
+	// check delim
+	_fetch(_zero_v32i8(), 0);	// ensure the first char arrived, discard return val
+	if (*fp->p++ != fp->delim) return 1;
+
+	bseq_t *s;
+	kv_pushp(bseq_t, *seq, &s);
+	s->rid = seq->n + fp->base_rid - 1;
+	// fprintf(stderr, "rid(%u)\n", s->rid);
+
+	_strip(sv);			// strip spaces, parse name until '\n' or ' '
+	s->name = (char *)_beg(); acc = _readline(sv, _id); s->l_name = _term(s->name);
+	s->tag = _beg();	// comment follows
+	if (acc) { _strip(sv); _put('C'); _put('O'); _put('Z'); _readline(lv, _id); }	// additional 32bytes are already reserved
+	s->l_tag = _term(s->tag);
+
+	// fprintf(stderr, "name: %s\n", &mem->a[(uint64_t)s->name]);
+	// fprintf(stderr, "com(%llu): %s\n", acc, &mem->a[(uint64_t)s->tag]);
+
+	// parse seq
+	s->seq = _beg(); while ((acc = _readline(dv, _trans)) == 0) {} s->l_seq = _term(s->seq);
+	// fprintf(stderr, "l_seq(%u)\n", s->l_seq);
+	// for (uint64_t i = 0; i < s->l_seq; ++i) fprintf(stderr, "%c", "NACMGRSVTWYHKDBN"[mem->a[(uint64_t)s->seq + i]]);
+	// fprintf(stderr, "\n");
+
+	// parse qual
+	s->qual = _beg();
+	if (fp->delim == '@') {
+		int64_t rem = s->l_seq;
+		if (fp->keep_qual) {
+			while (rem > 0) { rem -= _readline(lv, _id) - 1; }
+		} else {
+			while (1) {
+				uint64_t l = MIN2(fp->tail - fp->p, rem);
+				if ((rem -= l) == 0) { fp->p += l; break; }
+				_reload(0, _zero_v32i8());
+			}
+		}
+		if (acc != s->l_seq) return 1;
+	}
+	_term(s->qual);
+	// fprintf(stderr, "qual: %s\n", &mem->a[(uint64_t)s->qual]);
+	return 0;
+
+	#undef _reload
+	#undef _fetch
+	#undef _reserve
+	#undef _push
+	#undef _put
+	#undef _match
+	#undef _strip
+	#undef _readline
+	#undef _beg
+	#undef _term
 }
 #endif
 
-static bseq_t *bseq_read(bseq_file_t *fp, uint64_t chunk_size, uint32_t *n, void **base, uint64_t *size)
+static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *size)
 {
 	uint8_v mem = {0};
 	bseq_v seq = {0};
 	static const uint8_t margin[64] = {0};
 
 	set_info(0, "[bseq_read] read sequence block from file");
-	kv_reserve(uint8_t, mem, chunk_size + 128);
+	kv_reserve(uint8_t, mem, fp->size + 128);
 	kv_pushm(uint8_t, mem, margin, 64);
 	if (fp->bh) {
 		uint32_t size;
 		while (gzread(fp->fp, &size, 4) == 4) {
 			bseq_read_bam(fp, size, &seq, &mem);
-			if (mem.n >= chunk_size) break;
+			if (mem.n >= fp->size) break;
 		}
 	} else {
-		while (kseq_read(fp->ks) >= 0) {
-			bseq_read_fasta(fp, &seq, &mem);
-			if (mem.n >= chunk_size) break;
-		}
+		while (!bseq_read_fasta(fp, &seq, &mem) && mem.n < fp->size) {}
 	}
 	kv_pushm(uint8_t, mem, margin, 64);
 
@@ -1335,7 +1370,6 @@ static uint32_t mm_idx_cal_max_occ(const mm_idx_t *mi, double f)
  ******************/
 
 typedef struct {
-	uint64_t batch_size;
 	uint32_t icnt, ocnt;
 	bseq_file_t *fp;
 	mm_idx_t *mi;
@@ -1359,7 +1393,7 @@ static void *mm_idx_source(uint32_t tid, void *arg)
 	void *base;
 
 	s->id = q->icnt++;
-	s->seq = bseq_read(q->fp, q->batch_size, &s->n_seq, &base, &size);
+	s->seq = bseq_read(q->fp, &s->n_seq, &base, &size);
 	if (s->seq == 0) { free(s), s = 0; return 0; }
 
 	kv_push(void*, q->mi->base, base);
@@ -1475,7 +1509,6 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 	mm_idx_pipeline_t pl = {0}, **p;
 
 	set_info(0, "[mm_idx_gen] initialize index object");
-	pl.batch_size = opt->batch_size;
 	pl.icnt = pl.ocnt = 0;
 	pl.fp = fp;
 	if (pl.fp == 0) return 0;
@@ -2006,7 +2039,6 @@ static const mm128_t *mm_align_seq(
 #undef _s
 #undef _m
 
-#define BUF_SIZE	( 512 * 1024 )
 // flush the buffer if there is no room for (margin + 1) bytes
 #define _flush(_buf, _margin) { \
 	if (_unlikely((uintptr_t)(_buf)->p + (_margin) >= (uintptr_t)(_buf)->tail)) { \
@@ -2400,7 +2432,7 @@ static void *mm_align_source(uint32_t tid, void *arg)
 	s->lmm = lmm_init(NULL, 512 * 1024);
 	if (s->lmm == 0) return 0;
 	s->id = b->icnt++;
-	s->seq = bseq_read(b->fp, b->opt->batch_size, &s->n_seq, &s->base, &s->size);
+	s->seq = bseq_read(b->fp, &s->n_seq, &s->base, &s->size);
 	if (s->seq == 0) lmm_clean(s->lmm), free(s), s = 0;
 	return s;
 }
@@ -2804,8 +2836,17 @@ int main(int argc, char *argv[])
 		uint32_t qid = base_qid;
 		mm_idx_t *mi = 0;
 		mm_align_t *aln = 0;
-		if (fpr) mi = mm_idx_load(fpr, opt->n_threads);
-		else mi = mm_idx_gen(opt, (fp = bseq_open((const char *)v.a[i], base_rid, 0, 0, NULL))), base_rid = bseq_close(fp);
+
+		// load/generate index for this index-side iteration
+		if (fpr) {
+			mi = mm_idx_load(fpr, opt->n_threads);
+		} else {
+			fp = bseq_open((const char *)v.a[i], base_rid, opt->batch_size, 0, 0, NULL);
+			mi = mm_idx_gen(opt, fp);
+			base_rid = bseq_close(fp);
+		}
+
+		// check sanity of the index
 		if (mi == 0) {
 			if (fpr && i > 0) break;
 			fprintf(stderr, "[M::%s] ERROR: failed to %s `%s'. Please check %s.\n", __func__,
@@ -2815,11 +2856,19 @@ int main(int argc, char *argv[])
 		}
 		if (mm_verbose >= 3) fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %lu target sequence(s)\n", __func__,
 			realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->s.n);
-		if (fpw) mm_idx_dump(fpw, mi, opt->n_threads);
-		else aln = mm_align_init(opt, mi);
-		for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < (fpw? 0 : v.n); ++j)
-			mm_align_file(aln, (fp = bseq_open((const char*)v.a[j], qid, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n, opt->tags.a))), qid = bseq_close(fp);
-		if (!fpw) mm_align_destroy(aln);
+
+		// do the task
+		if (fpw) {
+			mm_idx_dump(fpw, mi, opt->n_threads);
+		} else {
+			aln = mm_align_init(opt, mi);
+			for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < v.n; ++j) {
+				fp = bseq_open((const char*)v.a[j], qid, opt->batch_size, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n, opt->tags.a);
+				mm_align_file(aln, fp);
+				qid = bseq_close(fp);
+			}
+			mm_align_destroy(aln);
+		}
 		mm_idx_destroy(mi);
 	}
 	fprintf(stderr, "[M::%s] Version: %s\n", __func__, MM_VERSION);
