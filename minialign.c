@@ -6,7 +6,6 @@
 /* set non-zero value to ensure order of streamed objects */
 #define STRICT_STREAM_ORDERING		( 1 )
 
-#include <assert.h>
 #include <getopt.h>
 #include <inttypes.h>
 #include <math.h>
@@ -114,12 +113,50 @@ static void oom_abort(const char *name)
 	_q - _buf - 1; \
 })
 
+/* 64bit random number generator (for unittest) */
+uint64_t mm_rand64(void)
+{
+	uint64_t bits = 31, n = 0;
+	for (uint64_t acc = 0; acc < 64; acc += bits) {
+		n <<= bits; n ^= (uint64_t)rand();
+	}
+	return n;
+}
+
 /* end of misc.c */
 
 #include "kvec.h"
 #include "gaba.h"
 #include "lmm.h"
 #include "arch/arch.h"
+
+#define UNITTEST_UNIQUE_ID		1
+#include "unittest.h"
+
+unittest_config( .name = "minialign" );
+
+/* test for timers and mallocs */
+unittest() {
+	double cpu = cputime(), real = realtime();	// make sure they do not raise segv
+	assert(isnan(cpu) == 0);
+	assert(isnan(real) == 0);
+}
+
+unittest() {
+	uint64_t const size = 1024 * 1024 * 1024;
+	uint8_t *p = malloc(size);
+	assert(p != NULL);
+
+	memset(p, 0, size);		// make sure we can touch this area
+
+	p = realloc(p, 2*size);
+	assert(p != NULL);
+
+	p = realloc(p, size/2);
+	assert(p != NULL);
+	free(p);
+}
+/* end of unittest */
 
 /* minimap.h */
 typedef struct { uint32_t x[2]; } v2u32_t;
@@ -247,9 +284,8 @@ static void kh_extend(kh_t *h)
 
 static void kh_put(kh_t *h, uint64_t key, uint64_t val)
 {
-	uint64_t mask = h->mask;
 	if (h->cnt >= h->ub) kh_extend(h);
-	h->cnt += kh_put_intl(h->a, key, val, mask);
+	h->cnt += kh_put_intl(h->a, key, val, h->mask);
 	return;
 }
 
@@ -272,6 +308,63 @@ static const uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 	} while (k + 1 < UINT64_MAX);	// !is_empty(k) || is_moved(k)
 	return NULL;
 }
+
+unittest() {
+	kh_t *h = kh_init(0);
+	assert(h != NULL);
+
+	const uint64_t kmask = mm_rand64(), vmask = mm_rand64(), cnt = 1024 * 1024;
+	const uint64_t *p;
+
+	assert(kh_cnt(h) == 0, "cnt(%lu)", kh_cnt(h));
+	for (uint64_t i = 0; i < 2*cnt; i++) {
+		p = kh_get_ptr(h, i^kmask);
+		assert(p == NULL);
+		assert(kh_get(h, i^kmask) == UINT64_MAX);
+	}
+
+	// put key-val pairs
+	for (uint64_t i = 0; i < cnt; i++) kh_put(h, i^kmask, i^vmask);
+	assert(kh_cnt(h) == cnt, "cnt(%lu)", kh_cnt(h));
+	for (uint64_t i = 0; i < cnt; i++) {
+		p = kh_get_ptr(h, i^kmask);
+		assert(p != NULL, "i(%lu)", i);
+		assert(*p == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
+		assert(kh_get(h, i^kmask) == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
+	}
+	for (uint64_t i = cnt; i < 2*cnt; i++) {
+		p = kh_get_ptr(h, i^kmask);
+		assert(p == NULL);
+		assert(kh_get(h, i^kmask) == UINT64_MAX);
+	}
+
+	// clear
+	kh_clear(h);
+	assert(kh_cnt(h) == 0, "cnt(%lu)", kh_cnt(h));
+	for (uint64_t i = 0; i < cnt; i++) {
+		p = kh_get_ptr(h, i^kmask);
+		assert(p == NULL);
+		assert(kh_get(h, i^kmask) == UINT64_MAX);
+	}
+
+	// add another set of key-val pairs
+	for (uint64_t i = cnt; i < 2*cnt; i++) kh_put(h, i^kmask, i^vmask);
+	assert(kh_cnt(h) == cnt, "cnt(%lu)", kh_cnt(h));
+	for (uint64_t i = 0; i < cnt; i++) {
+		p = kh_get_ptr(h, i^kmask);
+		assert(p == NULL);
+		assert(kh_get(h, i^kmask) == UINT64_MAX);
+	}
+	for (uint64_t i = cnt; i < 2*cnt; i++) {
+		p = kh_get_ptr(h, i^kmask);
+		assert(p != NULL, "i(%lu)", i);
+		assert(*p == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
+		assert(kh_get(h, i^kmask) == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
+	}
+
+	kh_destroy(h);
+}
+
 /* end of hash.c */
 
 /* queue.c */
@@ -2510,7 +2603,6 @@ _fail:
 
 static void mm_align_destroy(mm_align_t *b)
 {
-	assert(b != 0);
 	fwrite(b->base, sizeof(uint8_t), b->p - b->base, stdout);
 	for (uint64_t i = 0; i < b->opt->n_threads; ++i) mm_tbuf_destroy((mm_tbuf_t*)b->t[i]);
 	free(b->base); kv_hq_destroy(b->hq); free(b->occ); free(b->t); gaba_clean(b->gaba); pt_destroy(b->pt);
@@ -2520,9 +2612,6 @@ static void mm_align_destroy(mm_align_t *b)
 
 static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 {
-	assert(mi != 0);
-	assert(opt != 0);
-
 	static const mm_printer_t printer[] = {
 		[0] = { .header = mm_print_header_sam, .unmapped = mm_print_unmapped_sam, .mapped = mm_print_mapped_sam },
 		[MM_BLAST6>>56] = { .mapped = mm_print_mapped_blast6 },
@@ -2575,7 +2664,6 @@ _fail:
 
 static int mm_align_file(mm_align_t *b, bseq_file_t *fp)
 {
-	assert(b != 0);
 	if (fp == 0) return -1;
 	b->fp = fp;
 	return pt_stream(b->pt, mm_align_source, b, mm_align_worker, (void**)b->t, mm_align_drain, b);
@@ -2806,6 +2894,9 @@ int main(int argc, char *argv[])
 	bseq_file_t *fp = 0;
 	ptr_v v = {0};
 	FILE *fpr = 0, *fpw = 0;
+
+	// unittest hook
+	if (strcmp(argv[1], "unittest") == 0) return unittest_main(argc, argv);
 
 	enable_info(0);
 	set_info(0, "[main] parsing arguments");
