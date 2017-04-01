@@ -2502,8 +2502,6 @@ static const mm128_t *mm_align_seq(
 	} \
 	_flush(_buf, 32); \
 	_storeu_v32i8((_buf)->p, _loadu_v32i8(_q)); (_buf)->p += (_l) & 0x1f; \
-	/*_flush(_buf, _l);*/ \
-	/*for (const uint8_t *_q = (const uint8_t*)(_s), *_t = _q + (_l); _q < _t; _q++) *(_buf)->p++ = *(_q);*/ \
 }
 #define _putsnr(_buf, _s, _l) { \
 	const uint8_t *_q = (const uint8_t *)(_s) + (_l) - 32; \
@@ -2520,11 +2518,11 @@ static const mm128_t *mm_align_seq(
 	const uint8_t *_q = (const uint8_t *)(_s); \
 	for (const uint8_t *_t = _q + ((_l) & ~0x1fULL); _q < _t; _q += 32) { \
 		_flush(_buf, 32); \
-		_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_r, _conv); \
+		_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_conv, _r); \
 		_storeu_v32i8((_buf)->p, _b); (_buf)->p += 32; \
 	} \
 	_flush(_buf, 32); \
-	_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_r, _conv); \
+	_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_conv, _r); \
 	_storeu_v32i8((_buf)->p, _b); (_buf)->p += (_l) & 0x1f; \
 }
 #define _putsntr(_buf, _s, _l, _table) { \
@@ -2533,11 +2531,11 @@ static const mm128_t *mm_align_seq(
 	const uint8_t *_q = (const uint8_t *)(_s) + (_l) - 32; \
 	for (; _q >= _s; _q -= 32) { \
 		_flush(_buf, 32); \
-		_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_swap_v32i8(_r), _conv); \
+		_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_conv, _swap_v32i8(_r)); \
 		_storeu_v32i8((_buf)->p, _b); (_buf)->p += 32; \
 	} \
 	_flush(_buf, 32); \
-	_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_swap_v32i8(_r), _conv); \
+	_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_conv, _swap_v32i8(_r)); \
 	_storeu_v32i8((_buf)->p, _b); (_buf)->p += (_l) & 0x1f; \
 }
 
@@ -2738,52 +2736,20 @@ void mm_print_sam_md(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, cons
 		uint64_t acnt = 32;
 		while (acnt == 32) {
 			arr = _load(p, pos); acnt = lzcnt(arr^0x5555555555555555)>>1;
-			v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _swap_v32i8(_loadu_v32i8(qp));
+			v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _loadu_v32i8(qp);
+			if (dir) qv = _swap_v32i8(qv);
 			uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
 			uint64_t mcnt = MIN2(pos>>1, tzcnt(~mmask));
 			pos -= 2*mcnt; rp += mcnt; qp += dir? -mcnt : mcnt;
 			if (mcnt >= acnt) continue;
 			_putn(b, (int32_t)(rp-rb));
-			pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp -= cnt;
+			pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp += dir? -cnt : cnt;
 			for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); _put(b, '0'); rp++; }
 			_put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++;
 			rb = rp;
 		}
 	}
 	if (rp-rb) { _putn(b, (int32_t)(rp-rb)); }
-
-	#if 0
-	} else {
-		const uint8_t *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[qs];
-		while (pos > 0) {
-			// suppose each indel block is shorter than 32 bases
-			uint64_t arr = _load(p, pos), cnt = lzcnt(~arr);
-			pos -= cnt; qp += cnt;
-			if (((((int64_t)arr)>>62)^0x01) > 0) {	// is_del
-				pos -= (cnt = lzcnt(arr) - 1);
-				_putn(b, (int32_t)(rp-rb)); _put(b, '^'); _putsnt(b, rp, cnt, "NACMGRSVTWYHKDBN");
-				// for (uint64_t i = 0; i < cnt; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++; }
-				rp += cnt; rb = rp;
-			}
-			// match or mismatch
-			uint64_t acnt = 32;
-			while (acnt == 32) {
-				arr = _load(p, pos); acnt = lzcnt(arr^0x5555555555555555)>>1;
-				v32i8_t rv = _loadu_v32i8(rp), qv = _loadu_v32i8(qp);
-				uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
-				uint64_t mcnt = MIN2(pos>>1, tzcnt(~mmask));
-				pos -= 2*mcnt; rp += mcnt; qp += mcnt;
-				if (mcnt == acnt) continue;
-				_putn(b, (int32_t)(rp-rb));
-				pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt)); qp += cnt;
-				for (uint64_t i = 0; i < cnt-1; ++i) { _put(b, "NACMGRSVTWYHKDBN"[*rp]); _put(b, '0'); rp++; }
-				_put(b, "NACMGRSVTWYHKDBN"[*rp]); rp++;
-				rb = rp;
-			}
-		}
-		if (rp-rb) { _putn(b, (int32_t)(rp-rb)); }
-	}
-	#endif
 	#undef _load
 	return;
 }
