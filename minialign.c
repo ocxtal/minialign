@@ -1117,38 +1117,38 @@ static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 #else
 static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
-	#define _reload(_ofs, _pv) { \
+	#define _reload(_fp, _ofs, _pv) { \
 		uint64_t _o = (_ofs), _l; \
-		fp->p = fp->base + 32 + (_o); \
-		fp->tail = fp->p + (_l = gzread(fp->fp, fp->p, fp->size)); \
-		_storeu_v32i8(fp->p + _l, _pv); \
+		(_fp)->p = (_fp)->base + 32 + (_o); \
+		(_fp)->tail = (_fp)->p + (_l = gzread((_fp)->fp, (_fp)->p, (_fp)->size)); \
+		_storeu_v32i8((_fp)->p + _l, _pv); \
 	}
-	#define _fetch(_pv, _adv) ({ \
-		if (fp->p + 32 >= fp->tail) { \
-			_storeu_v32i8(fp->base + 32, _loadu_v32i8(fp->p)); \
-			_reload(fp->tail - fp->p, _pv); \
+	#define _fetch(_fp, _pv, _adv) ({ \
+		if (_unlikely((_fp)->p + 32 >= (_fp)->tail)) { \
+			_storeu_v32i8((_fp)->base + 32, _loadu_v32i8((_fp)->p)); \
+			_reload(_fp, (_fp)->tail - (_fp)->p, _pv); \
 		} \
 		v32i8_t r = _loadu_v32i8(fp->p); fp->p += (_adv); r; \
 	})
-	#define _reserve(_size) { \
-		if (mem->n + (_size) > mem->m) mem->a = realloc(mem->a, (mem->m *= 2)); \
+	#define _reserve(_mem, _size) { \
+		if ((_mem)->n + (_size) > (_mem)->m) (_mem)->a = realloc((_mem)->a, ((_mem)->m *= 2)); \
 	}
-	#define _push(_v, _l) ({ \
-		_reserve(64); _storeu_v32i8(mem->a + mem->n, _v); mem->n += (_l); \
+	#define _push(_mem, _v, _l) ({ \
+		_reserve(_mem, 64); _storeu_v32i8((_mem)->a + (_mem)->n, _v); (_mem)->n += (_l); \
 	})
-	#define _put(_c) { mem->a[mem->n++] = (_c); }
+	#define _put(_mem, _c) { (_mem)->a[(_mem)->n++] = (_c); }
 	#define _match(_v1, _v2) ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all
-	#define _strip(_v) ({ \
-		v32i8_t _t = _fetch(_zero_v32i8(), 0); \
+	#define _strip(_fp, _v) ({ \
+		v32i8_t _t = _fetch(_fp, _zero_v32i8(), 0); \
 		fp->p += tzcnt(~((uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_t, _v)) }).all)); \
 	})
-	#define _readline(_dv, _op) ({ \
+	#define _readline(_fp, _mem, _dv, _op) ({ \
 		const v32i8_t _lv = _set_v32i8('\n'); \
 		uint64_t dm, lm, base = mem->n; \
 		do { \
-			v32i8_t r = _fetch(_dv, 32); \
+			v32i8_t r = _fetch(_fp, _dv, 32); \
 			dm = _match(r, _dv); lm = _match(r, _lv); \
-			v32i8_t t = _op(r); _push(t, 32); \
+			v32i8_t t = _op(r); _push(_mem, t, 32); \
 		} while ((dm | lm) == 0); \
 		uint64_t len = tzcnt(dm | lm); \
 		mem->n += len - 32; fp->p += len - 31 - ((dm>>len)&0x01); \
@@ -1156,10 +1156,10 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	})
 	#define _id(x)		(x)
 	#define _trans(x)	( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
-	#define _beg()		( (uint8_t *)mem->n )
-	#define _term(_base) ({ \
-		uint64_t len = mem->n - (uint64_t)(_base); \
-		_put('\0'); len; \
+	#define _beg(_mem)		( (uint8_t *)(_mem)->n )
+	#define _term(_mem, _base) ({ \
+		uint64_t len = (_mem)->n - (uint64_t)(_base); \
+		_put(_mem, '\0'); len; \
 	})
 
 	const v32i8_t dv = _set_v32i8(fp->delim);
@@ -1168,7 +1168,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	uint64_t acc;
 
 	// check delim
-	_fetch(_zero_v32i8(), 0);	// ensure the first char arrived, discard return val
+	_fetch(fp, _zero_v32i8(), 0);	// ensure the first char arrived, discard return val
 	if (*fp->p++ != fp->delim) return 1;
 
 	bseq_t *s;
@@ -1176,37 +1176,40 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	s->rid = seq->n + fp->base_rid - 1;
 	// fprintf(stderr, "rid(%u)\n", s->rid);
 
-	_strip(sv);			// strip spaces, parse name until '\n' or ' '
-	s->name = (char *)_beg(); acc = _readline(sv, _id); s->l_name = _term(s->name);
-	s->tag = _beg();	// comment follows
-	if (acc) { _strip(sv); _put('C'); _put('O'); _put('Z'); _readline(lv, _id); }	// additional 32bytes are already reserved
-	s->l_tag = _term(s->tag);
+	_strip(fp, sv);			// strip spaces, parse name until '\n' or ' '
+	s->name = (char *)_beg(mem); acc = _readline(fp, mem, sv, _id); s->l_name = _term(mem, s->name);
+	s->tag = _beg(mem);	// comment follows
+	if (acc) {
+		_strip(fp, sv); _put(mem, 'C'); _put(mem, 'O'); _put(mem, 'Z');	// additional 32bytes are already reserved
+		_readline(fp, mem, lv, _id);
+	}
+	s->l_tag = _term(mem, s->tag);
 
 	// fprintf(stderr, "name: %s\n", &mem->a[(uint64_t)s->name]);
 	// fprintf(stderr, "com(%llu): %s\n", acc, &mem->a[(uint64_t)s->tag]);
 
 	// parse seq
-	s->seq = _beg(); while ((acc = _readline(dv, _trans)) == 0) {} s->l_seq = _term(s->seq);
+	s->seq = _beg(mem); while ((acc = _readline(fp, mem, dv, _trans)) == 0) {} s->l_seq = _term(mem, s->seq);
 	// fprintf(stderr, "l_seq(%u)\n", s->l_seq);
 	// for (uint64_t i = 0; i < s->l_seq; ++i) fprintf(stderr, "%c", "NACMGRSVTWYHKDBN"[mem->a[(uint64_t)s->seq + i]]);
 	// fprintf(stderr, "\n");
 
 	// parse qual
-	s->qual = _beg();
+	s->qual = _beg(mem);
 	if (fp->delim == '@') {
 		int64_t rem = s->l_seq;
 		if (fp->keep_qual) {
-			while (rem > 0) { rem -= _readline(lv, _id) - 1; }
+			while (rem > 0) { rem -= _readline(fp, mem, lv, _id) - 1; }
 		} else {
 			while (1) {
 				uint64_t l = MIN2(fp->tail - fp->p, rem);
 				if ((rem -= l) == 0) { fp->p += l; break; }
-				_reload(0, _zero_v32i8());
+				_reload(fp, 0, _zero_v32i8());
 			}
 		}
 		if (acc != s->l_seq) return 1;
 	}
-	_term(s->qual);
+	_term(mem, s->qual);
 	// fprintf(stderr, "qual: %s\n", &mem->a[(uint64_t)s->qual]);
 	return 0;
 
@@ -1262,6 +1265,13 @@ static int bseq_eof(bseq_file_t *fp)
 	return fp->is_eof;
 }
 
+unittest() {
+	char const *fasta_content =
+		">test0\nAAAA\n"
+		"> test1\nATAT\nCGCG\n"
+		">  test2\n\nAAAA\n"
+		">test3 comment   \nACGT";
+}
 /* end of bseq.c */
 
 /* sketch.c */
