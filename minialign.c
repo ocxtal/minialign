@@ -136,13 +136,13 @@ uint64_t mm_rand64(void)
 unittest_config( .name = "minialign" );
 
 /* test for timers and mallocs */
-unittest() {
+unittest( .name = "misc.timer" ) {
 	double cpu = cputime(), real = realtime();	// make sure they do not raise segv
 	assert(isnan(cpu) == 0);
 	assert(isnan(real) == 0);
 }
 
-unittest() {
+unittest( .name = "misc.malloc" ) {
 	uint64_t const size = 1024 * 1024 * 1024;
 	uint8_t *p = malloc(size);
 	assert(p != NULL);
@@ -309,7 +309,7 @@ static const uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 	return NULL;
 }
 
-unittest() {
+unittest( .name = "kh.base" ) {
 	kh_t *h = kh_init(0);
 	assert(h != NULL);
 
@@ -365,7 +365,7 @@ unittest() {
 	kh_destroy(h);
 }
 
-unittest() {
+unittest( .name = "kh.io" ) {
 	kh_t *h = kh_init(0);
 	const uint64_t kmask = mm_rand64(), vmask = mm_rand64(), cnt = 1024 * 1024;
 	for (uint64_t i = 0; i < cnt; i++) kh_put(h, i^kmask, i^vmask);
@@ -561,7 +561,7 @@ static void pt_unittest_drain(uint32_t tid, void *arg, void *item)
 	free(item);
 }
 
-unittest() {
+unittest( .name = "pt.single" ) {
 	pt_t *pt = pt_init(1);
 	assert(pt != NULL);
 
@@ -576,7 +576,7 @@ unittest() {
 	pt_destroy(pt);
 }
 
-unittest() {
+unittest( .name = "pt.multi" ) {
 	pt_t *pt = pt_init(4);
 	assert(pt != NULL);
 
@@ -789,12 +789,12 @@ static uint64_t pgwrite(pg_t *pg, void *src, uint64_t len)
 	return len;
 }
 
-unittest() {
+unittest( .name = "pg.single" ) {
 	const uint64_t size = 1024 * 1024 * 1024;
-	uint8_t *p = malloc(size);
-	for (uint64_t i = 0; i < size; i++) p[i] = i & 0xff;
+	uint8_t *p = malloc(size), *q = malloc(size);
+	for (uint64_t i = 0; i < size; i++) p[i] = i % 253;
 
-	const char *filename = "./minialign.unittest.pt.tmp";
+	const char *filename = "./minialign.unittest.pg.tmp";
 	FILE *fp = fopen(filename, "w");
 	assert(fp != NULL);
 	pg_t *pg = pg_init(fp, 1);
@@ -814,23 +814,21 @@ unittest() {
 	assert(pg != NULL);
 
 	for (uint64_t i = 0; i < 3; i++) {
-		uint64_t l = pgread(pg, p, size);
+		uint64_t l = pgread(pg, q, size);
 		assert(l == size, "l(%lu), size(%lu)", l, size);
-		for (uint64_t j = 0; j < size; j++) {
-			assert(p[j] == (j&0xff), "j(%lu), p[j](%lu)", j, j&0xff);
-		}
+		assert(memcmp(p, q, size) == 0);
 	}
 	pg_destroy(pg);
 	fclose(fp);
-	remove(filename);
+	free(p); free(q); remove(filename);
 }
 
-unittest() {
+unittest( .name = "pg.multi" ) {
 	const uint64_t size = 1024 * 1024 * 1024;
-	uint8_t *p = malloc(size);
-	for (uint64_t i = 0; i < size; i++) p[i] = i & 0xff;
+	uint8_t *p = malloc(size), *q = malloc(size);
+	for (uint64_t i = 0; i < size; i++) p[i] = i % 253;
 
-	const char *filename = "./minialign.unittest.pt.tmp";
+	const char *filename = "./minialign.unittest.pg.tmp";
 	FILE *fp = fopen(filename, "w");
 	assert(fp != NULL);
 	pg_t *pg = pg_init(fp, 4);
@@ -850,15 +848,13 @@ unittest() {
 	assert(pg != NULL);
 
 	for (uint64_t i = 0; i < 3; i++) {
-		uint64_t l = pgread(pg, p, size);
+		uint64_t l = pgread(pg, q, size);
 		assert(l == size, "l(%lu), size(%lu)", l, size);
-		for (uint64_t j = 0; j < size; j++) {
-			assert(p[j] == (j&0xff), "j(%lu), p[j](%lu)", j, j&0xff);
-		}
+		assert(memcmp(p, q, size) == 0);
 	}
 	pg_destroy(pg);
 	fclose(fp);
-	remove(filename);
+	free(p); free(q); remove(filename);
 }
 /* end of queue.c */
 
@@ -1075,156 +1071,120 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 	return 0;
 }
 
+#define _reload(_fp, _ofs) { \
+	uint64_t _o = (_ofs); \
+	(_fp)->p = (_fp)->base + 32; (_fp)->tail = (_fp)->p + (_o); \
+	uint64_t _l = gzread((_fp)->fp, (_fp)->p + (_o), (_fp)->size); \
+	(_fp)->tail += (_l); (_fp)->is_eof = _l < (_fp)->size; \
+	_storeu_v32i8((_fp)->tail, _zero_v32i8()); \
+}
+#define _fetch(_fp, _adv) ({ \
+	if (_unlikely(!(_fp)->is_eof && (_fp)->p + 32 >= (_fp)->tail)) { \
+		_storeu_v32i8((_fp)->base + 32, _loadu_v32i8((_fp)->p)); \
+		_reload(_fp, (_fp)->tail - (_fp)->p); \
+	} \
+	v32i8_t _r = _loadu_v32i8(fp->p); fp->p += (_adv); _r; \
+})
+#define _reserve(_mem, _size) { \
+	if ((_mem)->n + (_size) > (_mem)->m) (_mem)->a = realloc((_mem)->a, ((_mem)->m *= 2)); \
+}
+#define _push(_mem, _v, _l) ({ \
+	_reserve(_mem, 64); _storeu_v32i8((_mem)->a + (_mem)->n, _v); (_mem)->n += (_l); \
+})
+#define _put(_mem, _c) { (_mem)->a[(_mem)->n++] = (_c); }
+#define _match(_v1, _v2) ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all
+#define _strip(_fp, _v) ({ \
+	const v32i8_t _zv = _zero_v32i8(); \
+	v32i8_t _t = _fetch(_fp, 0); \
+	fp->p += tzcnt(~((uint64_t)_match(_t, _v)) | _match(_t, _zv)); \
+})
+#define _readline(_fp, _mem, _dv, _op) ({ \
+	const v32i8_t _lv = _set_v32i8('\n'), _zv = _zero_v32i8(); \
+	uint64_t _dm, _lm, _em, base = mem->n; \
+	do { \
+		v32i8_t _r = _fetch(_fp, 32); \
+		_dm = _match(_r, _dv); _lm = _match(_r, _lv); _em = _match(_r, _zv); \
+		v32i8_t _t = _op(_r); _push(_mem, _t, 32); \
+	} while ((_dm | _lm | _em) == 0); \
+	uint64_t _len = tzcnt(_dm | _lm | _em); \
+	fp->p += _len - 32 + ((_lm>>_len)&0x01); mem->n += _len - 32; \
+	((_lm>>_len)&0x01)? 0 : mem->n-base+1; \
+})
+#define _skipline(_fp) ({ \
+	const v32i8_t _lv = _set_v32i8('\n'), _zv = _zero_v32i8(); \
+	uint64_t _lm, _em, _acc = 0; \
+	do { \
+		v32i8_t _r = _fetch(_fp, 32); \
+		_lm = _match(_r, _lv); _em = _match(_r, _zv); \
+		_acc += 32; \
+	} while ((_lm | _em) == 0); \
+	uint64_t _len = tzcnt(_lm | _em); \
+	fp->p += _len - 31; _acc += _len - 32; \
+})
+#define _beg(_mem)		( (uint8_t *)(_mem)->n )
+#define _term(_mem, _base) ({ \
+	uint64_t _len = (_mem)->n - (uint64_t)(_base); \
+	_put(_mem, '\0'); _len; \
+})
+
 static uint64_t bseq_read_sam(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
 	return 0;
 }
 
-#if 0
-static void bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
-{
-	bseq_t *s;
-	kseq_t *ks = fp->ks;
-
-	uint64_t l_tag = (fp->keep_comment && ks->comment.l)? ks->comment.l+3 : 0;
-	kv_pushp(bseq_t, *seq, &s);
-	kv_reserve(uint8_t, *mem, mem->n + ks->name.l + ks->seq.l + ((fp->keep_qual && ks->qual.l)? ks->seq.l : 0) + l_tag + 4);
-	s->l_seq = ks->seq.l;
-	s->rid = seq->n + fp->base_rid - 1;
-	s->l_name = ks->name.l;
-	s->l_tag = l_tag;	// comment is transferred to CO:Z: tag if bseq_open is initialized with "CO" tag option
-
-	s->name = (char *)mem->n;
-	memcpy(mem->a + mem->n, ks->name.s, ks->name.l); mem->n += ks->name.l;
-	mem->a[mem->n++] = '\0';
-
-	s->tag = (uint8_t *)mem->n;
-	if (fp->keep_comment && ks->comment.l) {
-		mem->a[mem->n++] = 'C'; mem->a[mem->n++] = 'O'; mem->a[mem->n++] = 'Z';
-		memcpy(mem->a + mem->n, ks->comment.s, ks->comment.l); mem->n += ks->comment.l;
-	}
-	mem->a[mem->n++] = '\0';
-
-	s->seq = (uint8_t *)mem->n;
-	for (uint64_t i = 0; i < ks->seq.l; ++i) mem->a[mem->n++] = seq_nt4_table_4bit[0x1f&ks->seq.s[i]];
-	mem->a[mem->n++] = '\0';
-
-	s->qual = (uint8_t *)mem->n;
-	if (fp->keep_qual && ks->qual.l) { memcpy(mem->a + mem->n, ks->qual.s, ks->qual.l); mem->n += ks->qual.l; }
-	mem->a[mem->n++] = '\0';
-	return;
-}
-#else
 static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
-	#define _reload(_fp, _ofs, _pv) { \
-		uint64_t _o = (_ofs), _l; \
-		(_fp)->p = (_fp)->base + 32 + (_o); \
-		(_fp)->tail = (_fp)->p + (_l = gzread((_fp)->fp, (_fp)->p, (_fp)->size)); \
-		_storeu_v32i8((_fp)->p + _l, _pv); \
-	}
-	#define _fetch(_fp, _pv, _adv) ({ \
-		if (_unlikely((_fp)->p + 32 >= (_fp)->tail)) { \
-			_storeu_v32i8((_fp)->base + 32, _loadu_v32i8((_fp)->p)); \
-			_reload(_fp, (_fp)->tail - (_fp)->p, _pv); \
-		} \
-		v32i8_t r = _loadu_v32i8(fp->p); fp->p += (_adv); r; \
-	})
-	#define _reserve(_mem, _size) { \
-		if ((_mem)->n + (_size) > (_mem)->m) (_mem)->a = realloc((_mem)->a, ((_mem)->m *= 2)); \
-	}
-	#define _push(_mem, _v, _l) ({ \
-		_reserve(_mem, 64); _storeu_v32i8((_mem)->a + (_mem)->n, _v); (_mem)->n += (_l); \
-	})
-	#define _put(_mem, _c) { (_mem)->a[(_mem)->n++] = (_c); }
-	#define _match(_v1, _v2) ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all
-	#define _strip(_fp, _v) ({ \
-		v32i8_t _t = _fetch(_fp, _zero_v32i8(), 0); \
-		fp->p += tzcnt(~((uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_t, _v)) }).all)); \
-	})
-	#define _readline(_fp, _mem, _dv, _op) ({ \
-		const v32i8_t _lv = _set_v32i8('\n'); \
-		uint64_t dm, lm, base = mem->n; \
-		do { \
-			v32i8_t r = _fetch(_fp, _dv, 32); \
-			dm = _match(r, _dv); lm = _match(r, _lv); \
-			v32i8_t t = _op(r); _push(_mem, t, 32); \
-		} while ((dm | lm) == 0); \
-		uint64_t len = tzcnt(dm | lm); \
-		mem->n += len - 32; fp->p += len - 31 - ((dm>>len)&0x01); \
-		((dm>>len)&0x01)? mem->n-base+1 : 0; \
-	})
 	#define _id(x)		(x)
 	#define _trans(x)	( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
-	#define _beg(_mem)		( (uint8_t *)(_mem)->n )
-	#define _term(_mem, _base) ({ \
-		uint64_t len = (_mem)->n - (uint64_t)(_base); \
-		_put(_mem, '\0'); len; \
-	})
 
-	const v32i8_t dv = _set_v32i8(fp->delim);
-	const v32i8_t sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0x0f);
+	const v32i8_t dv = _set_v32i8(fp->delim == '@'? '+' : fp->delim);
+	const v32i8_t sv = _set_v32i8(' '), zv = _zero_v32i8(), fv = _set_v32i8(0xf);
 	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,0,8,2,0,1,0));
 	uint64_t acc;
 
 	// check delim
-	_fetch(fp, _zero_v32i8(), 0);	// ensure the first char arrived, discard return val
+	_fetch(fp, 0);	// ensure the first char arrived, discard return val
 	if (*fp->p++ != fp->delim) return 1;
 
 	bseq_t *s;
 	kv_pushp(bseq_t, *seq, &s);
 	s->rid = seq->n + fp->base_rid - 1;
-	// fprintf(stderr, "rid(%u)\n", s->rid);
 
-	_strip(fp, sv);			// strip spaces, parse name until '\n' or ' '
+	_strip(fp, sv);		// strip spaces, parse name until '\n' or ' '
 	s->name = (char *)_beg(mem); acc = _readline(fp, mem, sv, _id); s->l_name = _term(mem, s->name);
 	s->tag = _beg(mem);	// comment follows
 	if (acc) {
 		_strip(fp, sv); _put(mem, 'C'); _put(mem, 'O'); _put(mem, 'Z');	// additional 32bytes are already reserved
-		_readline(fp, mem, lv, _id);
+		_readline(fp, mem, zv, _id);
+		while (mem->a[mem->n-1] == ' ') mem->n--;	// strip spaces
 	}
 	s->l_tag = _term(mem, s->tag);
 
-	// fprintf(stderr, "name: %s\n", &mem->a[(uint64_t)s->name]);
-	// fprintf(stderr, "com(%llu): %s\n", acc, &mem->a[(uint64_t)s->tag]);
-
 	// parse seq
-	s->seq = _beg(mem); while ((acc = _readline(fp, mem, dv, _trans)) == 0) {} s->l_seq = _term(mem, s->seq);
-	// fprintf(stderr, "l_seq(%u)\n", s->l_seq);
-	// for (uint64_t i = 0; i < s->l_seq; ++i) fprintf(stderr, "%c", "NACMGRSVTWYHKDBN"[mem->a[(uint64_t)s->seq + i]]);
-	// fprintf(stderr, "\n");
+	s->seq = _beg(mem); while (_readline(fp, mem, dv, _trans) == 0) {} s->l_seq = _term(mem, s->seq);
 
 	// parse qual
 	s->qual = _beg(mem);
 	if (fp->delim == '@') {
-		int64_t rem = s->l_seq;
-		if (fp->keep_qual) {
-			while (rem > 0) { rem -= _readline(fp, mem, lv, _id) - 1; }
-		} else {
-			while (1) {
-				uint64_t l = MIN2(fp->tail - fp->p, rem);
-				if ((rem -= l) == 0) { fp->p += l; break; }
-				_reload(fp, 0, _zero_v32i8());
-			}
-		}
-		if (acc != s->l_seq) return 1;
+		_skipline(fp);	// skip name
+		if (fp->keep_qual) for (uint64_t t = mem->n + s->l_seq; mem->n < t; _readline(fp, mem, zv, _id)) {}
+		else for (uint64_t a = 0; a < s->l_seq; a += _skipline(fp)) {}
+		_strip(fp, _set_v32i8('\n'));
 	}
 	_term(mem, s->qual);
-	// fprintf(stderr, "qual: %s\n", &mem->a[(uint64_t)s->qual]);
 	return 0;
-
-	#undef _reload
-	#undef _fetch
-	#undef _reserve
-	#undef _push
-	#undef _put
-	#undef _match
-	#undef _strip
-	#undef _readline
-	#undef _beg
-	#undef _term
 }
-#endif
+
+#undef _reload
+#undef _fetch
+#undef _reserve
+#undef _push
+#undef _put
+#undef _match
+#undef _strip
+#undef _readline
+#undef _beg
+#undef _term
 
 static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *size)
 {
@@ -1233,16 +1193,19 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *si
 	static const uint8_t margin[64] = {0};
 
 	set_info(0, "[bseq_read] read sequence block from file");
+	if (fp->is_eof) return NULL;
 	kv_reserve(uint8_t, mem, fp->size + 128);
 	kv_pushm(uint8_t, mem, margin, 64);
 	if (fp->bh) {
-		uint32_t size;
-		while (gzread(fp->fp, &size, 4) == 4) {
+		while (mem.n < fp->size) {
+			uint32_t size;
+			if (gzread(fp->fp, &size, 4) == 4) { fp->is_eof = 1; break; }
 			bseq_read_bam(fp, size, &seq, &mem);
-			if (mem.n >= fp->size) break;
 		}
 	} else {
-		while (!bseq_read_fasta(fp, &seq, &mem) && mem.n < fp->size) {}
+		while (mem.n < fp->size) {
+			if (bseq_read_fasta(fp, &seq, &mem) != 0) { fp->is_eof = 1; break; }
+		}
 	}
 	kv_pushm(uint8_t, mem, margin, 64);
 
@@ -1265,12 +1228,205 @@ static int bseq_eof(bseq_file_t *fp)
 	return fp->is_eof;
 }
 
-unittest() {
-	char const *fasta_content =
+unittest( .name = "bseq.fasta" ) {
+	const char *filename = "./minialign.unittest.bseq.tmp";
+	const char *content =
 		">test0\nAAAA\n"
-		"> test1\nATAT\nCGCG\n"
+		"> test1\nATAT\nCGCG\n\n"
 		">  test2\n\nAAAA\n"
-		">test3 comment   \nACGT";
+		">test3 comment comment  \nACGT";
+
+	FILE *fp = fopen(filename, "w");
+	assert(fp != NULL);
+	fwrite(content, 1, strlen(content), fp);
+	fclose(fp);
+
+	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
+	bseq_file_t *b = bseq_open(filename, 1, 512 * 1024, 1, 1, tags);
+	assert(b != NULL);
+
+	uint32_t n_seq = 0;
+	void *ptr = NULL;
+	uint64_t size = 0;
+	bseq_t *s = bseq_read(b, &n_seq, &ptr, &size);
+
+	assert(s != NULL);
+	assert(n_seq == 4, "n_seq(%u)", n_seq);
+	assert(ptr != NULL);
+	assert(size > 0, "size(%lu)", size);
+
+	assert(s[0].rid == 1, "rid(%u)", s[0].rid);
+	assert(s[0].l_name == 5, "l_name(%u)", s[0].l_name);
+	assert(s[0].l_seq == 4, "l_seq(%u)", s[0].l_seq);
+	assert(s[0].l_tag == 0, "l_tag(%u)", s[0].l_tag);
+	assert(strcmp((const char*)s[0].name, "test0") == 0, "name(%s)", s[0].name);
+	assert(strcmp((const char*)s[0].seq, "\x1\x1\x1\x1") == 0, "seq(%s)", s[0].seq);
+	assert(strcmp((const char*)s[0].qual, "") == 0, "qual(%s)", s[0].qual);
+	assert(strcmp((const char*)s[0].tag, "") == 0, "tag(%s)", s[0].tag);
+
+	assert(s[1].rid == 2, "rid(%u)", s[1].rid);
+	assert(s[1].l_name == 5, "l_name(%u)", s[1].l_name);
+	assert(s[1].l_seq == 8, "l_seq(%u)", s[1].l_seq);
+	assert(s[1].l_tag == 0, "l_tag(%u)", s[1].l_tag);
+	assert(strcmp((const char*)s[1].name, "test1") == 0, "name(%s)", s[1].name);
+	assert(strcmp((const char*)s[1].seq, "\x1\x8\x1\x8\x2\x4\x2\x4") == 0, "seq(%s)", s[1].seq);
+	assert(strcmp((const char*)s[1].qual, "") == 0, "qual(%s)", s[1].qual);
+	assert(strcmp((const char*)s[1].tag, "") == 0, "tag(%s)", s[1].tag);
+
+	assert(s[2].rid == 3, "rid(%u)", s[2].rid);
+	assert(s[2].l_name == 5, "l_name(%u)", s[2].l_name);
+	assert(s[2].l_seq == 4, "l_seq(%u)", s[2].l_seq);
+	assert(s[2].l_tag == 0, "l_tag(%u)", s[2].l_tag);
+	assert(strcmp((const char*)s[2].name, "test2") == 0, "name(%s)", s[2].name);
+	assert(strcmp((const char*)s[2].seq, "\x1\x1\x1\x1") == 0, "seq(%s)", s[2].seq);
+	assert(strcmp((const char*)s[2].qual, "") == 0, "qual(%s)", s[2].qual);
+	assert(strcmp((const char*)s[2].tag, "") == 0, "tag(%s)", s[2].tag);
+
+	assert(s[3].rid == 4, "rid(%u)", s[3].rid);
+	assert(s[3].l_name == 5, "l_name(%u)", s[3].l_name);
+	assert(s[3].l_seq == 4, "l_seq(%u)", s[3].l_seq);
+	assert(s[3].l_tag == 18, "l_tag(%u)", s[3].l_tag);
+	assert(strcmp((const char*)s[3].name, "test3") == 0, "name(%s)", s[3].name);
+	assert(strcmp((const char*)s[3].seq, "\x1\x2\x4\x8") == 0, "seq(%s)", s[3].seq);
+	assert(strcmp((const char*)s[3].qual, "") == 0, "qual(%s)", s[3].qual);
+	assert(strcmp((const char*)s[3].tag, "COZcomment comment") == 0, "tag(%s)", s[3].tag);
+
+	uint32_t rid = bseq_close(b);
+	assert(rid == 5);
+}
+
+unittest( .name = "bseq.fastq" ) {
+	const char *filename = "./minialign.unittest.bseq.tmp";
+	const char *content =
+		"@test0\nAAAA\n+test0\nNNNN\n"
+		"@ test1\nATAT\nCGCG\n+ test1\n12+3\n+123\n"
+		"@  test2\n\nAAAA\n+  test2\n\n\n12@3\n\n"
+		"@test3  comment comment   \nACGT\n\n+ test3\n@123";
+
+	FILE *fp = fopen(filename, "w");
+	assert(fp != NULL);
+	fwrite(content, 1, strlen(content), fp);
+	fclose(fp);
+
+	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
+	bseq_file_t *b = bseq_open(filename, 1, 512 * 1024, 1, 1, tags);
+	assert(b != NULL);
+
+	uint32_t n_seq = 0;
+	void *ptr = NULL;
+	uint64_t size = 0;
+	bseq_t *s = bseq_read(b, &n_seq, &ptr, &size);
+
+	assert(s != NULL);
+	assert(n_seq == 4, "n_seq(%u)", n_seq);
+	assert(ptr != NULL);
+	assert(size > 0, "size(%lu)", size);
+
+	assert(s[0].rid == 1, "rid(%u)", s[0].rid);
+	assert(s[0].l_name == 5, "l_name(%u)", s[0].l_name);
+	assert(s[0].l_seq == 4, "l_seq(%u)", s[0].l_seq);
+	assert(s[0].l_tag == 0, "l_tag(%u)", s[0].l_tag);
+	assert(strcmp((const char*)s[0].name, "test0") == 0, "name(%s)", s[0].name);
+	assert(strcmp((const char*)s[0].seq, "\x1\x1\x1\x1") == 0, "seq(%s)", s[0].seq);
+	assert(strcmp((const char*)s[0].qual, "NNNN") == 0, "qual(%s)", s[0].qual);
+	assert(strcmp((const char*)s[0].tag, "") == 0, "tag(%s)", s[0].tag);
+
+	assert(s[1].rid == 2, "rid(%u)", s[1].rid);
+	assert(s[1].l_name == 5, "l_name(%u)", s[1].l_name);
+	assert(s[1].l_seq == 8, "l_seq(%u)", s[1].l_seq);
+	assert(s[1].l_tag == 0, "l_tag(%u)", s[1].l_tag);
+	assert(strcmp((const char*)s[1].name, "test1") == 0, "name(%s)", s[1].name);
+	assert(strcmp((const char*)s[1].seq, "\x1\x8\x1\x8\x2\x4\x2\x4") == 0, "seq(%s)", s[1].seq);
+	assert(strcmp((const char*)s[1].qual, "12+3+123") == 0, "qual(%s)", s[1].qual);
+	assert(strcmp((const char*)s[1].tag, "") == 0, "tag(%s)", s[1].tag);
+
+	assert(s[2].rid == 3, "rid(%u)", s[2].rid);
+	assert(s[2].l_name == 5, "l_name(%u)", s[2].l_name);
+	assert(s[2].l_seq == 4, "l_seq(%u)", s[2].l_seq);
+	assert(s[2].l_tag == 0, "l_tag(%u)", s[2].l_tag);
+	assert(strcmp((const char*)s[2].name, "test2") == 0, "name(%s)", s[2].name);
+	assert(strcmp((const char*)s[2].seq, "\x1\x1\x1\x1") == 0, "seq(%s)", s[2].seq);
+	assert(strcmp((const char*)s[2].qual, "12@3") == 0, "qual(%s)", s[2].qual);
+	assert(strcmp((const char*)s[2].tag, "") == 0, "tag(%s)", s[2].tag);
+
+	assert(s[3].rid == 4, "rid(%u)", s[3].rid);
+	assert(s[3].l_name == 5, "l_name(%u)", s[3].l_name);
+	assert(s[3].l_seq == 4, "l_seq(%u)", s[3].l_seq);
+	assert(s[3].l_tag == 18, "l_tag(%u)", s[3].l_tag);
+	assert(strcmp((const char*)s[3].name, "test3") == 0, "name(%s)", s[3].name);
+	assert(strcmp((const char*)s[3].seq, "\x1\x2\x4\x8") == 0, "seq(%s)", s[3].seq);
+	assert(strcmp((const char*)s[3].qual, "@123") == 0, "qual(%s)", s[3].qual);
+	assert(strcmp((const char*)s[3].tag, "COZcomment comment") == 0, "tag(%s)", s[3].tag);
+
+	uint32_t rid = bseq_close(b);
+	assert(rid == 5);
+}
+
+unittest( .name = "bseq.fastq.skip" ) {
+	const char *filename = "./minialign.unittest.bseq.tmp";
+	const char *content =
+		"@test0\nAAAA\n+test0\nNNNN\n"
+		"@ test1\nATAT\nCGCG\n+ test1\n12+3\n+123\n"
+		"@  test2\n\nAAAA\n+  test2\n\n\n12@3\n\n"
+		"@test3  comment comment   \nACGT\n\n+ test3\n@123";
+
+	FILE *fp = fopen(filename, "w");
+	assert(fp != NULL);
+	fwrite(content, 1, strlen(content), fp);
+	fclose(fp);
+
+	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
+	bseq_file_t *b = bseq_open(filename, 1, 512 * 1024, 0, 1, tags);
+	assert(b != NULL);
+
+	uint32_t n_seq = 0;
+	void *ptr = NULL;
+	uint64_t size = 0;
+	bseq_t *s = bseq_read(b, &n_seq, &ptr, &size);
+
+	assert(s != NULL);
+	assert(n_seq == 4, "n_seq(%u)", n_seq);
+	assert(ptr != NULL);
+	assert(size > 0, "size(%lu)", size);
+
+	assert(s[0].rid == 1, "rid(%u)", s[0].rid);
+	assert(s[0].l_name == 5, "l_name(%u)", s[0].l_name);
+	assert(s[0].l_seq == 4, "l_seq(%u)", s[0].l_seq);
+	assert(s[0].l_tag == 0, "l_tag(%u)", s[0].l_tag);
+	assert(strcmp((const char*)s[0].name, "test0") == 0, "name(%s)", s[0].name);
+	assert(strcmp((const char*)s[0].seq, "\x1\x1\x1\x1") == 0, "seq(%s)", s[0].seq);
+	assert(strcmp((const char*)s[0].qual, "") == 0, "qual(%s)", s[0].qual);
+	assert(strcmp((const char*)s[0].tag, "") == 0, "tag(%s)", s[0].tag);
+
+	assert(s[1].rid == 2, "rid(%u)", s[1].rid);
+	assert(s[1].l_name == 5, "l_name(%u)", s[1].l_name);
+	assert(s[1].l_seq == 8, "l_seq(%u)", s[1].l_seq);
+	assert(s[1].l_tag == 0, "l_tag(%u)", s[1].l_tag);
+	assert(strcmp((const char*)s[1].name, "test1") == 0, "name(%s)", s[1].name);
+	assert(strcmp((const char*)s[1].seq, "\x1\x8\x1\x8\x2\x4\x2\x4") == 0, "seq(%s)", s[1].seq);
+	assert(strcmp((const char*)s[1].qual, "") == 0, "qual(%s)", s[1].qual);
+	assert(strcmp((const char*)s[1].tag, "") == 0, "tag(%s)", s[1].tag);
+
+	assert(s[2].rid == 3, "rid(%u)", s[2].rid);
+	assert(s[2].l_name == 5, "l_name(%u)", s[2].l_name);
+	assert(s[2].l_seq == 4, "l_seq(%u)", s[2].l_seq);
+	assert(s[2].l_tag == 0, "l_tag(%u)", s[2].l_tag);
+	assert(strcmp((const char*)s[2].name, "test2") == 0, "name(%s)", s[2].name);
+	assert(strcmp((const char*)s[2].seq, "\x1\x1\x1\x1") == 0, "seq(%s)", s[2].seq);
+	assert(strcmp((const char*)s[2].qual, "") == 0, "qual(%s)", s[2].qual);
+	assert(strcmp((const char*)s[2].tag, "") == 0, "tag(%s)", s[2].tag);
+
+	assert(s[3].rid == 4, "rid(%u)", s[3].rid);
+	assert(s[3].l_name == 5, "l_name(%u)", s[3].l_name);
+	assert(s[3].l_seq == 4, "l_seq(%u)", s[3].l_seq);
+	assert(s[3].l_tag == 18, "l_tag(%u)", s[3].l_tag);
+	assert(strcmp((const char*)s[3].name, "test3") == 0, "name(%s)", s[3].name);
+	assert(strcmp((const char*)s[3].seq, "\x1\x2\x4\x8") == 0, "seq(%s)", s[3].seq);
+	assert(strcmp((const char*)s[3].qual, "") == 0, "qual(%s)", s[3].qual);
+	assert(strcmp((const char*)s[3].tag, "COZcomment comment") == 0, "tag(%s)", s[3].tag);
+
+	uint32_t rid = bseq_close(b);
+	assert(rid == 5);
 }
 /* end of bseq.c */
 
