@@ -1239,7 +1239,7 @@ unittest( .name = "bseq.fasta" ) {
 		">test0\nAAAA\n"
 		"> test1\nATAT\nCGCG\n\n"
 		">  test2\n\nAAAA\n"
-		">test3 comment comment  \nACGT";
+		">test3 comment comment  \nACGT\n\n";
 
 	FILE *fp = fopen(filename, "w");
 	assert(fp != NULL);
