@@ -3300,7 +3300,7 @@ int main(int argc, char *argv[])
 	FILE *fpr = 0, *fpw = 0;
 
 	// unittest hook
-	if (strcmp(argv[1], "unittest") == 0) return unittest_main(argc, argv);
+	if (argc > 2 && strcmp(argv[1], "unittest") == 0) return unittest_main(argc, argv);
 
 	enable_info(0);
 	set_info(0, "[main] parsing arguments");
