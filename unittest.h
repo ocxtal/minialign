@@ -1332,6 +1332,32 @@ int ut_modify_test_config_all(
 }
 
 /**
+ * @fn ut_print_help
+ */
+static inline
+void ut_print_help(void)
+{
+	static char const *help_message =
+		"\n"
+		"  unittest.h -- simple unittesting framework for C99\n"
+		"\n"
+		"  Options:\n"
+		"    -g, --group [STR,...]    specify group names\n"
+		"    -t, --test  [STR,...]    specify test names\n"
+		"    -o, --stdout             redirect to stdout\n"
+		"    -j, --json               print result in json\n"
+		"    -h, --help               show this message\n"
+		"\n"
+		"  this is an auto-generated message from unittest.h\n"
+		"  the latest source is available at:\n"
+		"    https://github.com/ocxtal/unittest.h\n"
+		"\n";
+
+	fprintf(stderr, "%s", help_message);
+	return;
+}
+
+/**
  * @fn ut_modify_test_config
  */
 static inline
@@ -1344,11 +1370,12 @@ int ut_modify_test_config(
 	struct ut_group_config_s *sorted_config,
 	int64_t file_cnt)
 {
-	struct option const opts_long[] = {
+	static struct option const opts_long[] = {
 		{ "group", required_argument, NULL, 'g' },
 		{ "test", required_argument, NULL, 't' },
 		{ "stdout", no_argument, NULL, 'o' },
 		{ "json", no_argument, NULL, 'j' },
+		{ "help", no_argument, NULL, 'h' },
 		{ NULL, 0, NULL, 0 }
 	};
 	char *opts_short = ut_build_short_option_string(opts_long);
@@ -1361,6 +1388,7 @@ int ut_modify_test_config(
 			case 't': test_arg = optarg; break;
 			case 'j': params->printer = ut_json_printer; break;
 			case 'o': params->fp = stdout; break;
+			case 'h': ut_print_help(); return(1);
 			default: break;
 		}
 	}
@@ -1435,7 +1463,9 @@ int ut_main_impl(int argc, char *argv[])
 	};
 
 	/* modify config */
-	ut_modify_test_config(argc, argv, &gconf, test, test_cnt, compd_config, file_cnt);
+	if(ut_modify_test_config(argc, argv, &gconf, test, test_cnt, compd_config, file_cnt)) {
+		return 1;
+	}
 
 	/* print global header */
 	if(gconf.printer.global_header != NULL) {
