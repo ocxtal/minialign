@@ -15,6 +15,9 @@
 /* max #threads, set larger value if needed */
 #define MAX_THREADS					( 64 )
 
+/* set zero to disable unittests */
+#define UNITTEST 					( 0 )
+
 #include <getopt.h>
 #include <inttypes.h>
 #include <math.h>
@@ -32,7 +35,7 @@
 #include "sassert.h"
 
 /* global consts */
-#define MM_VERSION		"0.5.0-rc1"
+#define MM_VERSION		"0.5.0"
 
 /* max, min */
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
@@ -3327,7 +3330,9 @@ int main(int argc, char *argv[])
 	FILE *fpr = 0, *fpw = 0;
 
 	// unittest hook
-	if (argc > 2 && strcmp(argv[1], "unittest") == 0) return unittest_main(argc, argv);
+	#if UNITTEST != 0
+	if (argc > 1 && strcmp(argv[1], "unittest") == 0) return unittest_main(argc, argv);
+	#endif
 
 	enable_info(0);
 	set_info(0, "[main] parsing arguments");
