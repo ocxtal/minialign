@@ -2718,7 +2718,6 @@ uint64_t parse_load_uint64(
 {
 	int64_t rem = pos & 63;
 	uint64_t a = (ptr[pos>>6]>>rem) | ((ptr[(pos>>6) + 1]<<(63 - rem))<<1);
-	debug("load arr(%llx)", a);
 	return(a);
 }
 
