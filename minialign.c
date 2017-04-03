@@ -2687,18 +2687,10 @@ static void mm_print_mapped_sam_core(mm_align_t *b, const mm_idx_seq_t *r, const
 
 	if (flag&0x10) { _putsntr(b, &t->seq[t->l_seq-qe], qe-qs, "NTGKCYSBAWRDMHVN"); }
 	else { _putsnt(b, &t->seq[qs], qe-qs, "NACMGRSVTWYHKDBN"); }
-	/*
-	if (flag&0x10) { for (int64_t k = t->l_seq-qs-1; k >= t->l_seq-qe; k--) { _put(b, "NTGKCYSBAWRDMHVN"[(uint8_t)t->seq[k]]); } }
-	else { for (int64_t k = qs; k < qe; k++) { _put(b, "NACMGRSVTWYHKDBN"[(uint8_t)t->seq[k]]); } }
-	*/
 	_t(b);
 	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
 		if (flag&0x10) { _putsnr(b, &t->qual[t->l_seq-qe], qe-qs); }
 		else { _putsn(b, &t->qual[qs], qe-qs); }
-		/*
-		if (flag&0x10) { for (int64_t k = t->l_seq-qs-1; k >= t->l_seq-qe; k--) { _put(b, t->qual[k]); } }
-		else { for (int64_t k = qs; k < qe; k++) { _put(b, t->qual[k]); } }
-		*/
 	} else {
 		_put(b, '*');
 	}
