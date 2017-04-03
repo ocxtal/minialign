@@ -936,10 +936,10 @@ typedef struct {
 	gzFile fp;
 	bam_header_t *bh;
 	uint8_t *p, *base, *tail;
-	uint64_t size;	// equal to batch_size
+	uint64_t size, acc;	// equal to batch_size
 	uint16_t *tags;
 	uint32_t l_tags, base_rid;
-	uint8_t is_eof, delim, keep_qual, keep_comment;
+	uint8_t is_eof, delim, keep_qual, keep_comment, state;
 } bseq_file_t;
 
 // sam optional tags
@@ -1035,9 +1035,6 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 	uint32_t l_tag;
 	bam_core_t *c;
 
-	// if (fp->buf.m < size) kv_reserve(uint8_t, fp->buf, size);
-	if (fp->size < size) { fp->tail = (fp->base = fp->p = realloc(fp->base, fp->size = size)) + size; }
-	gzread(fp->fp, fp->p, size);
 	if ((c = (bam_core_t*)fp->p)->flag&0x900) return 0;	// skip supp/secondary
 	sname = fp->p + sizeof(bam_core_t);
 	sseq = sname + c->l_qname + sizeof(uint32_t)*c->n_cigar;
@@ -1070,66 +1067,46 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 	mem->a[mem->n++] = '\0';
 
 	s->tag = (uint8_t *)mem->n;
-	// if (fp->l_tags && l_tag) { memcpy(mem->a + mem->n, stag, l_tag); mem->n += l_tag; }
 	if (fp->l_tags && l_tag) mem->n += bseq_save_tags(fp->l_tags, fp->tags, l_tag, stag, mem->a + mem->n);
 	mem->a[mem->n++] = '\0';
 	return 0;
 }
 
-#define _reload(_fp, _ofs) { \
-	uint64_t _o = (_ofs); \
-	(_fp)->p = (_fp)->base + 32; (_fp)->tail = (_fp)->p + (_o); \
-	uint64_t _l = gzread((_fp)->fp, (_fp)->p + (_o), (_fp)->size); \
-	(_fp)->tail += (_l); (_fp)->is_eof = _l < (_fp)->size; \
-	_storeu_v32i8((_fp)->tail, _zero_v32i8()); \
-}
-#define _fetch(_fp, _adv) ({ \
-	if (_unlikely(!(_fp)->is_eof && (_fp)->p + 32 >= (_fp)->tail)) { \
-		_storeu_v32i8((_fp)->base + 32, _loadu_v32i8((_fp)->p)); \
-		_reload(_fp, (_fp)->tail - (_fp)->p); \
-	} \
-	v32i8_t _r = _loadu_v32i8(fp->p); fp->p += (_adv); _r; \
+#define _match(_v1, _v2)	( ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all )
+#define _strip(_p, _t, _v) ({ \
+	v32i8_t _r = _loadu_v32i8(_p); \
+	uint64_t _len = MIN2(tzcnt(~((uint64_t)_match(_r, _v))), _t - _p); \
+	fprintf(stderr, "strip, len(%llu)\n", _len); \
+	_p += _len; _len; \
 })
-#define _reserve(_mem, _size) { \
-	if ((_mem)->n + (_size) > (_mem)->m) (_mem)->a = realloc((_mem)->a, ((_mem)->m *= 2)); \
-}
-#define _push(_mem, _v, _l) ({ \
-	_reserve(_mem, 64); _storeu_v32i8((_mem)->a + (_mem)->n, _v); (_mem)->n += (_l); \
-})
-#define _put(_mem, _c) { (_mem)->a[(_mem)->n++] = (_c); }
-#define _match(_v1, _v2) ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all
-#define _strip(_fp, _v) ({ \
-	const v32i8_t _zv = _zero_v32i8(); \
-	v32i8_t _t = _fetch(_fp, 0); \
-	fp->p += tzcnt(~((uint64_t)_match(_t, _v)) | _match(_t, _zv)); \
-})
-#define _readline(_fp, _mem, _dv, _op) ({ \
-	const v32i8_t _lv = _set_v32i8('\n'), _zv = _zero_v32i8(); \
-	uint64_t _dm, _lm, _em, base = mem->n; \
+#define _readline(_p, _t, _q, _dv, _op) ({ \
+	uint64_t _m1, _m2, _len; \
+	const v32i8_t _lv = _set_v32i8('\n'); \
 	do { \
-		v32i8_t _r = _fetch(_fp, 32); \
-		_dm = _match(_r, _dv); _lm = _match(_r, _lv); _em = _match(_r, _zv); \
-		v32i8_t _t = _op(_r); _push(_mem, _t, 32); \
-	} while ((_dm | _lm | _em) == 0); \
-	uint64_t _len = tzcnt(_dm | _lm | _em); \
-	fp->p += _len - 32 + ((_lm>>_len)&0x01); mem->n += _len - 32; \
-	((_lm>>_len)&0x01)? 0 : mem->n-base+1; \
+		v32i8_t _r = _loadu_v32i8(_p), _s = _op(_r); _storeu_v32i8(_q, _s); \
+		_m1 = _match(_r, _dv); _m2 = _match(_r, _lv); \
+		_len = MIN2(tzcnt(_m1 | _m2), _t - _p); \
+		_p += 32; _q += 32; \
+	} while (_len >= 32); \
+	fprintf(stderr, "readline, len(%llu), m1(%llx), m2(%llx)\n", _len, _m1, _m2); \
+	_p += _len - 31; _q += _len - 32; _m1>>_len; \
 })
-#define _skipline(_fp) ({ \
-	const v32i8_t _lv = _set_v32i8('\n'), _zv = _zero_v32i8(); \
-	uint64_t _lm, _em, _acc = 0; \
+#define _skipline(_p, _t) ({ \
+	uint64_t _m, _len; \
+	const uint8_t *_b = _p; \
+	const v32i8_t _lv = _set_v32i8('\n'); \
 	do { \
-		v32i8_t _r = _fetch(_fp, 32); \
-		_lm = _match(_r, _lv); _em = _match(_r, _zv); \
-		_acc += 32; \
-	} while ((_lm | _em) == 0); \
-	uint64_t _len = tzcnt(_lm | _em); \
-	fp->p += _len - 31; _acc += _len - 32; \
+		v32i8_t _r = _loadu_v32i8(_p); \
+		_m = _match(_r, _lv); \
+		_len = MIN2(tzcnt(_m), _t - _p); _p += 32; \
+	} while (_len >= 32); \
+	fprintf(stderr, "skipline, len(%llu), m(%llx)\n", _len, _m); \
+	_p += _len - 31; _p - _b - 1; \
 })
-#define _beg(_mem)		( (uint8_t *)(_mem)->n )
-#define _term(_mem, _base) ({ \
-	uint64_t _len = (_mem)->n - (uint64_t)(_base); \
-	_put(_mem, '\0'); _len; \
+#define _beg(_q, _b)		( (uint8_t *)(_q - _b) )
+#define _term(_q, _b, _ofs) ({ \
+	uint64_t _len = (uint64_t)(_q - &(_b)[(uint64_t)(_ofs)]); \
+	*_q++ = '\0'; _len; \
 })
 
 static uint64_t bseq_read_sam(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
@@ -1139,55 +1116,98 @@ static uint64_t bseq_read_sam(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 
 static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
-	#define _id(x)		(x)
-	#define _trans(x)	( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
-
+	// mem must have enough space (e.g. 2 * buffer)
+	// keep them on registers
+	#define _id(x)			(x)
+	#define _trans(x)		( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
 	const v32i8_t dv = _set_v32i8(fp->delim == '@'? '+' : fp->delim);
-	const v32i8_t sv = _set_v32i8(' '), zv = _zero_v32i8(), fv = _set_v32i8(0xf);
+	const v32i8_t sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0xf);
 	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,0,8,2,0,1,0));
-	uint64_t acc;
 
-	// check delim
-	_fetch(fp, 0);	// ensure the first char arrived, discard return val
-	if (*fp->p++ != fp->delim) return 1;
-
-	bseq_t *s;
-	kv_pushp(bseq_t, *seq, &s);
-	s->rid = seq->n + fp->base_rid - 1;
-
-	_strip(fp, sv);		// strip spaces, parse name until '\n' or ' '
-	s->name = (char *)_beg(mem); acc = _readline(fp, mem, sv, _id); s->l_name = _term(mem, s->name);
-	s->tag = _beg(mem);	// comment follows
-	if (acc) {
-		_strip(fp, sv); _put(mem, 'C'); _put(mem, 'O'); _put(mem, 'Z');	// additional 32bytes are already reserved
-		_readline(fp, mem, zv, _id);
-		while (mem->a[mem->n-1] == ' ') mem->n--;	// strip spaces
+	bseq_t *s = &seq->a[seq->n-1];
+	uint8_t *p = fp->p, *q = &mem->a[mem->n];
+	const uint8_t *t = fp->tail;
+	uint64_t m, acc, lim, ret = 1;
+	if (p >= t) return 1;	// refill needed
+	switch (fp->state) {
+		case 0:				// idle
+			if (*p++ != fp->delim) return 2;	// broken
+			kv_pushp(bseq_t, *seq, &s);			// create new sequence
+			s->rid = seq->n + fp->base_rid - 1;
+			fp->state = 1;						// transition to spaces between delim and name
+		case 1:
+			_strip(p, t, sv);
+			if (p >= t) goto _refill;
+			s->name = (char*)_beg(q, mem->a);
+			fp->state = 2;
+		case 2:
+			m = _readline(p, t, q, sv, _id);
+			if (p >= t) goto _refill;
+			s->l_name = _term(q, mem->a, s->name);
+			s->tag = _beg(q, mem->a);
+			if ((m & 0x01) == 0) goto _seq_head;
+			fp->state = 3;
+		case 3:
+			_strip(p, t, sv);
+			if (p >= t) goto _refill;
+			*q++ = 'C'; *q++ = 'O'; *q++ = 'Z';
+			fp->state = 4;
+		case 4:									// parsing comment
+			_readline(p, t, q, lv, _id);
+			if (p >= t) goto _refill;			// refill needed, commen continues
+			while (*--q == ' ') {} q++;			// strip spaces
+		_seq_head:
+			s->l_tag = _term(q, mem->a, s->tag);
+			s->seq = _beg(q, mem->a);
+			fp->state = 5;
+		case 5:									// parsing seq
+			do {
+				m = _readline(p, t, q, dv, _trans);
+				if (p >= t) { if (fp->is_eof) break; else goto _refill; }
+			} while ((m & 0x01) == 0);
+			s->l_seq = _term(q, mem->a, s->seq);
+			s->qual = _beg(q, mem->a);
+			if (fp->delim == '>') { p -= p < t; goto _qual_tail; }
+			fp->state = 6;
+		case 6:
+			_skipline(p, t);
+			if (p >= t) goto _refill;
+			fp->state = 7; fp->acc = 0;
+		case 7:									// parsing qual
+			acc = fp->acc, lim = s->l_seq;
+			if (fp->keep_qual) {
+				do {
+					const uint8_t *b = q; _readline(p, t, q, lv, _id); acc += q - b;
+					if (p >= t) goto _refill;
+				} while (acc < lim);
+			} else {
+				do {
+					acc += _skipline(p, t);
+					if (p >= t) goto _refill;
+				} while (acc < lim);
+			}
+			fp->state = 8;
+		case 8:
+			if (p >= t) goto _refill;
+			_strip(p, t, lv);
+		_qual_tail:
+			_term(q, mem->a, s->qual);
+			break;
+		default:			// invalid state
+			return 2;		// broken
 	}
-	s->l_tag = _term(mem, s->tag);
+	ret = 0; fp->state = 0;	// back to idle
+_refill:
+	fp->p = p; mem->n = q - mem->a;
+	return ret;
 
-	// parse seq
-	s->seq = _beg(mem); while (_readline(fp, mem, dv, _trans) == 0) {} s->l_seq = _term(mem, s->seq);
-
-	// parse qual
-	s->qual = _beg(mem);
-	if (fp->delim == '@') {
-		_skipline(fp);	// skip name
-		if (fp->keep_qual) for (uint64_t t = mem->n + s->l_seq; mem->n < t; _readline(fp, mem, zv, _id)) {}
-		else for (uint64_t a = 0; a < s->l_seq; a += _skipline(fp)) {}
-		_strip(fp, _set_v32i8('\n'));
-	}
-	_term(mem, s->qual);
-	return 0;
+	#undef _id
+	#undef _trans
 }
-
-#undef _reload
-#undef _fetch
-#undef _reserve
-#undef _push
-#undef _put
 #undef _match
 #undef _strip
 #undef _readline
+#undef _skipline
 #undef _beg
 #undef _term
 
@@ -1204,12 +1224,20 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *si
 	if (fp->bh) {
 		while (mem.n < fp->size) {
 			uint32_t size;
-			if (gzread(fp->fp, &size, 4) == 4) { fp->is_eof = 1; break; }
+			if (gzread(fp->fp, &size, 4) != 4) { fp->is_eof = 1; break; }
+			if (fp->size < size) fp->tail = (fp->base = fp->p = realloc(fp->base, fp->size = size)) + size;
+			if (gzread(fp->fp, fp->p, size) != size) { free(mem.a); fp->is_eof = 2; return NULL; }
 			bseq_read_bam(fp, size, &seq, &mem);
 		}
 	} else {
 		while (mem.n < fp->size) {
-			if (bseq_read_fasta(fp, &seq, &mem) != 0) { fp->is_eof = 1; break; }
+			uint64_t ret = bseq_read_fasta(fp, &seq, &mem);
+			if (ret > 1) { free(mem.a); fp->is_eof = 2; return NULL; }
+			if (ret == 0) continue;
+			if (fp->is_eof) break;
+			fp->p = fp->base + 32;
+			fp->tail = fp->p + gzread(fp->fp, fp->p, fp->size);
+			if (fp->tail < fp->base + 32 + fp->size) fp->is_eof = 1;
 		}
 	}
 	kv_pushm(uint8_t, mem, margin, 64);
@@ -1298,6 +1326,7 @@ unittest( .name = "bseq.fasta" ) {
 
 	uint32_t rid = bseq_close(b);
 	assert(rid == 5);
+	remove(filename);
 }
 
 unittest( .name = "bseq.fastq" ) {
@@ -1365,6 +1394,7 @@ unittest( .name = "bseq.fastq" ) {
 
 	uint32_t rid = bseq_close(b);
 	assert(rid == 5);
+	remove(filename);
 }
 
 unittest( .name = "bseq.fastq.skip" ) {
@@ -1432,6 +1462,7 @@ unittest( .name = "bseq.fastq.skip" ) {
 
 	uint32_t rid = bseq_close(b);
 	assert(rid == 5);
+	remove(filename);
 }
 /* end of bseq.c */
 
