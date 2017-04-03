@@ -1223,22 +1223,25 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *si
 			uint32_t size;
 			if (gzread(fp->fp, &size, 4) != 4) { fp->is_eof = 1; break; }
 			if (fp->size < size) fp->tail = (fp->base = fp->p = realloc(fp->base, fp->size = size)) + size;
-			if (gzread(fp->fp, fp->p, size) != size) { free(mem.a); fp->is_eof = 2; return NULL; }
+			if (gzread(fp->fp, fp->p, size) != size) { seq.n = 0; fp->is_eof = 2; break; }
 			bseq_read_bam(fp, size, &seq, &mem);
 		}
 	} else {
 		while (mem.n < fp->size) {
-			uint64_t ret = bseq_read_fasta(fp, &seq, &mem);
-			if (ret > 1) { free(mem.a); fp->is_eof = 2; return NULL; }
-			if (ret == 0) continue;
-			if (fp->is_eof) break;
-			fp->p = fp->base + 32;
-			fp->tail = fp->p + gzread(fp->fp, fp->p, fp->size);
-			if (fp->tail < fp->base + 32 + fp->size) fp->is_eof = 1;
+			uint64_t ret;
+			while ((ret = bseq_read_fasta(fp, &seq, &mem)) != 0) {
+				if (ret > 1) { seq.n = 0; fp->is_eof = 2; goto _tail; }
+				if (fp->is_eof) goto _tail;
+				fp->p = fp->base + 32;
+				fp->tail = fp->p + gzread(fp->fp, fp->p, fp->size);
+				if (fp->tail < fp->base + 32 + fp->size) fp->is_eof = 1;
+				if (mem.n + fp->size > mem.m) mem.a = realloc(mem.a, mem.m *= 2);
+			}
 		}
+	_tail:;
 	}
-	kv_pushm(uint8_t, mem, margin, 64);
 
+	kv_pushm(uint8_t, mem, margin, 64);
 	for (uint64_t i = 0; i < seq.n; i++) {
 		seq.a[i].name += (ptrdiff_t)mem.a;
 		seq.a[i].seq += (ptrdiff_t)mem.a;
