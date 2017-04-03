@@ -964,7 +964,7 @@ static uint64_t bseq_search_tag(uint32_t l_tags, const uint16_t *tags, uint16_t 
 {
 	v32i16_t tv = _set_v32i16((t2<<8) | t1);
 	for (uint64_t i = 0; i < ((l_tags + 0x1f) & ~0x1f); i+=0x20) {
-		if (((v32_masku_t){ .mask = _mask_v32i16(_eq_v32i16(_load_v32i16(&tags[i]), tv)) }).all != 0) return 1;
+		if (((v32_masku_t){ .mask = _mask_v32i16(_eq_v32i16(_loadu_v32i16(&tags[i]), tv)) }).all != 0) return 1;
 	}
 	return 0;
 }
