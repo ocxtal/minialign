@@ -3065,8 +3065,8 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 	kv_hq_init(b->hq);
 	b->printer = printer[opt->flag>>56];
 	if (!b->printer.mapped) goto _fail;
-	for (uint64_t i = 0; i < 10; ++i) b->conv[i] = (i + 1) % 10;
-	for (uint64_t i = 10; i < 40; ++i) b->conv[i] = (((i + 1) % 10)<<4) + (i + 1) / 10;
+	for (uint64_t i = 0; i < 9; ++i) b->conv[i] = (i + 1) % 10;
+	for (uint64_t i = 9; i < 40; ++i) b->conv[i] = (((i + 1) % 10)<<4) + (i + 1) / 10;
 
 	// set consts
 	b->mi = mi, b->opt = opt;
