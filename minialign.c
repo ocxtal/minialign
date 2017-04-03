@@ -3,11 +3,14 @@
 #define _POSIX_C_SOURCE		200112L
 #define _DARWIN_C_SOURCE	_DARWIN_C_FULL
 
-/* set non-zero value to ensure order of output lines */
+/* set non-zero value to ensure the order of output records */
 #define STRICT_STREAM_ORDERING		( 1 )
 
-/* collect suppementary alignments, set to zero for compatibility with 0.4.x */
+/* collect suppementary alignments, set zero for compatibility with 0.4.x */
 #define COLLECT_SUPPLEMENTARY		( 1 )
+
+/* use crc32 for hash64, set zero for compatibility with 0.4.x */
+#define USE_CRC32_HASH				( 1 )
 
 /* max #threads, set larger value if needed */
 #define MAX_THREADS					( 64 )
@@ -1469,7 +1472,9 @@ unittest( .name = "bseq.fastq.skip" ) {
 /* end of bseq.c */
 
 /* sketch.c */
-#if 0
+#if USE_CRC32_HASH != 0
+#define hash64(k0, k1, mask)		( (_mm_crc32_u64((k0), (k0)) ^ (k1)) & (mask) )
+#else
 static inline uint64_t hash64(uint64_t key, uint64_t mask)
 {
 	key = (~key + (key << 21)) & mask; // key = (key << 21) - key - 1;
@@ -1481,8 +1486,6 @@ static inline uint64_t hash64(uint64_t key, uint64_t mask)
 	key = (key + (key << 31)) & mask;
 	return key;
 }
-#else
-#define hash64(k0, k1, mask)		( (_mm_crc32_u64((k0), (k0)) ^ (k1)) & (mask) )
 #endif
 
 /**
