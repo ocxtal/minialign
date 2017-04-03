@@ -4,7 +4,7 @@
 #define _DARWIN_C_SOURCE	_DARWIN_C_FULL
 
 /* set non-zero value to ensure order of output lines */
-#define STRICT_STREAM_ORDERING		( 0 )
+#define STRICT_STREAM_ORDERING		( 1 )
 
 /* collect suppementary alignments, set to zero for compatibility with 0.4.x */
 #define COLLECT_SUPPLEMENTARY		( 1 )
@@ -1217,8 +1217,8 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *si
 	static const uint8_t margin[64] = {0};
 
 	set_info(0, "[bseq_read] read sequence block from file");
-	if (fp->is_eof) return NULL;
-	kv_reserve(uint8_t, mem, fp->size + 128);
+	if (fp->is_eof && fp->p >= fp->tail) return NULL;
+	kv_reserve(uint8_t, mem, 2*fp->size);
 	kv_pushm(uint8_t, mem, margin, 64);
 	if (fp->bh) {
 		while (mem.n < fp->size) {
@@ -1237,7 +1237,7 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *si
 				fp->p = fp->base + 32;
 				fp->tail = fp->p + gzread(fp->fp, fp->p, fp->size);
 				if (fp->tail < fp->base + 32 + fp->size) fp->is_eof = 1;
-				if (mem.n + fp->size > mem.m) mem.a = realloc(mem.a, mem.m *= 2);
+				if (mem.n + 2*fp->size > mem.m) mem.a = realloc(mem.a, mem.m *= 2);
 			}
 		}
 	_tail:;
