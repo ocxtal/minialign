@@ -5,8 +5,9 @@ Minialign is a little bit fast and moderately accurate nucleotide sequence align
 
 ## Announcements
 
-* Latest: 0.4.6; stable: 0.4.4
-* A severe bug was found in the release 0.4.5. Please update to the latest (0.4.6), or rewind to the old ones (0.4.4 or below) if your binary shows `0.4.5` when invoked by `minialign -v`.
+* Latest: 0.5.0; stable: 0.4.4
+* **2016/4/3: Version 0.5.0 is released.** New features: SA (supplementary alignment) and MD (mismatch position) tags are enabled with `-TSA` and `-TMD` flags.
+* **Please do not use 0.4.5 and 0.4.6**, since they have bugs in multithreading.
 
 ## Getting started
 
@@ -192,10 +193,11 @@ $ minialign -X -l index.mai read1.fa read2.fa ... readN.fa > out.sam	# map read[
 * Large gap open penalty (> 5) and large X-drop penalty (> 64) are disallowed due to the limitation of the GABA library.
 * SDUST masking is removed from the original minimap implementation.
 * Repetitive seed-hit region detection is also removed.
-* Index file format is incompatible among releases (also with minimap). Please rebuild index files when a new version of minialign is installed. (otherwise result in SEGV)
+* Index file format is incompatible among releases (nor with minimap). Please rebuild index files when a new version of minialign is installed. (otherwise result in SEGV)
 
 ## Updates
 
+* 2016/4/3 (0.5.0) Add MD (mismatch position) and SA (supplementary alignment) tag options for SAM format. Use CRC32 instruction for 64-bit integer hash. Faster FASTA and FASTQ parsing and SAM formatting. Fix bugs in multithreading.
 * 2016/2/21 (0.4.6) Fix bugs in the indexing routines and the hashmap. Remove `samsplit`. Index file format is modified (now compressed by deflate).
 * 2016/2/9 (0.4.5) Add support for BLAST6 / BLASR1 / BLASR4 / PAF formats. Change the default output format to PAF in the all-versus-all mode. Add support for NH, IH, XS, and NM tags in the sam format. Replaced internal implementations (hashmap and queue) to eliminate overheads.
 * 2016/1/25 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags), change -xpacbio scoring params to -a1 -b2 -p2 -q1 (performed better on recent PacBio reads).

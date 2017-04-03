@@ -25,6 +25,6 @@ install:
 uninstall:
 	rm -f $(PREFIX)/bin/minialign
 
-minialign.c: kvec.h kseq.h ksort.h gaba.h lmm.h sassert.h
+minialign.c: kvec.h ksort.h gaba.h lmm.h unittest.h sassert.h
 gaba_wrap.c: gaba.h unittest.h sassert.h
 
