@@ -1076,7 +1076,6 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 #define _strip(_p, _t, _v) ({ \
 	v32i8_t _r = _loadu_v32i8(_p); \
 	uint64_t _len = MIN2(tzcnt(~((uint64_t)_match(_r, _v))), _t - _p); \
-	fprintf(stderr, "strip, len(%llu)\n", _len); \
 	_p += _len; _len; \
 })
 #define _readline(_p, _t, _q, _dv, _op) ({ \
@@ -1088,7 +1087,6 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 		_len = MIN2(tzcnt(_m1 | _m2), _t - _p); \
 		_p += 32; _q += 32; \
 	} while (_len >= 32); \
-	fprintf(stderr, "readline, len(%llu), m1(%llx), m2(%llx)\n", _len, _m1, _m2); \
 	_p += _len - 31; _q += _len - 32; _m1>>_len; \
 })
 #define _skipline(_p, _t) ({ \
@@ -1100,7 +1098,6 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 		_m = _match(_r, _lv); \
 		_len = MIN2(tzcnt(_m), _t - _p); _p += 32; \
 	} while (_len >= 32); \
-	fprintf(stderr, "skipline, len(%llu), m(%llx)\n", _len, _m); \
 	_p += _len - 31; _p - _b - 1; \
 })
 #define _beg(_q, _b)		( (uint8_t *)(_q - _b) )
