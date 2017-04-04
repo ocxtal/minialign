@@ -1648,6 +1648,7 @@ typedef struct {
 	uint16_v tags;
 	uint64_t batch_size, outbuf_size;
 	char *rg_line, *rg_id;
+	uint32_t base_rid, base_qid;
 } mm_mapopt_t;
 
 static void mm_mapopt_destroy(mm_mapopt_t *opt)
@@ -1671,7 +1672,8 @@ static mm_mapopt_t *mm_mapopt_init(void)
 		/* -S, -E */.sidx = 0, .eidx = 3,
 		.hlim = 7000, .llim = 7000, .blim = 0, .elim = 200,
 		.batch_size = 512 * 1024,
-		.outbuf_size = 512 * 1024
+		.outbuf_size = 512 * 1024,
+		.base_rid = 0, .base_qid = 0
 	};
 	return opt;
 }
@@ -3323,7 +3325,6 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 int main(int argc, char *argv[])
 {
 	int ret = 1;
-	uint32_t base_rid = 0, base_qid = 0;
 	const char *fnr = 0, *fnw = 0;
 	bseq_file_t *fp = 0;
 	ptr_v v = {0};
@@ -3357,7 +3358,7 @@ int main(int argc, char *argv[])
 	if (fnr) fpr = fopen(fnr, "rb");
 	if (fnw) fpw = fopen(fnw, "wb");
 	for (uint64_t i = 0; i < (fpr? 0x7fffffff : (((opt->flag&MM_AVA) || fpw)? v.n : 1)); ++i) {
-		uint32_t qid = base_qid;
+		uint32_t qid = opt->base_qid;
 		mm_idx_t *mi = 0;
 		mm_align_t *aln = 0;
 
@@ -3365,9 +3366,9 @@ int main(int argc, char *argv[])
 		if (fpr) {
 			mi = mm_idx_load(fpr, opt->nth);
 		} else {
-			fp = bseq_open((const char *)v.a[i], base_rid, opt->batch_size, 0, 0, NULL);
+			fp = bseq_open((const char *)v.a[i], opt->base_rid, opt->batch_size, 0, 0, NULL);
 			mi = mm_idx_gen(opt, fp);
-			base_rid = bseq_close(fp);
+			opt->base_rid = bseq_close(fp);
 		}
 
 		// check sanity of the index
