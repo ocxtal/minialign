@@ -35,7 +35,9 @@
 #include "sassert.h"
 
 /* global consts */
-#define MM_VERSION		"0.5.0"
+#ifndef MM_VERSION
+#  define MM_VERSION		"0.5.0"
+#endif
 
 /* max, min */
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
