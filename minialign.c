@@ -48,7 +48,6 @@
 #define _unlikely(x)	__builtin_expect(!!(x), 0)
 
 /* timer */
-int mm_verbose = 3;
 double mm_realtime0;
 
 static double cputime()
@@ -1641,7 +1640,7 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 #define MM_MHAP 		( 0x05ULL<<56 )
 
 typedef struct {
-	uint32_t sidx, eidx, nth, min, k, w, b;
+	uint32_t sidx, eidx, nth, min, k, w, b, verbose;
 	uint64_t flag;
 	float min_ratio;
 	int32_t m, x, gi, ge, xdrop, llim, hlim, elim, blim;
@@ -1664,6 +1663,7 @@ static mm_mapopt_t *mm_mapopt_init(void)
 	set_info(0, "[mm_mapopt_init] initialize mapopt object");
 	mm_mapopt_t *opt = calloc(1, sizeof(mm_mapopt_t));
 	*opt = (mm_mapopt_t){
+		/* -V */ .verbose = 1,
 		/* -f, -k, -w, -b, -T */ .k = 15, .w = 16, .b = 14, .flag = 0,
 		/* -a, -b, -p, -q, -Y */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
 		/* -s, -m */ .min = 50, .min_ratio = 0.3,
@@ -1984,7 +1984,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 	pt_t *pt = pt_init(opt->nth);
 	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
 	free(p); kv_hq_destroy(pl.hq);
-	if (mm_verbose >= 3)
+	if (opt->verbose >= 1)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 
 	mm_idx_post_t *q = (mm_idx_post_t*)calloc(opt->nth, sizeof(mm_idx_post_t));
@@ -1999,7 +1999,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 	pt_destroy(pt);
 
 	free(q); free(qq);
-	if (mm_verbose >= 3)
+	if (opt->verbose >= 1)
 		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0));
 	return pl.mi;
 }
@@ -3129,7 +3129,7 @@ static void posixly_correct()
 
 static void mm_print_help(const mm_mapopt_t *opt)
 {
-	if (mm_verbose == 0) return;
+	if (opt->verbose == 0) return;
 	fprintf(stderr, "\n"
 					"  minialign - fast aligner for PacBio and Nanopore long reads\n"
 					"\n"
@@ -3160,13 +3160,17 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -w INT       minimizer window size [{-k}*2/3]\n");
 	fprintf(stderr, "    -d FILE      dump index to FILE []\n");
 	fprintf(stderr, "    -l FILE      load index from FILE [] (overriding -k and -w)\n");
-	fprintf(stderr, "    -C INT[,INT] set base rid and qid [%u, %u]\n", opt->base_rid, opt->base_qid);
+	if (opt->verbose >= 2)
+		fprintf(stderr, "    -C INT[,INT] set base rid and qid [%u, %u]\n", opt->base_rid, opt->base_qid);
 	fprintf(stderr, "  Mapping:\n");
-	// fprintf(stderr, "    -f FLOAT,... occurrence thresholds [0.05,0.01,0.001]\n");
+	if (opt->verbose >= 2)
+		fprintf(stderr, "    -f FLOAT,... occurrence thresholds [0.05,0.01,0.001]\n");
 	fprintf(stderr, "    -a INT       match award [%d]\n", opt->m);
 	fprintf(stderr, "    -b INT       mismatch penalty [%d]\n", opt->x);
 	fprintf(stderr, "    -p INT       gap open penalty [%d]\n", opt->gi);
 	fprintf(stderr, "    -q INT       gap extension penalty [%d]\n", opt->ge);
+	if (opt->verbose >= 2)
+		fprintf(stderr, "    -Y INT       X-drop threshold [%d]\n", opt->xdrop);
 	fprintf(stderr, "    -s INT       minimum alignment score [%d]\n", opt->min);
 	fprintf(stderr, "    -m INT       minimum alignment score ratio [%1.2f]\n", opt->min_ratio);
 	fprintf(stderr, "  Output:\n");
@@ -3193,7 +3197,7 @@ static int mm_mapopt_load_preset(mm_mapopt_t *o, const char *arg)
 		o->k = 14; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.3;
 		o->flag |= MM_AVA | MM_PAF;
 	} else {
-		if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, arg);
+		if (o->verbose >= 1) fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, arg);
 		return 1;
 	}
 	return 0;
@@ -3225,7 +3229,7 @@ static int mm_mapopt_parse_base_ids(mm_mapopt_t *o, const char *arg)
 	return 0;
 }
 
-static uint64_t mm_mapopt_parse_tags(const char *p, uint16_v *buf)
+static uint64_t mm_mapopt_parse_tags(mm_mapopt_t *o, const char *p, uint16_v *buf)
 {
 	uint32_t flag = 0;
 	while (*p != '\0') {
@@ -3242,6 +3246,7 @@ static uint64_t mm_mapopt_parse_tags(const char *p, uint16_v *buf)
 			else if (strncmp(p, "NM", 2) == 0) flag |= 0x01ULL<<MM_NM;
 			else if (strncmp(p, "SA", 2) == 0) flag |= 0x01ULL<<MM_SA;
 			else if (strncmp(p, "MD", 2) == 0) flag |= 0x01ULL<<MM_MD;
+			else if (o->verbose >= 1) fprintf(stderr, "[M::%s] Unknown tag: `%c%c'.\n", __func__, p[0], p[1]);
 		}
 		if (*q == '\0') break;
 		p = q + 1;
@@ -3275,7 +3280,7 @@ static void mm_mapopt_parse_rg(mm_mapopt_t *o, const char *arg)
 	return;
 }
 
-static uint64_t mm_mapopt_parse_format(const char *arg)
+static uint64_t mm_mapopt_parse_format(mm_mapopt_t *o, const char *arg)
 {
 	if (strcmp(arg, "sam") == 0) return 0;
 	else if (strcmp(arg, "blast6") == 0) return MM_BLAST6;
@@ -3283,7 +3288,7 @@ static uint64_t mm_mapopt_parse_format(const char *arg)
 	else if (strcmp(arg, "blasr4") == 0) return MM_BLASR4;
 	else if (strcmp(arg, "paf") == 0) return MM_PAF;
 	else if (strcmp(arg, "mhap") == 0) return MM_MHAP;
-	else if (mm_verbose >= 3) fprintf(stderr, "[M::%s] Unknown output format: `%s'.\n", __func__, arg);
+	else if (o->verbose >= 1) fprintf(stderr, "[M::%s] Unknown output format: `%s'.\n", __func__, arg);
 	return 0;
 }
 
@@ -3297,7 +3302,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 
 		if (ch == 't') o->nth = atoi(optarg);
 		else if (ch == 'x') mm_mapopt_load_preset(o, optarg);
-		else if (ch == 'V') mm_verbose = atoi(optarg);
+		else if (ch == 'V') if (isdigit(optarg[0])) { o->verbose = atoi(optarg); } else { for (const char *p = optarg; *p; p++, o->verbose++) {} }
 		else if (ch == 'k') o->k = atoi(optarg);
 		else if (ch == 'w') o->w = atoi(optarg);
 		else if (ch == 'f') mm_mapopt_parse_threshs(o, optarg);
@@ -3309,7 +3314,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 's') o->min = atoi(optarg);
 		else if (ch == 'm') o->min_ratio = atof(optarg);
 		else if (ch == 'r') {
-			if (mm_verbose >= 3)
+			if (o->verbose >= 1)
 				fprintf(stderr, "[M::%s] Warning: Minimum length threshold option is deprecated in version 0.4.0 and later, interpreted as score ratio.\n", __func__);
 			o->min_ratio = atof(optarg);
 		}
@@ -3324,12 +3329,12 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 'S') o->sidx = atoi(optarg);
 		else if (ch == 'E') o->eidx = atoi(optarg);
 		else if (ch == 'Y') o->xdrop = atoi(optarg);
-		else if (ch == 'O') o->flag &= ~(0xffULL<<56), o->flag |= mm_mapopt_parse_format(optarg);
+		else if (ch == 'O') o->flag &= ~(0xffULL<<56), o->flag |= mm_mapopt_parse_format(o, optarg);
 		else if (ch == 'P') o->flag |= MM_OMIT_REP;
 		else if (ch == 'Q') o->flag |= MM_KEEP_QUAL;
 		else if (ch == 'R') mm_mapopt_parse_rg(o, optarg);
-		else if (ch == 'T') o->flag |= mm_mapopt_parse_tags(optarg, NULL);
-		else if (ch == 'U') mm_mapopt_parse_tags(optarg, &o->tags);
+		else if (ch == 'T') o->flag |= mm_mapopt_parse_tags(o, optarg, NULL);
+		else if (ch == 'U') mm_mapopt_parse_tags(o, optarg, &o->tags);
 		else if (ch == 'v') { return 1; }
 		else if (ch == 'h') { return 2; }
 	}
@@ -3360,7 +3365,7 @@ int main(int argc, char *argv[])
 	}
 	if (!fnr && v.n == 0) { mm_print_help(opt); ret = 1; goto _final; }
 	if (!fnw && ((fnr && v.n == 0) || (!fnr && v.n == 1 && !(opt->flag&MM_AVA)))) {
-		if (mm_verbose >= 3) fprintf(stderr, "[M::%s] query-side input redirected to stdin.\n", __func__);
+		if (opt->verbose >= 1) fprintf(stderr, "[M::%s] query-side input redirected to stdin.\n", __func__);
 		kv_push(void*, v, "-");
 	}
 	if (opt->w >= 16) opt->w = (int)(.6666667 * opt->k + .499);
@@ -3393,7 +3398,7 @@ int main(int argc, char *argv[])
 				fpr? fnr : (const char*)v.a[i], fpr? "file path, format and its version" : "file path and format");
 			ret = 1; goto _final;
 		}
-		if (mm_verbose >= 3) fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %lu target sequence(s)\n", __func__,
+		if (opt->verbose >= 1) fprintf(stderr, "[M::%s::%.3f*%.2f] loaded/built index for %lu target sequence(s)\n", __func__,
 			realtime() - mm_realtime0, cputime() / (realtime() - mm_realtime0), mi->s.n);
 
 		// do the task
