@@ -2238,28 +2238,6 @@ void trace_load_section_b(
 }
 
 /**
- * @macro _trace_load_mask
- * @brief load mask and decrement pointer
- */
-#if MODEL == LINEAR
-#define _trace_declare_mask() \
-	uint32_t mask_h, mask_v;
-#define _trace_load_mask() { \
-	mask_v = ptr->pair.v.all; \
-	mask_h = ptr->pair.h.all; \
-}
-#else /* MODEL == AFFINE */
-#define _trace_declare_mask() \
-	uint32_t mask_h, mask_v, mask_e, mask_f;
-#define _trace_load_mask() { \
-	mask_f = ptr->pair.f.all; \
-	mask_e = ptr->pair.e.all; \
-	mask_v = ptr->pair.v.all; \
-	mask_h = ptr->pair.h.all; \
-}
-#endif
-
-/**
  * @macro _trace_*_load_context
  * @brief load context onto registers
  */
@@ -2275,11 +2253,9 @@ void trace_load_section_b(
 	int64_t p = (t)->w.l.p, q = (t)->w.l.q; \
 	union gaba_dir_u dir = _dir_load(blk, p & (BLK - 1)); \
 	union gaba_mask_pair_u const *ptr = &blk->mask[p & (BLK - 1)]; \
-	_trace_declare_mask(); \
-	_trace_load_mask(); \
 	_print_v2i32(idx); \
 	debug("p(%lld), q(%lld), mask_h(%x), mask_v(%x), path_array(%llx)", \
-		p, q, mask_h, mask_v, path_array);
+		p, q, ptr->mask.h.all, ptr->mask.v.all, path_array);
 
 #define _trace_forward_load_context(t) \
 	uint32_t *path = (t)->w.l.path.phead; \
@@ -2328,7 +2304,6 @@ void trace_load_section_b(
 	debug("adjusted sum(%u, %u), len(%u, %u), stat(%u)", _hi32(sum), _lo32(sum), _hi32(len), _lo32(len), tail->stat); \
 	/* reload dir and mask pointer */ \
 	_trace_reload_ptr(p & (BLK - 1)); \
-	_trace_load_mask(); \
 }
 
 /**
@@ -2403,11 +2378,9 @@ void trace_load_section_b(
 	if(_unlikely(ptr == blk->mask - 1)) { \
 		_trace_forward_cap_update_path(); \
 		_trace_reload_ptr(BLK - 1); \
-		_trace_load_mask(); \
 		debug("jump to %s", #_jump_to); \
 		goto _jump_to; \
 	} \
-	_trace_load_mask(); \
 }
 #define _trace_forward_bulk_load(t, _jump_to) { \
 	if(_unlikely(ptr == blk->mask - 1)) { \
@@ -2415,12 +2388,10 @@ void trace_load_section_b(
 		_trace_reload_ptr(BLK - 1); \
 		if(_unlikely(p < BLK)) { \
 			_trace_forward_calc_index(t); \
-			_trace_load_mask(); \
 			debug("jump to %s", #_jump_to); \
 			goto _jump_to; \
 		} \
 	} \
-	_trace_load_mask(); \
 }
 #define _trace_forward_tail_load(t, _jump_to) { \
 	if(_unlikely(ptr == blk->mask - 1)) { \
@@ -2440,7 +2411,6 @@ void trace_load_section_b(
 		/* load dir and update mask pointer */ \
 		_trace_reload_ptr(BLK - 1); \
 	} \
-	_trace_load_mask(); \
 }
 
 /**
@@ -2450,11 +2420,9 @@ void trace_load_section_b(
 	if(_unlikely(ptr == blk->mask - 1)) { \
 		_trace_reverse_cap_update_path(); \
 		_trace_reload_ptr(BLK - 1); \
-		_trace_load_mask(); \
 		debug("jump to %s", #_jump_to); \
 		goto _jump_to; \
 	} \
-	_trace_load_mask(); \
 }
 #define _trace_reverse_bulk_load(t, _jump_to) { \
 	if(_unlikely(ptr == blk->mask - 1)) { \
@@ -2462,12 +2430,10 @@ void trace_load_section_b(
 		_trace_reload_ptr(BLK - 1); \
 		if(_unlikely(p < BLK)) { \
 			_trace_reverse_calc_index(t); \
-			_trace_load_mask(); \
 			debug("jump to %s", #_jump_to); \
 			goto _jump_to; \
 		} \
 	} \
-	_trace_load_mask(); \
 }
 #define _trace_reverse_tail_load(t, _jump_to) { \
 	if(_unlikely(ptr == blk->mask - 1)) { \
@@ -2487,7 +2453,6 @@ void trace_load_section_b(
 		/* load dir and update mask pointer */ \
 		_trace_reload_ptr(BLK - 1); \
 	} \
-	_trace_load_mask(); \
 }
 
 /**
@@ -2549,15 +2514,15 @@ void trace_load_section_b(
  * @brief test mask
  */
 #if MODEL == LINEAR
-#define _trace_test_diag_h()			( (mask_h>>q) & 0x01 )
-#define _trace_test_diag_v()			( (mask_v>>q) & 0x01 )
-#define _trace_test_gap_h()				( (mask_h>>q) & 0x01 )
-#define _trace_test_gap_v()				( (mask_v>>q) & 0x01 )
+#define _trace_test_diag_h()			( (ptr->pair.h.all>>q) & 0x01 )
+#define _trace_test_diag_v()			( (ptr->pair.v.all>>q) & 0x01 )
+#define _trace_test_gap_h()				( (ptr->pair.h.all>>q) & 0x01 )
+#define _trace_test_gap_v()				( (ptr->pair.v.all>>q) & 0x01 )
 #else /* MODEL == AFFINE */
-#define _trace_test_diag_h()			( (mask_h>>q) & 0x01 )
-#define _trace_test_diag_v()			( (mask_v>>q) & 0x01 )
-#define _trace_test_gap_h()				( (mask_e>>q) & 0x01 )
-#define _trace_test_gap_v()				( (mask_f>>q) & 0x01 )
+#define _trace_test_diag_h()			( (ptr->pair.h.all>>q) & 0x01 )
+#define _trace_test_diag_v()			( (ptr->pair.v.all>>q) & 0x01 )
+#define _trace_test_gap_h()				( (ptr->pair.e.all>>q) & 0x01 )
+#define _trace_test_gap_v()				( (ptr->pair.f.all>>q) & 0x01 )
 #endif
 
 /**
@@ -2631,7 +2596,7 @@ void trace_forward_body(
 			} \
 			_trace_inc_ge(); \
 			debug("go %s (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
-				#_label, #_type, ((uint64_t)dir.dynamic.array), mask_h, mask_v, p, q, ptr, path_array); \
+				#_label, #_type, ((uint64_t)dir.dynamic.array), ptr->mask.h.all, ptr->mask.v.all, p, q, ptr, path_array); \
 			_trace_##_type##_##_label##_update_index(); \
 			_trace_forward_##_label##_update_path_q(); \
 			_trace_forward_##_type##_load(t, _trace_forward_##_next##_##_label##_head); \
@@ -2649,7 +2614,7 @@ void trace_forward_body(
 				goto _trace_forward_index_break; \
 			} \
 			debug("go d (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
-				#_type, ((uint64_t)dir.dynamic.array), mask_h, mask_v, p, q, ptr, path_array); \
+				#_type, ((uint64_t)dir.dynamic.array), ptr->mask.h.all, ptr->mask.v.all, p, q, ptr, path_array); \
 			_trace_##_type##_h_update_index(); \
 			_trace_forward_h_update_path_q(); \
 			_trace_forward_##_type##_load(t, _trace_forward_##_next##_d_mid); \
@@ -2730,7 +2695,7 @@ void trace_reverse_body(
 			} \
 			_trace_inc_ge(); \
 			debug("go %s (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
-				#_label, #_type, ((uint64_t)dir.dynamic.array), mask_h, mask_v, p, q, ptr, path_array); \
+				#_label, #_type, ((uint64_t)dir.dynamic.array), ptr->mask.h.all, ptr->mask.v.all, p, q, ptr, path_array); \
 			_trace_##_type##_##_label##_update_index(); \
 			_trace_reverse_##_label##_update_path_q(); \
 			_trace_reverse_##_type##_load(t, _trace_reverse_##_next##_##_label##_head); \
@@ -2748,7 +2713,7 @@ void trace_reverse_body(
 				goto _trace_reverse_index_break; \
 			} \
 			debug("go d (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
-				#_type, ((uint64_t)dir.dynamic.array), mask_h, mask_v, p, q, ptr, path_array); \
+				#_type, ((uint64_t)dir.dynamic.array), ptr->mask.h.all, ptr->mask.v.all, p, q, ptr, path_array); \
 			_trace_##_type##_v_update_index(); \
 			_trace_reverse_v_update_path_q(); \
 			_trace_reverse_##_type##_load(t, _trace_reverse_##_next##_d_mid); \
