@@ -3158,6 +3158,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -w INT       minimizer window size [{-k}*2/3]\n");
 	fprintf(stderr, "    -d FILE      dump index to FILE []\n");
 	fprintf(stderr, "    -l FILE      load index from FILE [] (overriding -k and -w)\n");
+	fprintf(stderr, "    -C INT[,INT] set base rid and qid [%u, %u]\n", opt->base_rid, opt->base_qid);
 	fprintf(stderr, "  Mapping:\n");
 	// fprintf(stderr, "    -f FLOAT,... occurrence thresholds [0.05,0.01,0.001]\n");
 	fprintf(stderr, "    -a INT       match award [%d]\n", opt->m);
@@ -3209,6 +3210,16 @@ static int mm_mapopt_parse_threshs(mm_mapopt_t *o, const char *arg)
 		if (o->frq[i] < 0.0 || o->frq[i] > 1.0)
 			fprintf(stderr, "[M::%s] Warning: Invalid threshold `%f' parsed from `%s'.\n", __func__, o->frq[i], arg);
 	}
+	return 0;
+}
+
+static int mm_mapopt_parse_base_ids(mm_mapopt_t *o, const char *arg)
+{
+	const char *p = optarg;
+	if (!isdigit(*p)) return 1;
+	o->base_rid = atoi(p);
+	while (*p && *p != ',') { p++; }
+	if (*p && isdigit(p[1])) o->base_qid = atoi(&p[1]);
 	return 0;
 }
 
@@ -3278,19 +3289,20 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 {
 	while (optind < argc) {
 		int ch;
-		if ((ch = getopt(argc, argv, "k:w:f:c:x:B:t:V:d:l:Xs:m:r:a:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
+		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:Xs:m:r:a:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
 			kv_push(void*, *v, argv[optind]); optind++; continue;
 		}
 
-		if (ch == 'k') o->k = atoi(optarg);
+		if (ch == 't') o->nth = atoi(optarg);
+		else if (ch == 'x') mm_mapopt_load_preset(o, optarg);
+		else if (ch == 'V') mm_verbose = atoi(optarg);
+		else if (ch == 'k') o->k = atoi(optarg);
 		else if (ch == 'w') o->w = atoi(optarg);
 		else if (ch == 'f') mm_mapopt_parse_threshs(o, optarg);
-		else if (ch == 'x') mm_mapopt_load_preset(o, optarg);
 		else if (ch == 'B') o->b = atoi(optarg);
-		else if (ch == 't') o->nth = atoi(optarg);
-		else if (ch == 'V') mm_verbose = atoi(optarg);
 		else if (ch == 'd') *fnw = optarg;
 		else if (ch == 'l') *fnr = optarg;
+		else if (ch == 'C') mm_mapopt_parse_base_ids(o, optarg);
 		else if (ch == 'X') o->flag |= MM_AVA;
 		else if (ch == 's') o->min = atoi(optarg);
 		else if (ch == 'm') o->min_ratio = atof(optarg);
