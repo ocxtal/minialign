@@ -220,7 +220,7 @@ static kh_t *kh_init(uint64_t size)
 	size = size < KH_SIZE? KH_SIZE : (0x8000000000000000>>(lzcnt(size - 1) - 1));
 	h->mask = size - 1; h->max = size; h->cnt = 0; h->ub = size * KH_THRESH;
 	h->a = malloc(sizeof(mm128_t) * size);
-	for (uint64_t i = 0; i < size; ++i) h->a[i].u64[0] = UINT64_MAX-1, h->a[i].u64[1] = 0;
+	for (uint64_t i = 0; i < size; ++i) h->a[i].u64[0] = UINT64_MAX, h->a[i].u64[1] = 0;
 	return h;
 }
 
@@ -258,7 +258,7 @@ static void kh_clear(kh_t *h)
 {
 	if (h == 0) { return; }
 	h->mask = KH_SIZE - 1; h->cnt = 0; h->ub = KH_SIZE * KH_THRESH;
-	for (uint64_t i = 0; i < KH_SIZE; ++i) h->a[i].u64[0] = UINT64_MAX-1, h->a[i].u64[1] = 0;
+	for (uint64_t i = 0; i < KH_SIZE; ++i) h->a[i].u64[0] = UINT64_MAX, h->a[i].u64[1] = 0;
 	return;
 }
 
@@ -284,11 +284,11 @@ static void kh_extend(kh_t *h)
 	uint64_t prev_size = h->mask + 1, size = 2 * prev_size, mask = size - 1;
 	h->mask = mask; h->ub = size * KH_THRESH;
 	if (size > h->max) { h->a = realloc(h->a, sizeof(mm128_t) * size); h->max = size; }
-	for (uint64_t i = 0; i < prev_size; ++i) h->a[i + prev_size].u64[0] = UINT64_MAX-1, h->a[i + prev_size].u64[1] = 0;
+	for (uint64_t i = 0; i < prev_size; ++i) h->a[i + prev_size].u64[0] = UINT64_MAX, h->a[i + prev_size].u64[1] = 0;
 	for (uint64_t i = 0; i < size; ++i) {
 		uint64_t k = h->a[i].u64[0];	// key
 		if (k + 2 < 2 || (k & mask) == i) continue;
-		uint64_t v = h->a[i].u64[1]; h->a[i].u64[0] = UINT64_MAX;	// moved
+		uint64_t v = h->a[i].u64[1]; h->a[i].u64[0] = UINT64_MAX-1;	// moved
 		kh_put_intl(h->a, k, v, mask);
 	}
 	return;
@@ -307,7 +307,7 @@ static uint64_t kh_get(kh_t *h, uint64_t key)
 	do {
 		if ((k = h->a[pos].u64[0]) == key) return h->a[pos].u64[1];
 		pos = mask & (pos + 1);
-	} while (k + 1 < UINT64_MAX);	// !is_empty(k) || is_moved(k)
+	} while (k + 1 != 0);			// !is_empty(k) || is_moved(k)
 	return UINT64_MAX;
 }
 
@@ -317,7 +317,7 @@ static const uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 	do {
 		if ((k = h->a[pos].u64[0]) == key) return &h->a[pos].u64[1];
 		pos = mask & (pos + 1);
-	} while (k + 1 < UINT64_MAX);	// !is_empty(k) || is_moved(k)
+	} while (k + 1 != 0);			// !is_empty(k) || is_moved(k)
 	return NULL;
 }
 
