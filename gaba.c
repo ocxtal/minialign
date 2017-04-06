@@ -3739,31 +3739,6 @@ uint64_t suffix(gaba_dp_dump_cigar_reverse)(
 }
 
 /**
- * @fn extract_max, extract_min
- * @brief extract max /min value from 8-bit 16-cell vector
- */
-static _force_inline
-int8_t extract_max(int8_t const vector[][4])
-{
-	int8_t *v = (int8_t *)vector;
-	int8_t max = -128;
-	for(int i = 0; i < 16; i++) {
-		max = (v[i] > max) ? v[i] : max;
-	}
-	return(max);
-}
-static _force_inline
-int8_t extract_min(int8_t const vector[][4])
-{
-	int8_t *v = (int8_t *)vector;
-	int8_t min = 127;
-	for(int i = 0; i < 16; i++) {
-		min = (v[i] < min) ? v[i] : min;
-	}
-	return(min);
-}
-
-/**
  * @fn gaba_init_restore_default_params
  */
 static _force_inline
