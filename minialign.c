@@ -3171,6 +3171,14 @@ static void posixly_correct()
 #endif
 }
 
+static void mm_print_version(void)
+{
+	const char *prefix = "minialign-";
+	uint64_t spos = strncmp(MM_VERSION, prefix, MIN2(strlen(MM_VERSION), strlen(prefix)))? 0 : strlen(prefix);
+	puts(&MM_VERSION[spos]);
+	return;
+}
+
 static void mm_print_help(const mm_mapopt_t *opt)
 {
 	if (opt->verbose == 0) return;
@@ -3409,7 +3417,7 @@ int main(int argc, char *argv[])
 	mm_realtime0 = realtime();
 	mm_mapopt_t *opt = mm_mapopt_init();
 	switch (mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &v)) {
-		case 1: puts(MM_VERSION); ret = 0; goto _final;
+		case 1: mm_print_version(); ret = 0; goto _final;
 		case 2: mm_print_help(opt); ret = 0; goto _final;
 	}
 	if (!fnr && v.n == 0) { mm_print_help(opt); ret = 1; goto _final; }
