@@ -1678,7 +1678,7 @@ static mm_mapopt_t *mm_mapopt_init(void)
 	set_info(0, "[mm_mapopt_init] initialize mapopt object");
 	mm_mapopt_t *opt = calloc(1, sizeof(mm_mapopt_t));
 	*opt = (mm_mapopt_t){
-		/* -V */ .verbose = 1,
+		/* -V */ .verbose = 2,
 		/* -f, -k, -w, -b, -T */ .k = 15, .w = 16, .b = 14, .flag = 0,
 		/* -a, -b, -p, -q, -Y */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
 		/* -s, -m */ .min = 50, .min_ratio = 0.3,
