@@ -3082,8 +3082,8 @@ _fail:
 
 static void mm_align_destroy(mm_align_t *b)
 {
-	fwrite(b->base, sizeof(uint8_t), b->p - b->base, stdout);
 	if (b->printer.footer) b->printer.footer(b);
+	fwrite(b->base, sizeof(uint8_t), b->p - b->base, stdout);
 	for (uint64_t i = 0; i < b->opt->nth; ++i) mm_tbuf_destroy((mm_tbuf_t*)b->t[i]);
 	free(b->base); kv_hq_destroy(b->hq); free(b->occ); free(b->t); gaba_clean(b->gaba); pt_destroy(b->pt);
 	free(b);
