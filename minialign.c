@@ -1646,6 +1646,7 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 #define MM_KEEP_QUAL	( 0x02ULL<<48 )
 #define MM_CIRCULAR		( 0x04ULL<<48 )
 #define MM_OMIT_REP		( 0x08ULL<<48 )		// omit secondary records
+#define MM_COMP 		( 0x10ULL<<48 )
 
 #define MM_BLAST6		( 0x01ULL<<56 )
 #define MM_BLASR1		( 0x02ULL<<56 )
@@ -1745,6 +1746,8 @@ static int mm_mapopt_check(mm_mapopt_t *opt, int (*_fprintf)(FILE*,const char*,.
 		}
 	}
 	#undef _dup
+
+	if (!(opt->flag&MM_AVA) && (opt->flag&MM_COMP)) _fprintf(_fp, "[W::%s] `-A' flag is only effective in all-versus-all mode. ignored.\n", __func__), opt->flag &= ~MM_COMP;
 	return ret;
 }
 
@@ -2197,20 +2200,22 @@ typedef struct mm_tbuf_s { // per-thread buffer
 
 #define _s(x)		( (x)<0?-1:1)
 #define _m(x)		( (((int32_t)(x))>>31)^(x) )
-static void mm_expand(uint32_t n, const v2u32_t *r, uint32_t qid, int32_t qs, uint32_t thresh, mm128_v *coef)
+static void mm_expand(uint32_t n, const v2u32_t *r, uint32_t qid, int32_t qs, uint32_t org, uint32_t thresh, mm128_v *coef)
 {
 	const int32_t ofs = 0x40000000;
+	kv_reserve(mm128_t, *coef, coef->n + n);
 	for (uint64_t i = 0; i < n; ++i) {	// iterate over all the collected minimizers
-		if (ofs + r[i].x[1] - qid > thresh) continue;	// 0x3fffffff to skip self and dual, 0xffffffff to keep all
+		// if (org + r[i].x[1] - qid > thresh) continue;	// 0x3fffffff to skip self and dual, 0xffffffff to keep all
+		if (org + qid - r[i].x[1] < thresh) continue;
 		int32_t rs = (int32_t)r[i].x[0], _qs = (rs>>31) ^ qs, _rs = (rs>>31) ^ rs;
-		mm128_t *p;
-		kv_pushp(mm128_t, *coef, &p);
+		mm128_t *p = &coef->a[coef->n++];
+		// kv_pushp(mm128_t, *coef, &p);
 		p->u32[0] = ofs + _rs - (_qs>>1); p->u32[1] = r[i].x[1]; p->u32[2] = _rs; p->u32[3] = _qs;
 	}
 	return;
 }
 
-static void mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t qid, uint32_t max_occ, uint32_t resc_occ, uint32_t thresh, mm128_v *mini, mm128_v *coef)
+static void mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, uint32_t qid, uint32_t max_occ, uint32_t resc_occ, uint32_t org, uint32_t thresh, mm128_v *mini, mm128_v *coef)
 {
 	uint64_t n_resc = 0;
 	mini->n = coef->n = 0;
@@ -2227,7 +2232,7 @@ static void mm_collect(const mm_idx_t *mi, uint32_t l_seq, const uint8_t *seq, u
 			q->u32[0] = qs; q->u32[1] = n; q->u64[1] = (uintptr_t)r;
 			continue;
 		}
-		mm_expand(n, r, qid, qs, thresh, coef);
+		mm_expand(n, r, qid, qs, org, thresh, coef);
 	}
 	mini->n = n_resc;	// write back rescued array
 	return;
@@ -2452,7 +2457,9 @@ static const mm128_t *mm_align_seq(
 {
 	int32_t min = opt->min;
 	const int32_t ofs = 0x40000000;
-	const uint32_t mask = 0x7fffffff, thresh = opt->flag&MM_AVA? (uint32_t)ofs - 1 : 0xffffffff;
+	const uint32_t mask = 0x7fffffff;
+	const uint32_t org = (opt->flag&(MM_AVA|MM_COMP))==MM_AVA? ofs : 0, thresh = (opt->flag&MM_AVA? 1 : 0) + org;
+
 	mm128_v reg = {0};
 	// prepare section info for alignment
 	uint8_t tail[96];
@@ -2467,12 +2474,12 @@ static const mm128_t *mm_align_seq(
 	b->coef.n = b->resc.n = b->intv.n = 0; kh_clear(b->pos);
 	for (uint64_t i = 0, j = 0; reg.n == 0 && i < n_occ; ++i) {
 		if (i == 0) {
-			mm_collect(mi, l_seq, seq, qid, occ[n_occ-1], occ[0], thresh, &b->resc, &b->coef);
+			mm_collect(mi, l_seq, seq, qid, occ[n_occ-1], occ[0], org, thresh, &b->resc, &b->coef);
 		} else {
 			if (i == 1) radix_sort_128x(b->resc.a, b->resc.a + b->resc.n);
 			for (uint64_t k = 0; k < b->coef.n; ++k) b->coef.a[k].u32[2] &= mask;
 			for (; j < b->resc.n && b->resc.a[j].u32[1] <= occ[i]; ++j)
-				mm_expand(b->resc.a[j].u32[1], (const v2u32_t*)b->resc.a[j].u64[1], qid, b->resc.a[j].u32[0], thresh, &b->coef);
+				mm_expand(b->resc.a[j].u32[1], (const v2u32_t*)b->resc.a[j].u64[1], qid, b->resc.a[j].u32[0], org, thresh, &b->coef);
 		}
 		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
 
@@ -3229,6 +3236,8 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -m INT       minimum alignment score ratio [%1.2f]\n", opt->min_ratio);
 	if (opt->verbose >= 2)
 		fprintf(stderr, "    -M INT       maximum #alignments reported [%d]\n", opt->max_cnt);
+	if (opt->verbose >= 2)
+		fprintf(stderr, "    -A           calculate both topright and bottomright triangles (only effective with -X)\n");
 	fprintf(stderr, "  Output:\n");
 	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf,mhap,falcon} [%s]\n",
 		(const char *[]){ "sam", "blast6", "blasr1", "blasr4", "paf", "mhap", "falcon" }[opt->flag>>56]);
@@ -3353,7 +3362,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 {
 	while (optind < argc) {
 		int ch;
-		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXs:m:r:Ma:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
+		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:Ma:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
 			kv_push(void*, *v, argv[optind]); optind++; continue;
 		}
 
@@ -3369,6 +3378,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 		else if (ch == 'C') mm_mapopt_parse_base_ids(o, optarg);
 		else if (ch == 'N') o->base_rid = 0xffffffff, o->base_qid = 0xffffffff;
 		else if (ch == 'X') o->flag |= MM_AVA;
+		else if (ch == 'A') o->flag |= MM_COMP;
 		else if (ch == 's') o->min = atoi(optarg);
 		else if (ch == 'm') o->min_ratio = atof(optarg);
 		else if (ch == 'r') {
