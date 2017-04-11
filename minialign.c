@@ -1062,7 +1062,6 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 	kv_pushp(bseq_t, *seq, &s);
 	kv_reserve(uint8_t, *mem, mem->n + c->l_qname + c->l_qseq + ((fp->keep_qual && *squal != 0xff)? c->l_qseq : 0) + (fp->l_tags? l_tag : 0) + 3);
 	s->l_seq = c->l_qseq;
-	// s->rid = seq->n + fp->base_rid - 1;
 	s->l_name = c->l_qname - 1;		// remove tail '\0'
 	s->l_tag = fp->l_tags? l_tag : 0;
 
@@ -1152,7 +1151,6 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 		case 0:				// idle
 			if (*p++ != fp->delim) return 2;	// broken
 			kv_pushp(bseq_t, *seq, &s);			// create new sequence
-			// s->rid = seq->n + fp->base_rid - 1;
 			fp->state = 1;						// transition to spaces between delim and name
 		case 1:
 			_strip(p, t, sv);
@@ -2205,11 +2203,9 @@ static void mm_expand(uint32_t n, const v2u32_t *r, uint32_t qid, int32_t qs, ui
 	const int32_t ofs = 0x40000000;
 	kv_reserve(mm128_t, *coef, coef->n + n);
 	for (uint64_t i = 0; i < n; ++i) {	// iterate over all the collected minimizers
-		// if (org + r[i].x[1] - qid > thresh) continue;	// 0x3fffffff to skip self and dual, 0xffffffff to keep all
 		if (org + qid - r[i].x[1] < thresh) continue;
 		int32_t rs = (int32_t)r[i].x[0], _qs = (rs>>31) ^ qs, _rs = (rs>>31) ^ rs;
 		mm128_t *p = &coef->a[coef->n++];
-		// kv_pushp(mm128_t, *coef, &p);
 		p->u32[0] = ofs + _rs - (_qs>>1); p->u32[1] = r[i].x[1]; p->u32[2] = _rs; p->u32[3] = _qs;
 	}
 	return;
@@ -2432,7 +2428,6 @@ static uint64_t mm_post_map(const mm_mapopt_t *opt, uint32_t n_reg, mm128_t *reg
 
 	for (i = 1; i < n_reg; ++i) tsc += _aln(reg[i])->score - bsc + 1;
 	reg[0].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe));
-	// if (n_reg > 1) fprintf(stderr, "n_reg(%u), usc(%d), lsc(%d), pe(%1.9f)\n", n_reg, ssc, bsc, pe);
 	for (i = 1; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i)
 		reg[i].u32[0] |= (0x100<<16) | _clip(-10.0 * MAPQ_COEF * log10(1.0 - pe * (double)(score - bsc + 1) / (double)tsc));
 	return 1;
@@ -2466,7 +2461,7 @@ static const mm128_t *mm_align_seq(
 	const uint8_t *lim = (const uint8_t*)0x800000000000;
 	gaba_section_t qf, qr, mg;
 	if (l_seq == 0) return 0;
-	// qid = opt->flag&MM_AVA? qid : 0xffffffff;
+
 	memset(tail, 0, 96);
 	qf.id = 0; qf.len = l_seq; qf.base = (const uint8_t*)seq;
 	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev((const uint8_t*)seq+l_seq-1, lim);
