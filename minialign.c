@@ -1195,12 +1195,12 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			if (fp->keep_qual) {
 				do {
 					const uint8_t *b = q; _readline(p, t, q, lv, _id); acc += q - b;
-					if (p >= t) goto _refill;
+					if (p >= t) { fp->acc = acc; goto _refill; }
 				} while (acc < lim);
 			} else {
 				do {
 					acc += _skipline(p, t);
-					if (p >= t) goto _refill;
+					if (p >= t) { fp->acc = acc; goto _refill; }
 				} while (acc < lim);
 			}
 			fp->state = 8;
@@ -3357,7 +3357,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 {
 	while (optind < argc) {
 		int ch;
-		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:Ma:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
+		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
 			kv_push(void*, *v, argv[optind]); optind++; continue;
 		}
 
@@ -3438,8 +3438,14 @@ int main(int argc, char *argv[])
 	}
 
 	set_info(0, "[main] open index file");
-	if (fnr) fpr = fopen(fnr, "rb");
-	if (fnw) fpw = fopen(fnw, "wb");
+	if (fnr && (fpr = fopen(fnr, "rb")) == NULL) {
+		fprintf(stderr, "[E::%s] failed to open index file `%s'. Please check file path and it exists.\n", __func__, fnr);
+		goto _final;
+	}
+	if (fnw && (fpw = fopen(fnw, "wb")) == NULL) {
+		fprintf(stderr, "[E::%s] failed to open index file `%s' in write mode. Please check file path and its permission.\n", __func__, fnw);
+		goto _final;
+	}
 	for (uint64_t i = 0; i < (fpr? 0x7fffffff : (((opt->flag&MM_AVA) || fpw)? v.n : 1)); ++i) {
 		uint32_t qid = opt->base_qid;
 		mm_idx_t *mi = 0;
