@@ -1197,12 +1197,12 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			if (fp->keep_qual) {
 				do {
 					const uint8_t *b = q; _readline(p, t, q, lv, _id); acc += q - b;
-					if (p >= t) goto _refill;
+					if (p >= t) { fp->acc = acc; goto _refill; }
 				} while (acc < lim);
 			} else {
 				do {
 					acc += _skipline(p, t);
-					if (p >= t) goto _refill;
+					if (p >= t) { fp->acc = acc; goto _refill; }
 				} while (acc < lim);
 			}
 			fp->state = 8;
