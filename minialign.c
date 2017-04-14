@@ -1014,12 +1014,12 @@ static uint32_t bseq_close(bseq_file_t *fp)
 	return base_rid;
 }
 
-static void bseq_set_id(bseq_t *s, uint32_t base_rid, uint32_t offset)
+static void bseq_set_id(bseq_t *s, uint32_t base_rid, void *ptr_ofs, uint32_t rid_ofs)
 {
 	if (base_rid == 0xffffffff) {
-		s->rid = atoi(s->name);
+		s->rid = atoi(ptr_ofs + (uint64_t)s->name);
 	} else {
-		s->rid = base_rid + offset;		// traditional incremental id
+		s->rid = base_rid + rid_ofs;		// traditional incremental id
 	}
 	return;
 }
@@ -1087,7 +1087,7 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 	if (fp->l_tags && l_tag) mem->n += bseq_save_tags(fp->l_tags, fp->tags, l_tag, stag, mem->a + mem->n);
 	mem->a[mem->n++] = '\0';
 
-	bseq_set_id(s, fp->base_rid, seq->n - 1);
+	bseq_set_id(s, fp->base_rid, mem->a, seq->n - 1);
 	return 0;
 }
 
@@ -1209,7 +1209,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			_strip(p, t, lv);
 		_qual_tail:
 			_term(q, mem->a, s->qual);
-			bseq_set_id(s, fp->base_rid, seq->n - 1);
+			bseq_set_id(s, fp->base_rid, mem->a, seq->n - 1);
 			break;
 		default:			// invalid state
 			return 2;		// broken
