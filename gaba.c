@@ -1,4 +1,4 @@
-
+#define DEBUG
 /**
  * @file gaba.c
  *
@@ -2255,7 +2255,7 @@ void trace_load_section_b(
 	union gaba_mask_pair_u const *ptr = &blk->mask[p & (BLK - 1)]; \
 	_print_v2i32(idx); \
 	debug("p(%lld), q(%lld), mask_h(%x), mask_v(%x), path_array(%llx)", \
-		p, q, ptr->mask.h.all, ptr->mask.v.all, path_array);
+		p, q, ptr->pair.h.all, ptr->pair.v.all, path_array);
 
 #define _trace_forward_load_context(t) \
 	uint32_t *path = (t)->w.l.path.phead; \
@@ -2596,7 +2596,7 @@ void trace_forward_body(
 			} \
 			_trace_inc_ge(); \
 			debug("go %s (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
-				#_label, #_type, ((uint64_t)dir.dynamic.array), ptr->mask.h.all, ptr->mask.v.all, p, q, ptr, path_array); \
+				#_label, #_type, ((uint64_t)dir.dynamic.array), ptr->pair.h.all, ptr->pair.v.all, p, q, ptr, path_array); \
 			_trace_##_type##_##_label##_update_index(); \
 			_trace_forward_##_label##_update_path_q(); \
 			_trace_forward_##_type##_load(t, _trace_forward_##_next##_##_label##_head); \
@@ -2614,7 +2614,7 @@ void trace_forward_body(
 				goto _trace_forward_index_break; \
 			} \
 			debug("go d (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
-				#_type, ((uint64_t)dir.dynamic.array), ptr->mask.h.all, ptr->mask.v.all, p, q, ptr, path_array); \
+				#_type, ((uint64_t)dir.dynamic.array), ptr->pair.h.all, ptr->pair.v.all, p, q, ptr, path_array); \
 			_trace_##_type##_h_update_index(); \
 			_trace_forward_h_update_path_q(); \
 			_trace_forward_##_type##_load(t, _trace_forward_##_next##_d_mid); \
@@ -2695,7 +2695,7 @@ void trace_reverse_body(
 			} \
 			_trace_inc_ge(); \
 			debug("go %s (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
-				#_label, #_type, ((uint64_t)dir.dynamic.array), ptr->mask.h.all, ptr->mask.v.all, p, q, ptr, path_array); \
+				#_label, #_type, ((uint64_t)dir.dynamic.array), ptr->pair.h.all, ptr->pair.v.all, p, q, ptr, path_array); \
 			_trace_##_type##_##_label##_update_index(); \
 			_trace_reverse_##_label##_update_path_q(); \
 			_trace_reverse_##_type##_load(t, _trace_reverse_##_next##_##_label##_head); \
@@ -2713,7 +2713,7 @@ void trace_reverse_body(
 				goto _trace_reverse_index_break; \
 			} \
 			debug("go d (%s), dir(%llx), mask_h(%x), mask_v(%x), p(%lld), q(%lld), ptr(%p), path_array(%llx)", \
-				#_type, ((uint64_t)dir.dynamic.array), ptr->mask.h.all, ptr->mask.v.all, p, q, ptr, path_array); \
+				#_type, ((uint64_t)dir.dynamic.array), ptr->pair.h.all, ptr->pair.v.all, p, q, ptr, path_array); \
 			_trace_##_type##_v_update_index(); \
 			_trace_reverse_v_update_path_q(); \
 			_trace_reverse_##_type##_load(t, _trace_reverse_##_next##_d_mid); \
