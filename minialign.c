@@ -939,6 +939,7 @@ _bam_read_header_fail:
 /* end of bamlite.c */
 
 /* bseq.c */
+#define BSEQ_MGN			( 64 )
 typedef struct {
 	gzFile fp;
 	bam_header_t *bh;
@@ -998,7 +999,9 @@ static bseq_file_t *bseq_open(const char *fn, uint32_t base_rid, uint64_t batch_
 	if (!fp->bh && !fp->delim) { free(fp); return 0; }
 
 	// init buffer
-	fp->tail = fp->p = (fp->base = malloc((fp->size = batch_size) + 128)) + batch_size;
+	fp->tail = fp->p = (fp->base = malloc((fp->size = batch_size) + 2*BSEQ_MGN)) + batch_size;
+	memset(fp->base, 0, BSEQ_MGN);
+	memset(fp->base + batch_size + BSEQ_MGN, 0, BSEQ_MGN);
 
 	fp->tags = calloc(((fp->l_tags = l_tags) + 0x1f) & ~0x1f, sizeof(uint16_t));
 	if (l_tags && tags) memcpy(fp->tags, tags, l_tags * sizeof(uint16_t));
@@ -1253,9 +1256,10 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *si
 			while ((ret = bseq_read_fasta(fp, &seq, &mem)) != 0) {
 				if (ret > 1) { seq.n = 0; fp->is_eof = 2; goto _tail; }
 				if (fp->is_eof) goto _tail;
-				fp->p = fp->base + 32;
+				fp->p = fp->base + BSEQ_MGN;
 				fp->tail = fp->p + gzread(fp->fp, fp->p, fp->size);
-				if (fp->tail < fp->base + 32 + fp->size) fp->is_eof = 1;
+				memset(fp->tail, 0, BSEQ_MGN);
+				if (fp->tail < fp->base + BSEQ_MGN + fp->size) fp->is_eof = 1;
 				if (mem.n + 2*fp->size > mem.m) mem.a = realloc(mem.a, mem.m *= 2);
 			}
 		}
