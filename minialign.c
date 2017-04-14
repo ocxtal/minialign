@@ -76,11 +76,11 @@ mm_info_t info[MAX_THREADS+1] __attribute__(( aligned(64) ));
 #define enable_info(t)		{ info[t].enabled = 1; }
 #define disable_info(t)		{ info[t].enabled = 0; }
 #define set_info(t, x)		{ info[t].msg = (const char *)(x); }
-static void oom_abort(const char *name)
+static void oom_abort(const char *name, uint64_t req)
 {
 	struct rusage r;
 	getrusage(RUSAGE_SELF, &r);
-	fprintf(stderr, "[E::%s] Out of memory. (maxrss: %ld MB)\n", name, r.ru_maxrss);
+	fprintf(stderr, "[E::%s] Out of memory. (required: %lu B, maxrss: %ld MB)\n", name, req, r.ru_maxrss);
 	for (uint64_t i = 0; i < MAX_THREADS+1; ++i) {
 		if (info[i].enabled)
 			fprintf(stderr, "[E::%s]  thread %" PRIu64 ": %s\n", name, i, info[i].msg? info[i].msg : "No information available.");
@@ -90,21 +90,21 @@ static void oom_abort(const char *name)
 
 #define mm_malloc(x) ({ \
 	void *_ptr = malloc((size_t)(x)); \
-	if (_ptr == NULL) { oom_abort(__func__); } \
+	if (_ptr == NULL) { oom_abort(__func__, (x)); } \
 	_ptr; \
 })
 #define malloc(x)		mm_malloc(x)
 
 #define mm_realloc(x, y) ({ \
 	void *_ptr = realloc((void *)(x), (size_t)(y)); \
-	if (_ptr == NULL) { oom_abort(__func__); } \
+	if (_ptr == NULL) { oom_abort(__func__, (y)); } \
 	_ptr; \
 })
 #define realloc(x, y)	mm_realloc(x, y)
 
 #define mm_calloc(x, y) ({ \
 	void *_ptr = calloc((size_t)(x), (size_t)(y)); \
-	if (_ptr == NULL) { oom_abort(__func__); } \
+	if (_ptr == NULL) { oom_abort(__func__, (y)); } \
 	_ptr; \
 })
 #define calloc(x, y)	mm_calloc(x, y)
@@ -664,7 +664,7 @@ static void *pg_worker(uint32_t tid, void *arg, void *item)
 	if (s == NULL || s->len == 0) return s;
 
 	char buf[128], *p = buf;
-	p += _pstr(p, "[pg_worker] bucket id: "); p += _pnum(uint32_t, p, s->id);
+	p += _pstr(p, "[pg_worker] bucket id: "); p += _pnum(uint32_t, p, s->id); *p = '\0';
 	set_info(tid, buf);
 	return (s->raw? pg_deflate : pg_inflate)(s, pg->block_size);
 }
@@ -1891,7 +1891,7 @@ static void *mm_idx_worker(uint32_t tid, void *arg, void *item)
 	mm_idx_step_t *s = (mm_idx_step_t*)item;
 
 	char buf[128], *p = buf;
-	p += _pstr(p, "[mm_idx_worker] bin id "); p += _pnum(uint32_t, p, s->seq[0].rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->seq[s->n_seq-1].rid);
+	p += _pstr(p, "[mm_idx_worker] bin id "); p += _pnum(uint32_t, p, s->seq[0].rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->seq[s->n_seq-1].rid); *p = '\0';
 	set_info(tid, buf);
 	for (uint64_t i = 0; i < s->n_seq; ++i)
 		mm_sketch(s->seq[i].seq, s->seq[i].l_seq, q->mi->w, q->mi->k, s->seq[i].rid, &s->a);
@@ -2351,7 +2351,7 @@ static const gaba_alignment_t *mm_extend(
 	if (a) kh_put(pos, key, (uintptr_t)a);
 	return a;
 _abort:;
-	oom_abort(__func__);
+	oom_abort(__func__, 0);
 	return 0;
 }
 
@@ -3018,7 +3018,7 @@ static void *mm_align_worker(uint32_t tid, void *arg, void *item)
 	mm_align_step_t *s = (mm_align_step_t*)item;
 
 	char buf[128], *p = buf;
-	p += _pstr(p, "[mm_align_worker] bin id "); p += _pnum(uint32_t, p, s->seq[0].rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->seq[s->n_seq-1].rid);
+	p += _pstr(p, "[mm_align_worker] bin id "); p += _pnum(uint32_t, p, s->seq[0].rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->seq[s->n_seq-1].rid); *p = '\0';
 	set_info(tid, buf);
 
 	for (uint64_t i = 0; i < s->n_seq; ++i) {
@@ -3481,7 +3481,10 @@ int main(int argc, char *argv[])
 		} else {
 			aln = mm_align_init(opt, mi);
 			for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < v.n; ++j) {
-				fp = bseq_open((const char*)v.a[j], qid, opt->batch_size, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n, opt->tags.a);
+				if (!(fp = bseq_open((const char*)v.a[j], qid, opt->batch_size, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n, opt->tags.a))) {
+					fprintf(stderr, "[E::%s] failed to open sequence file `%s'. Please check file path and format.\n", __func__, (const char*)v.a[j]);
+					goto _final;
+				}
 				mm_align_file(aln, fp);
 				qid = bseq_close(fp);
 			}
