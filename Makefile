@@ -1,6 +1,6 @@
 CC = gcc
 GIT = git
-VERSION = $(shell $(GIT) describe --tags || echo 0.5.0)
+VERSION = $(shell $(GIT) describe --tags || echo minialign-0.5.0)
 CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99
 LDFLAGS = -lm -lz -lpthread
 PREFIX = /usr/local
@@ -10,10 +10,10 @@ all: minialign
 minialign: minialign.c gaba_wrap.c gaba_linear.o gaba_affine.o
 	$(CC) -o $@ $(CFLAGS) -DMM_VERSION=\"$(VERSION)\" $^ $(LDFLAGS)
 
-gaba_linear.o: gaba.c gaba.h unittest.h sassert.h
+gaba_linear.o: gaba.c
 	$(CC) -c -o $@ $(CFLAGS) -DMODEL=LINEAR -DSUFFIX $<
 
-gaba_affine.o: gaba.c gaba.h unittest.h sassert.h
+gaba_affine.o: gaba.c
 	$(CC) -c -o $@ $(CFLAGS) -DMODEL=AFFINE -DSUFFIX $<
 
 clean:
