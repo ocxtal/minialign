@@ -1,4 +1,4 @@
-#define DEBUG
+
 /**
  * @file gaba.c
  *
