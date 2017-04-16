@@ -3235,7 +3235,7 @@ static int mm_mapopt_load_preset(mm_mapopt_t *o, const char *arg)
 	} else if (strcmp(arg, "ont") == 0) {
 		o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
 	} else if (strcmp(arg, "ava") == 0) {
-		o->k = 14; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.3;
+		o->k = 14; o->w = 5; o->m = 1; o->x = 2; o->gi = 0; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.05;
 		o->flag |= MM_AVA | MM_PAF;
 	} else {
 		if (o->verbose >= 1) fprintf(stderr, "[M::%s] Warning: Unknown preset tag: `%s'.\n", __func__, arg);
