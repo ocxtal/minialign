@@ -1152,7 +1152,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			if (p >= t) goto _refill;
 			s->l_name = _term(q, mem->a, s->name);
 			s->tag = _beg(q, mem->a);
-			if (!fp->keep_comment || (m & 0x01) == 0) goto _seq_head;
+			if ((m & 0x01) == 0) goto _seq_head;
 			fp->state = 3;
 		case 3:
 			_strip(p, t, sv);
@@ -1161,8 +1161,9 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			fp->state = 4;
 		case 4:									// parsing comment
 			_readline(p, t, q, lv, _id);
-			if (p >= t) goto _refill;			// refill needed, commen continues
+			if (p >= t) goto _refill;			// refill needed, comment continues
 			while (*--q == ' ') {} q++;			// strip spaces
+			if (!fp->keep_comment) q = mem->a + (uint64_t)s->tag;
 		_seq_head:
 			s->l_tag = _term(q, mem->a, s->tag);
 			s->seq = _beg(q, mem->a);
