@@ -1634,7 +1634,7 @@ typedef struct {
 	uint32_t sidx, eidx, nth, min, k, w, b, verbose;
 	uint64_t flag;
 	float min_ratio;
-	int32_t m, x, gi, ge, xdrop, qmin, llim, hlim, elim, blim, max_cnt;
+	int32_t m, x, gi, ge, xdrop, rmin, qmin, llim, hlim, elim, blim, max_cnt;
 	uint32_t n_frq;
 	float frq[16];
 	uint16_v tags;
@@ -1663,7 +1663,7 @@ static mm_mapopt_t *mm_mapopt_init(void)
 		/* -t */ .nth = 1,
 		/* -R */ .rg_line = NULL, .rg_id = NULL,
 
-		/* -S, -E, -H */.sidx = 0, .eidx = 3, .qmin = 0,
+		/* -S, -E, -L, -H */.sidx = 0, .eidx = 3, .rmin = 0, .qmin = 0,
 		.hlim = 7000, .llim = 7000, .blim = 0, .elim = 200,
 		.batch_size = 512 * 1024,
 		.outbuf_size = 512 * 1024,
@@ -3371,6 +3371,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 			case 'q': o->ge = atoi(optarg); break;
 			case 'F': o->llim = atoi(optarg); break;
 			case 'G': o->hlim = atoi(optarg); break;
+			case 'L': o->rmin = atoi(optarg); break;
 			case 'H': o->qmin = atoi(optarg); break;
 			case 'I': o->blim = atoi(optarg); break;
 			case 'J': o->elim = atoi(optarg); break;
@@ -3437,7 +3438,7 @@ int main(int argc, char *argv[])
 		if (fpr) {
 			mi = mm_idx_load(fpr, opt->nth);
 		} else {
-			fp = bseq_open((const char *)v.a[i], opt->batch_size, 0, 0, 0, NULL);
+			fp = bseq_open((const char *)v.a[i], opt->batch_size, 0, opt->rmin, 0, NULL);
 			mi = mm_idx_gen(opt, fp);
 			opt->base_rid += bseq_close(fp);
 		}
