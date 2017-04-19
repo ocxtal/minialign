@@ -2180,7 +2180,7 @@ static void mm_expand(uint32_t n, const v2u32_t *r, uint32_t qid, int32_t qs, ui
 	if (n == 0) return;
 	kv_reserve(mm128_t, *coef, coef->n + n);
 	for (uint64_t i = 0; i < n; ++i) {	// iterate over all the collected minimizers
-		if (org + qid - r[i].x[1] < thresh) continue;
+		if (org + r[i].x[1] - qid < thresh) continue;
 		int32_t rs = (int32_t)r[i].x[0], _qs = (rs>>31) ^ qs, _rs = (rs>>31) ^ rs;
 		mm128_t *p = &coef->a[coef->n++];
 		p->u32[0] = ofs + _rs - (_qs>>1); p->u32[1] = r[i].x[1]; p->u32[2] = _rs; p->u32[3] = _qs;
