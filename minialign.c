@@ -2866,8 +2866,8 @@ static void mm_print_mapped_blasr1(mm_align_t *b, const bseq_t *t, uint64_t n_re
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
-		_putsn(b, t->name, t->l_name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
-		_putsn(b, r->name, r->l_name); _sp(b); _put(b, '0'); _sp(b); _put(b, s->bid&0x01? '0' : '1'); _sp(b);
+		_putsn(b, t->name, t->l_name); _sp(b); _putsn(b, r->name, r->l_name); _sp(b);
+		_put(b, '0'); _sp(b); _put(b, s->bid&0x01? '0' : '1'); _sp(b);
 		_put(b, '-'); _putn(b, a->score); _sp(b);	// score in negative
 		_putfi(int32_t, b, mid, 4); _sp(b);
 		_putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
@@ -2891,8 +2891,7 @@ static void mm_print_mapped_blasr4(mm_align_t *b, const bseq_t *t, uint64_t n_re
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
-		_putsn(b, t->name, t->l_name); _put(b, '/'); _put(b, '0'); _put(b, '_'); _putn(b, t->l_seq); _sp(b);
-		_putsn(b, r->name, r->l_name); _sp(b);
+		_putsn(b, t->name, t->l_name); _sp(b); _putsn(b, r->name, r->l_name); _sp(b);
 		_put(b, '-'); _putn(b, a->score); _sp(b); _putfi(int32_t, b, mid, 4); _sp(b);	// add '-' before the number to negate score
 		_put(b, '0'); _sp(b); _putn(b, qs); _sp(b); _putn(b, qe); _sp(b); _putn(b, t->l_seq); _sp(b);
 		_put(b, s->bid&0x01? '0' : '1'); _sp(b); _putn(b, rs); _sp(b); _putn(b, re); _sp(b); _putn(b, r->l_seq); _sp(b);
