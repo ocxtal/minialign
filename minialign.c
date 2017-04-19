@@ -946,7 +946,7 @@ typedef struct {
 	uint8_t *p, *base, *tail;
 	uint64_t size, acc;	// equal to batch_size
 	uint16_t *tags;
-	uint32_t l_tags, n_seq;
+	uint32_t l_tags, n_seq, min_len;
 	uint8_t is_eof, delim, keep_qual, keep_comment, state;
 } bseq_file_t;
 
@@ -977,7 +977,7 @@ static uint64_t bseq_search_tag(uint32_t l_tags, const uint16_t *tags, uint16_t 
 	return 0;
 }
 
-static bseq_file_t *bseq_open(const char *fn, uint64_t batch_size, uint32_t keep_qual, uint32_t l_tags, const uint16_t *tags)
+static bseq_file_t *bseq_open(const char *fn, uint64_t batch_size, uint32_t keep_qual, uint32_t min_len, uint32_t l_tags, const uint16_t *tags)
 {
 	int c;
 	bseq_file_t *fp;
@@ -987,7 +987,8 @@ static bseq_file_t *bseq_open(const char *fn, uint64_t batch_size, uint32_t keep
 	f = fn && strcmp(fn, "-")? gzopen(fn, "r") : gzdopen(fileno(stdin), "r");
 	if (f == NULL) return NULL;
 	fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
-	fp->n_seq = 0; fp->keep_qual = keep_qual; fp->fp = f; fp->bh = NULL; fp->delim = 0;
+	fp->n_seq = 0; fp->keep_qual = keep_qual; fp->min_len = min_len;
+	fp->fp = f; fp->bh = NULL; fp->delim = 0;
 	for (uint64_t i = 0; i < 4; i++) {	// allow some invalid spaces at the head
 		if ((c = gzgetc(fp->fp)) == 'B') {	// test bam signature
 			gzungetc(c, fp->fp); fp->bh = bam_read_header(fp->fp); break;
@@ -1046,6 +1047,7 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 	bam_core_t *c;
 
 	if ((c = (bam_core_t*)fp->p)->flag&0x900) return 0;	// skip supp/secondary
+	if ((uint32_t)c->l_qseq < fp->min_len) return 0;	// skip short reads
 	sname = fp->p + sizeof(bam_core_t);
 	sseq = sname + c->l_qname + sizeof(uint32_t)*c->n_cigar;
 	squal = sseq + (c->l_qseq+1) / 2;
@@ -1205,6 +1207,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			return 2;		// broken
 	}
 	ret = 0; fp->state = 0;	// back to idle
+	if ((uint32_t)s->l_seq < fp->min_len) seq->n--, q = mem->a + (uint64_t)s->name;
 _refill:
 	fp->p = p; mem->n = q - mem->a;
 	return ret;
@@ -1282,7 +1285,7 @@ unittest( .name = "bseq.fasta" ) {
 	fclose(fp);
 
 	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
-	bseq_file_t *b = bseq_open(filename, 32, 1, 1, tags);
+	bseq_file_t *b = bseq_open(filename, 32, 1, 0, 1, tags);
 	assert(b != NULL);
 
 	uint32_t n_seq = 0;
@@ -1346,7 +1349,7 @@ unittest( .name = "bseq.fastq" ) {
 	fclose(fp);
 
 	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
-	bseq_file_t *b = bseq_open(filename, 32, 1, 1, tags);
+	bseq_file_t *b = bseq_open(filename, 32, 1, 0, 1, tags);
 	assert(b != NULL);
 
 	uint32_t n_seq = 0;
@@ -1410,7 +1413,7 @@ unittest( .name = "bseq.fastq.skip" ) {
 	fclose(fp);
 
 	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
-	bseq_file_t *b = bseq_open(filename, 32, 0, 1, tags);
+	bseq_file_t *b = bseq_open(filename, 32, 0, 0, 1, tags);
 	assert(b != NULL);
 
 	uint32_t n_seq = 0;
@@ -1631,7 +1634,7 @@ typedef struct {
 	uint32_t sidx, eidx, nth, min, k, w, b, verbose;
 	uint64_t flag;
 	float min_ratio;
-	int32_t m, x, gi, ge, xdrop, llim, hlim, elim, blim, max_cnt;
+	int32_t m, x, gi, ge, xdrop, qmin, llim, hlim, elim, blim, max_cnt;
 	uint32_t n_frq;
 	float frq[16];
 	uint16_v tags;
@@ -1660,7 +1663,7 @@ static mm_mapopt_t *mm_mapopt_init(void)
 		/* -t */ .nth = 1,
 		/* -R */ .rg_line = NULL, .rg_id = NULL,
 
-		/* -S, -E */.sidx = 0, .eidx = 3,
+		/* -S, -E, -H */.sidx = 0, .eidx = 3, .qmin = 0,
 		.hlim = 7000, .llim = 7000, .blim = 0, .elim = 200,
 		.batch_size = 512 * 1024,
 		.outbuf_size = 512 * 1024,
@@ -3368,7 +3371,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 			case 'q': o->ge = atoi(optarg); break;
 			case 'F': o->llim = atoi(optarg); break;
 			case 'G': o->hlim = atoi(optarg); break;
-			// case 'H': o->qlim = atoi(optarg); break;
+			case 'H': o->qmin = atoi(optarg); break;
 			case 'I': o->blim = atoi(optarg); break;
 			case 'J': o->elim = atoi(optarg); break;
 			case 'S': o->sidx = atoi(optarg); break;
@@ -3434,7 +3437,7 @@ int main(int argc, char *argv[])
 		if (fpr) {
 			mi = mm_idx_load(fpr, opt->nth);
 		} else {
-			fp = bseq_open((const char *)v.a[i], opt->batch_size, 0, 0, NULL);
+			fp = bseq_open((const char *)v.a[i], opt->batch_size, 0, 0, 0, NULL);
 			mi = mm_idx_gen(opt, fp);
 			opt->base_rid += bseq_close(fp);
 		}
@@ -3456,7 +3459,7 @@ int main(int argc, char *argv[])
 		} else {
 			aln = mm_align_init(opt, mi);
 			for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < v.n; ++j) {
-				if (!(fp = bseq_open((const char*)v.a[j], opt->batch_size, (opt->flag&MM_KEEP_QUAL)!=0, opt->tags.n, opt->tags.a))) {
+				if (!(fp = bseq_open((const char*)v.a[j], opt->batch_size, (opt->flag&MM_KEEP_QUAL)!=0, opt->qmin, opt->tags.n, opt->tags.a))) {
 					fprintf(stderr, "[E::%s] failed to open sequence file `%s'. Please check file path and format.\n", __func__, (const char*)v.a[j]);
 					goto _final;
 				}
