@@ -3365,8 +3365,9 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 			case 'b': o->x = atoi(optarg); break;
 			case 'p': o->gi = atoi(optarg); break;
 			case 'q': o->ge = atoi(optarg); break;
-			case 'L': o->llim = atoi(optarg); break;
-			case 'H': o->hlim = atoi(optarg); break;
+			case 'F': o->llim = atoi(optarg); break;
+			case 'G': o->hlim = atoi(optarg); break;
+			// case 'H': o->qlim = atoi(optarg); break;
 			case 'I': o->blim = atoi(optarg); break;
 			case 'J': o->elim = atoi(optarg); break;
 			case 'S': o->sidx = atoi(optarg); break;
