@@ -3198,10 +3198,12 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -w INT       minimizer window size [{-k}*2/3]\n");
 	fprintf(stderr, "    -d FILE      dump index to FILE []\n");
 	fprintf(stderr, "    -l FILE      load index from FILE [] (overriding -k and -w)\n");
-	if (opt->verbose >= 2)
+	if (opt->verbose >= 2) {
 		fprintf(stderr, "    -C INT[,INT] set base rid and qid [%u, %u]\n", opt->base_rid, opt->base_qid);
-	if (opt->verbose >= 2)
 		fprintf(stderr, "    -N           treat sequence name as id (seq must be sorted)\n");
+		fprintf(stderr, "    -L INT       sequence length filter: min. ref. length; 0 to disable [%u]\n", opt->rmin);
+		fprintf(stderr, "    -H INT       sequence length filter: min. query length; 0 to disable [%u]\n", opt->qmin);
+	}
 	fprintf(stderr, "  Mapping:\n");
 	if (opt->verbose >= 2)
 		fprintf(stderr, "    -f FLOAT,... occurrence thresholds [0.05,0.01,0.001]\n");
@@ -3213,10 +3215,10 @@ static void mm_print_help(const mm_mapopt_t *opt)
 		fprintf(stderr, "    -Y INT       X-drop threshold [%d]\n", opt->xdrop);
 	fprintf(stderr, "    -s INT       minimum alignment score [%d]\n", opt->min);
 	fprintf(stderr, "    -m INT       minimum alignment score ratio [%1.2f]\n", opt->min_ratio);
-	if (opt->verbose >= 2)
+	if (opt->verbose >= 2) {
 		fprintf(stderr, "    -M INT       maximum #alignments reported [%d]\n", opt->max_cnt);
-	if (opt->verbose >= 2)
 		fprintf(stderr, "    -A           calculate both topright and bottomright triangles (only effective with -X)\n");
+	}
 	fprintf(stderr, "  Output:\n");
 	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf,mhap,falcon} [%s]\n",
 		(const char *[]){ "sam", "blast6", "blasr1", "blasr4", "paf", "mhap", "falcon" }[opt->flag>>56]);
