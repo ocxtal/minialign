@@ -2823,7 +2823,7 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, 
 	return;
 }
 
-#define _putd(b, _id)		_put(b, (_id)&0x01? '+' : '-');
+#define _putd(b, _id)		_put(b, ((_id)&0x01)? '+' : '-');
 // qname rname idt len #x #gi qs qe rs re e-value bitscore
 static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
