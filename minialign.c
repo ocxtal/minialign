@@ -1654,7 +1654,7 @@ static mm_mapopt_t *mm_mapopt_init(void)
 	set_info(0, "[mm_mapopt_init] initialize mapopt object");
 	mm_mapopt_t *opt = calloc(1, sizeof(mm_mapopt_t));
 	*opt = (mm_mapopt_t){
-		/* -V */ .verbose = 2,
+		/* -V */ .verbose = 1,
 		/* -f, -k, -w, -b, -T */ .k = 15, .w = 16, .b = 14, .flag = 0,
 		/* -a, -b, -p, -q, -Y */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
 		/* -s, -m */ .min = 50, .min_ratio = 0.3,
@@ -3222,14 +3222,20 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "  Output:\n");
 	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf,mhap,falcon} [%s]\n",
 		(const char *[]){ "sam", "blast6", "blasr1", "blasr4", "paf", "mhap", "falcon" }[opt->flag>>56]);
-	fprintf(stderr, "    -P           omit secondary (repetitive) alignments\n");
+	if (opt->verbose >= 2)
+		fprintf(stderr, "    -P           omit secondary (repetitive) alignments\n");
 	fprintf(stderr, "    -Q           include quality string\n");
 	fprintf(stderr, "    -R STR       read group header line, like \"@RG\\tID:1\" [%s]\n", opt->rg_line? opt->rg_line : "");
 	fprintf(stderr, "    -T STR,...   list of optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []\n");
 	fprintf(stderr, "                   RG is also inferred from -R\n");
 	fprintf(stderr, "                   supp. records are omitted when SA tag is enabled\n");
-	fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
+	if (opt->verbose >= 2)
+		fprintf(stderr, "    -U STR,...   tags to be transferred from the input bam file []\n");
 	fprintf(stderr, "\n");
+	if (opt->verbose < 2) {
+		fprintf(stderr, "  Pass -hVV to show all the options.\n");
+		fprintf(stderr, "\n");
+	}
 	return;
 }
 
@@ -3341,6 +3347,7 @@ static uint64_t mm_mapopt_parse_format(mm_mapopt_t *o, const char *arg)
 
 static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **fnr, const char **fnw, ptr_v *v)
 {
+	int ret = 0;
 	while (optind < argc) {
 		int ch;
 		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
@@ -3385,11 +3392,11 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 			case 'R': mm_mapopt_parse_rg(o, optarg); break;
 			case 'T': o->flag |= mm_mapopt_parse_tags(o, optarg, NULL); break;
 			case 'U': mm_mapopt_parse_tags(o, optarg, &o->tags); break;
-			case 'v': return 1;
-			case 'h': return 2;
+			case 'v': ret = 1; break;
+			case 'h': ret = 2; break;
 		}
 	}
-	return 0;
+	return ret;
 }
 
 int main(int argc, char *argv[])
