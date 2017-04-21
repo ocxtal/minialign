@@ -76,11 +76,11 @@ mm_info_t info[MAX_THREADS+1] __attribute__(( aligned(64) ));
 #define enable_info(t)		{ info[t].enabled = 1; }
 #define disable_info(t)		{ info[t].enabled = 0; }
 #define set_info(t, x)		{ info[t].msg = (const char *)(x); }
-static void oom_abort(const char *name, uint64_t req)
+static void oom_abort(const char *name, size_t req)
 {
 	struct rusage r;
 	getrusage(RUSAGE_SELF, &r);
-	fprintf(stderr, "[E::%s] Out of memory. (required: %lu B, maxrss: %ld MB)\n", name, req, r.ru_maxrss);
+	fprintf(stderr, "[E::%s] Out of memory. (required: %zu B, maxrss: %ld MB)\n", name, req, r.ru_maxrss);
 	for (uint64_t i = 0; i < MAX_THREADS+1; ++i) {
 		if (info[i].enabled)
 			fprintf(stderr, "[E::%s]  thread %" PRIu64 ": %s\n", name, i, info[i].msg? info[i].msg : "No information available.");
@@ -2006,6 +2006,7 @@ static mm_idx_t *mm_idx_gen(const mm_mapopt_t *opt, bseq_file_t *fp)
 	return pl.mi;
 }
 
+#if 0
 static void mm_idx_cmp(const mm_mapopt_t *opt, const mm_idx_t *m1, const mm_idx_t *m2)
 {
 	for (uint64_t i = 0; i < 1ULL<<opt->b; ++i) {
@@ -2039,6 +2040,7 @@ static void mm_idx_cmp(const mm_mapopt_t *opt, const mm_idx_t *m1, const mm_idx_
 		}
 	}
 }
+#endif
 
 /*************
  * index I/O *
