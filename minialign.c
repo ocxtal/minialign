@@ -3159,11 +3159,16 @@ static void posixly_correct()
 #endif
 }
 
-static void mm_print_version(void)
+static const char *mm_get_version(void)
 {
 	const char *prefix = "minialign-";
 	uint64_t spos = strncmp(MM_VERSION, prefix, MIN2(strlen(MM_VERSION), strlen(prefix)))? 0 : strlen(prefix);
-	puts(&MM_VERSION[spos]);
+	return &MM_VERSION[spos];
+}
+
+static void mm_print_version(void)
+{
+	puts(mm_get_version());
 	return;
 }
 
@@ -3193,7 +3198,7 @@ static void mm_print_help(const mm_mapopt_t *opt)
 	fprintf(stderr, "    -x STR       load preset params {pacbio,ont,ava} [ont]\n");
 	fprintf(stderr, "    -t INT       number of threads [%d]\n", opt->nth);
 	fprintf(stderr, "    -X           switch to all-versus-all alignment mode\n");
-	fprintf(stderr, "    -v           show version number [%s]\n", MM_VERSION);
+	fprintf(stderr, "    -v           show version number [%s]\n", mm_get_version());
 	fprintf(stderr, "  Indexing:\n");
 	// fprintf(stderr, "    -c STR,...   treat specified sequences as circular []\n");
 	fprintf(stderr, "    -k INT       k-mer size [%d]\n", opt->k);

@@ -5,7 +5,8 @@ Minialign is a little bit fast and moderately accurate nucleotide sequence align
 
 ## Announcements
 
-* Latest: 0.5.0; stable: 0.4.4
+* Latest: 0.5.1; stable: 0.4.4
+* **2016/4/21: Version 0.5.1:** Support falcon\_sense input fomat (`-Ofalcon`). Some utility options for all-versus-all alignment. Fix a bug in fasta parser.
 * **2016/4/3: Version 0.5.0 is released.** New features: SA (supplementary alignment) and MD (mismatch position) tags are enabled with `-TSA` and `-TMD` flags.
 * **Please do not use 0.4.5 and 0.4.6**, since they have bugs in multithreading.
 
@@ -197,6 +198,7 @@ $ minialign -X -l index.mai read1.fa read2.fa ... readN.fa > out.sam	# map read[
 
 ## Updates
 
+* 2016/4/21 (0.5.1) Add falcon\_sense input format (`-Ofalcon`), max #alignments (`-M`), sequence length filter (`-L`, `-H`), and name-as-id option (`-N`). Fix a bug in fasta/q parser (comment is leaked at the head of sequence).
 * 2016/4/3 (0.5.0) Add MD (mismatch position) and SA (supplementary alignment) tag options for SAM format. Use CRC32 instruction for 64-bit integer hash. Faster FASTA and FASTQ parsing and SAM formatting. Fix bugs in multithreading.
 * 2016/2/21 (0.4.6) Fix bugs in the indexing routines and the hashmap. Remove `samsplit`. Index file format is modified (now compressed by deflate).
 * 2016/2/9 (0.4.5) Add support for BLAST6 / BLASR1 / BLASR4 / PAF formats. Change the default output format to PAF in the all-versus-all mode. Add support for NH, IH, XS, and NM tags in the sam format. Replaced internal implementations (hashmap and queue) to eliminate overheads.
