@@ -1,6 +1,6 @@
 CC = gcc
 GIT = git
-VERSION = $(shell $(GIT) describe --tags || echo minialign-0.5.1)
+VERSION = $(shell $(GIT) describe --tags || echo minialign-0.5.2-unknown)
 CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99
 LDFLAGS = -lm -lz -lpthread
 PREFIX = /usr/local

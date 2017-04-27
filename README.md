@@ -5,8 +5,8 @@ Minialign is a little bit fast and moderately accurate nucleotide sequence align
 
 ## Announcements
 
-* Latest: 0.5.1; stable: 0.4.4
-* **2016/4/21: Version 0.5.1:** Support falcon\_sense input fomat (`-Ofalcon`). Some utility options for all-versus-all alignment. Fix a bug in fasta parser.
+* Latest: 0.5.2; stable: 0.4.4
+* **2016/4/27: Version 0.5.2:** Fix a bug in falcon\_sense fomat (`-Ofalcon`).
 * **2016/4/3: Version 0.5.0 is released.** New features: SA (supplementary alignment) and MD (mismatch position) tags are enabled with `-TSA` and `-TMD` flags.
 * **Please do not use 0.4.5 and 0.4.6**, since they have bugs in multithreading.
 
