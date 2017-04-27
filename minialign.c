@@ -2951,10 +2951,10 @@ static void mm_print_mapped_falcon(mm_align_t *b, const bseq_t *t, uint64_t n_re
 		const gaba_alignment_t *a = _aln(reg[j]);
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
-		uint32_t qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
+		uint32_t qs = r->l_seq-s->apos-s->alen, qe = r->l_seq-s->apos;
 		_putsn(b, r->name, r->l_name); _sp(b);
-		if (s->bid&0x01) { _putsnt(b, &t->seq[qs], qe-qs, "NACMGRSVTWYHKDBN"); }
-		else { _putsntr(b, &t->seq[t->l_seq-qe], qe-qs, "NTGKCYSBAWRDMHVN"); }
+		if (s->bid&0x01) { _putsnt(b, &r->seq[qs], qe-qs, "NACMGRSVTWYHKDBN"); }
+		else { _putsntr(b, &r->seq[r->l_seq-qe], qe-qs, "NTGKCYSBAWRDMHVN"); }
 		_cr(b);
 	}
 	_put(b, '+'); _sp(b); _put(b, '+'); _cr(b);
