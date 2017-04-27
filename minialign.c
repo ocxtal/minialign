@@ -2300,8 +2300,9 @@ static const gaba_alignment_t *mm_extend(
 		if (f == NULL) goto _abort;
 		uint32_t flag = GABA_STATUS_TERM;
 		do {
-			if (f->status & GABA_STATUS_UPDATE_A) flag |= GABA_STATUS_UPDATE_A, r = t;
-			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
+			if (f->status & GABA_STATUS_UPDATE_A) r = t;
+			if (f->status & GABA_STATUS_UPDATE_B) q = t;
+			flag |= f->status & (GABA_STATUS_UPDATE_A | GABA_STATUS_UPDATE_B);
 			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
 		} while (!(flag & f->status));
@@ -2316,8 +2317,9 @@ static const gaba_alignment_t *mm_extend(
 		if ((m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1)) == NULL) goto _abort;
 		flag = GABA_STATUS_TERM;
 		do {
-			if (f->status & GABA_STATUS_UPDATE_A) flag |= GABA_STATUS_UPDATE_A, r = t;
-			if (f->status & GABA_STATUS_UPDATE_B) flag |= GABA_STATUS_UPDATE_B, q = t;
+			if (f->status & GABA_STATUS_UPDATE_A) r = t;
+			if (f->status & GABA_STATUS_UPDATE_B) q = t;
+			flag |= f->status & (GABA_STATUS_UPDATE_A | GABA_STATUS_UPDATE_B);
 			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
 			m = (f->max > m->max)? f : m;
 		} while (!(flag & f->status));
