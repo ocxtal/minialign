@@ -1,7 +1,11 @@
 
 /* make sure posix apis are properly activated */
-#define _POSIX_C_SOURCE		200112L
-#define _DARWIN_C_SOURCE	_DARWIN_C_FULL
+#if defined(__linux__) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE		200112L
+#endif
+#if defined(__darwin__) && !defined(_DARWIN_C_FULL)
+#  define _DARWIN_C_SOURCE	_DARWIN_C_FULL
+#endif
 
 /* set non-zero value to ensure the order of output records */
 #define STRICT_STREAM_ORDERING		( 1 )

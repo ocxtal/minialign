@@ -23,12 +23,12 @@
 #endif
 
 /* for compatibility with -std=c99 (2016/4/26 by Hajime Suzuki) */
-#ifndef _POSIX_C_SOURCE
-#define _POSIX_C_SOURCE		200112L
+#if defined(__linux__) && !defined(_POSIX_C_SOURCE)
+#  define _POSIX_C_SOURCE		200112L
 #endif
 
-#ifndef _BSD_SOURCE
-#define _BSD_SOURCE
+#if defined(__darwin__) && !defined(_BSD_SOURCE)
+#  define _BSD_SOURCE
 #endif
 
 /* end */
