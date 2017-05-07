@@ -677,8 +677,8 @@ static pg_block_t *pg_read_block(pg_t *pg)
 {
 	pg_block_t *s = malloc(sizeof(pg_block_t) + pg->block_size);
 	if (fread(&s->len, sizeof(uint64_t), 1, pg->fp) != 1 || s->len == 0) { goto _fail; }
-	s->head = 0; s->id = pg->icnt++; s->raw = 0; s->flush = 0;
 	if (fread(s->buf, sizeof(uint8_t), s->len, pg->fp) != s->len) { goto _fail; }
+	s->head = 0; s->id = pg->icnt++; s->raw = 0; s->flush = 0;
 	return s;
 _fail:
 	free(s);
@@ -1854,9 +1854,9 @@ static void *mm_idx_source(uint32_t tid, void *arg)
 	uint64_t size;
 	void *base;
 
-	s->id = q->icnt++;
 	s->seq = bseq_read(q->fp, &s->n_seq, &base, &size);
 	if (s->seq == 0) { free(s), s = NULL; return NULL; }
+	s->id = q->icnt++;
 
 	// register fetched block
 	kv_push(void*, q->mi->base, base);
@@ -2991,10 +2991,10 @@ static void *mm_align_source(uint32_t tid, void *arg)
 
 	s->lmm = lmm_init(NULL, 512 * 1024);
 	if (s->lmm == NULL) return NULL;
-	s->id = b->icnt++;
 	s->seq = bseq_read(b->fp, &s->n_seq, &s->base, &s->size);
 	if (s->seq == 0) { lmm_clean(s->lmm), free(s), s = NULL; return NULL; }
 	if (b->base_qid == UINT32_MAX) b->base_qid = atoi(s->seq[0].name);
+	s->id = b->icnt++;
 	s->base_qid = b->base_qid; b->base_qid += s->n_seq;
 	return s;
 }
