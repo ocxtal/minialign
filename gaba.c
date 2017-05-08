@@ -2242,10 +2242,13 @@ void trace_load_section_b(
  * @brief load context onto registers
  */
 #define _trace_load_context(t) \
-	v2i32_t idx = _load_v2i32(&(t)->w.l.aidx), gc = _zero_v2i32(); \
-	v2i32_t const hterm = _seta_v2i32(-1, 0); \
-	v2i32_t const dterm = _seta_v2i32(0, 0); \
-	v2i32_t const vterm = _seta_v2i32(0, -1); \
+	register v2i32_t idx = _load_v2i32(&(t)->w.l.aidx), gc = _zero_v2i32(); \
+	static uint32_t const hc[2] __attribute__(( aligned(32) )) = { 0, -1 }; \
+	static uint32_t const dc[2] __attribute__(( aligned(32) )) = { 0, 0 }; \
+	static uint32_t const vc[2] __attribute__(( aligned(32) )) = { -1, 0 }; \
+	v2i32_t const hterm = _load_v2i32(hc); \
+	v2i32_t const dterm = _load_v2i32(dc); \
+	v2i32_t const vterm = _load_v2i32(vc); \
 	_print_v2i32(hterm); \
 	_print_v2i32(dterm); \
 	_print_v2i32(vterm); \
@@ -2289,16 +2292,19 @@ void trace_load_section_b(
 	(t)->w.l.psum -= (t)->w.l.p; \
 	/* load section lengths */ \
 	struct gaba_joint_tail_s const *tail = (t)->w.l.tail; \
-	v2i32_t len = _load_v2i32(&tail->alen); \
+	register v2i32_t len = _load_v2i32(&tail->alen); \
 	/* reload tail */ \
 	tail = (t)->w.l.tail = tail->tail; \
 	blk = _last_block(tail) + 1; \
 	p = ((t)->w.l.p = tail->p) - 1; \
 	debug("updated psum(%lld), w.l.p(%d), p(%lld)", (t)->w.l.psum, (t)->w.l.p, p); \
 	/* adjust sum lengths */ \
-	v2i32_t const mask = _seta_v2i32(GABA_STATUS_UPDATE_B, GABA_STATUS_UPDATE_A); \
-	v2i32_t stat = _set_v2i32(tail->stat); \
-	v2i32_t sum = _load_v2i32(&(t)->w.l.asum); \
+	static uint32_t const mc[2] __attribute__(( aligned(32) )) = { \
+		GABA_STATUS_UPDATE_A, GABA_STATUS_UPDATE_B \
+	}; \
+	v2i32_t const mask = _load_v2i32(mc); \
+	register v2i32_t stat = _set_v2i32(tail->stat); \
+	register v2i32_t sum = _load_v2i32(&(t)->w.l.asum); \
 	sum = _sub_v2i32(sum, _and_v2i32(_eq_v2i32(_and_v2i32(stat, mask), mask), len)); \
 	_store_v2i32(&(t)->w.l.asum, sum); \
 	debug("adjusted sum(%u, %u), len(%u, %u), stat(%u)", _hi32(sum), _lo32(sum), _hi32(len), _lo32(len), tail->stat); \
