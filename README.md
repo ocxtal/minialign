@@ -127,7 +127,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 6. Heng Li (2014). Invertible integer hash functions. *GitHub Gist*, [https://gist.github.com/lh3/974ced188be2f90422cc](https://gist.github.com/lh3/974ced188be2f90422cc)
 7. Hajime Suzuki (2016). libgaba: Adaptive semi-global banded alignment on string graphs. *GitHub*, [https://github.com/ocxtal/libgaba](https://github.com/ocxtal/libgaba)
 8. Hajime Suzuki (2016). Assessment on adaptive-banded dynamic programming algorithm for the nucleotide semi-global alignment. *GitHub*, [https://github.com/ocxtal/adaptivebandbench](https://github.com/ocxtal/adaptivebandbench)
-9. Hajime Suzuki (2016). Benchmark on difference recurrence relation. *GitHub*, [https://github.com/ocxtal/diffbench](https://github.com/ocxtal/diffbench)
+9. Hajime Suzuki (2017). Acceleration Of Nucleotide Semi-Global Alignment With Adaptive Banded Dynamic Programming. *bioRxiv*, 130633.
 
 ## FAQs and recipes
 
