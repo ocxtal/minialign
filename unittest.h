@@ -680,7 +680,7 @@ struct ut_nm_result_s *ut_parse_nm_output(
 	utkvec_t(struct ut_nm_result_s) buf;
 
 	utkv_init(buf);
-	while(p != '\0') {
+	while(*p != '\0') {
 		struct ut_nm_result_s r;
 
 		/* check the sanity of the line */
