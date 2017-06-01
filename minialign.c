@@ -1128,6 +1128,7 @@ static uint64_t bseq_read_sam(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	return 0;
 }
 
+// returns 0 when correctly finished, 1 when buffer starved, >=2 when broken
 static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 {
 	// mem must have enough space (e.g. 2 * buffer)
@@ -1179,10 +1180,12 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 		case 5:									// parsing seq
 			do {
 				m = _readline(p, t, q, dv, _trans);
-				if (p >= t) { if (fp->is_eof) break; else goto _refill; }
+				if (p >= t) { m |= fp->is_eof; break; }
 				p++;							// skip '\n'
 			} while ((m & 0x01) == 0);
+			if ((m & 0x01) == 0) goto _refill;
 			s->l_seq = _term(q, mem->a, s->seq);
+			if (p >= t) break;
 			s->qual = _beg(q, mem->a);
 			if (fp->delim == '>') { p--; goto _qual_tail; }
 			fp->state = 6;
@@ -1216,7 +1219,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 		default:			// invalid state
 			return 2;		// broken
 	}
-	ret = 0; fp->state = 0;	// back to idle
+	ret = fp->is_eof; fp->state = 0;	// back to idle
 	if ((uint32_t)s->l_seq < fp->min_len) seq->n--, q = mem->a + (uint64_t)s->name;
 _refill:
 	fp->p = p; mem->n = q - mem->a;
@@ -1253,15 +1256,15 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *si
 	} else {
 		while (mem.n < fp->size + 64) {
 			uint64_t ret;
-			while ((ret = bseq_read_fasta(fp, &seq, &mem)) != 0) {
-				if (ret > 1) { seq.n = 0; fp->is_eof = 2; goto _tail; }
-				if (fp->is_eof) goto _tail;
+			while ((ret = bseq_read_fasta(fp, &seq, &mem)) == 1) {
+				if (fp->is_eof) goto _tail;							// correctly reached the end
 				fp->p = fp->base + BSEQ_MGN;
 				fp->tail = fp->p + gzread(fp->fp, fp->p, fp->size);
 				memset(fp->tail, 0, BSEQ_MGN);
 				if (fp->tail < fp->base + BSEQ_MGN + fp->size) fp->is_eof = 1;
 				if (mem.n + 2*fp->size > mem.m) mem.a = realloc(mem.a, mem.m *= 2);
 			}
+			if (ret > 1) { seq.n = 0; fp->is_eof = 2; goto _tail; }	// error occurred
 		}
 	_tail:;
 	}
