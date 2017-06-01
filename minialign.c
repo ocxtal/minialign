@@ -1103,7 +1103,7 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 		_len = MIN2(tzcnt(_m1 | _m2), _t - _p); \
 		_p += 32; _q += 32; \
 	} while (_len >= 32); \
-	_p += _len - 31; _q += _len - 32; _m1>>_len; \
+	_p += _len - 32; _q += _len - 32; _m1>>_len; \
 })
 #define _skipline(_p, _t) ({ \
 	uint64_t _m; \
@@ -1115,7 +1115,7 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 		_m = _match(_r, _lv); \
 		_len = MIN2(tzcnt(_m), _t - _p); _p += 32; \
 	} while (_len >= 32); \
-	_p += _len - 31; _p - _b - 1; \
+	_p += _len - 32; _p - _b; \
 })
 #define _beg(_q, _b)		( (uint8_t *)(_q - _b) )
 #define _term(_q, _b, _ofs) ({ \
@@ -1136,7 +1136,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	#define _trans(x)		( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
 	const v32i8_t dv = _set_v32i8(fp->delim == '@'? '+' : fp->delim);
 	const v32i8_t sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0xf);
-	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,8,8,2,0,1,0));		// treat U as T
+	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,0,8,2,0,1,0));
 
 	bseq_t *s = &seq->a[seq->n-1];
 	uint8_t *p = fp->p, *q = &mem->a[mem->n];
@@ -1156,6 +1156,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 		case 2:
 			m = _readline(p, t, q, sv, _id);
 			if (p >= t) goto _refill;
+			p++;								// skip '\n' or ' '
 			s->l_name = _term(q, mem->a, s->name);
 			s->tag = _beg(q, mem->a);
 			if ((m & 0x01) == 0) goto _seq_head;
@@ -1168,6 +1169,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 		case 4:									// parsing comment
 			_readline(p, t, q, lv, _id);
 			if (p >= t) goto _refill;			// refill needed, comment continues
+			p++;								// skip '\n'
 			while (*--q == ' ') {} q++;			// strip spaces
 			if (!fp->keep_comment) q = mem->a + (uint64_t)s->tag;
 		_seq_head:
@@ -1178,14 +1180,16 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			do {
 				m = _readline(p, t, q, dv, _trans);
 				if (p >= t) { if (fp->is_eof) break; else goto _refill; }
+				p++;							// skip '\n'
 			} while ((m & 0x01) == 0);
 			s->l_seq = _term(q, mem->a, s->seq);
 			s->qual = _beg(q, mem->a);
-			if (fp->delim == '>') { p -= p < t; goto _qual_tail; }
+			if (fp->delim == '>') { p--; goto _qual_tail; }
 			fp->state = 6;
 		case 6:
 			_skipline(p, t);
 			if (p >= t) goto _refill;
+			p++;
 			fp->state = 7; fp->acc = 0;
 		case 7:									// parsing qual
 			acc = fp->acc, lim = s->l_seq;
@@ -1193,11 +1197,13 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 				do {
 					const uint8_t *b = q; _readline(p, t, q, lv, _id); acc += q - b;
 					if (p >= t) { fp->acc = acc; goto _refill; }
+					p++;						// skip '\n'
 				} while (acc < lim);
 			} else {
 				do {
 					acc += _skipline(p, t);
 					if (p >= t) { fp->acc = acc; goto _refill; }
+					p++;						// skip '\n'
 				} while (acc < lim);
 			}
 			fp->state = 8;
@@ -1245,7 +1251,7 @@ static bseq_t *bseq_read(bseq_file_t *fp, uint32_t *n, void **base, uint64_t *si
 			bseq_read_bam(fp, size, &seq, &mem);
 		}
 	} else {
-		while (mem.n < fp->size) {
+		while (mem.n < fp->size + 64) {
 			uint64_t ret;
 			while ((ret = bseq_read_fasta(fp, &seq, &mem)) != 0) {
 				if (ret > 1) { seq.n = 0; fp->is_eof = 2; goto _tail; }
@@ -1289,7 +1295,7 @@ unittest( .name = "bseq.fasta" ) {
 	fclose(fp);
 
 	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
-	bseq_file_t *b = bseq_open(filename, 32, 1, 0, 1, tags);
+	bseq_file_t *b = bseq_open(filename, 64, 1, 0, 1, tags);
 	assert(b != NULL);
 
 	uint32_t n_seq = 0;
@@ -1353,7 +1359,7 @@ unittest( .name = "bseq.fastq" ) {
 	fclose(fp);
 
 	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
-	bseq_file_t *b = bseq_open(filename, 32, 1, 0, 1, tags);
+	bseq_file_t *b = bseq_open(filename, 256, 1, 0, 1, tags);
 	assert(b != NULL);
 
 	uint32_t n_seq = 0;
@@ -1399,7 +1405,7 @@ unittest( .name = "bseq.fastq" ) {
 	assert(strcmp((const char*)s[3].tag, "COZcomment comment") == 0, "tag(%s)", s[3].tag);
 
 	n_seq = bseq_close(b);
-	assert(n_seq == 5);
+	assert(n_seq == 4);
 	remove(filename);
 }
 
@@ -1417,7 +1423,7 @@ unittest( .name = "bseq.fastq.skip" ) {
 	fclose(fp);
 
 	const uint16_t tags[1] = { ((uint16_t)'C') | (((uint16_t)'O')<<8) };
-	bseq_file_t *b = bseq_open(filename, 32, 0, 0, 1, tags);
+	bseq_file_t *b = bseq_open(filename, 256, 0, 0, 1, tags);
 	assert(b != NULL);
 
 	uint32_t n_seq = 0;
@@ -1463,7 +1469,7 @@ unittest( .name = "bseq.fastq.skip" ) {
 	assert(strcmp((const char*)s[3].tag, "COZcomment comment") == 0, "tag(%s)", s[3].tag);
 
 	n_seq = bseq_close(b);
-	assert(n_seq == 5);
+	assert(n_seq == 4);
 	remove(filename);
 }
 /* end of bseq.c */
