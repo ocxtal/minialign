@@ -1136,7 +1136,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	#define _trans(x)		( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
 	const v32i8_t dv = _set_v32i8(fp->delim == '@'? '+' : fp->delim);
 	const v32i8_t sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0xf);
-	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,0,8,2,0,1,0));
+	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,8,8,2,0,1,0));		// treat U as T
 
 	bseq_t *s = &seq->a[seq->n-1];
 	uint8_t *p = fp->p, *q = &mem->a[mem->n];

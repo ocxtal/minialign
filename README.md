@@ -6,8 +6,8 @@ Minialign is a little bit fast and moderately accurate nucleotide sequence align
 ## Announcements
 
 * Latest: 0.5.2; stable: 0.4.4
-* **2016/4/27: Version 0.5.2:** Fix a bug in falcon\_sense fomat (`-Ofalcon`).
-* **2016/4/3: Version 0.5.0 is released.** New features: SA (supplementary alignment) and MD (mismatch position) tags are enabled with `-TSA` and `-TMD` flags.
+* **2017/4/27: Version 0.5.2:** Fix a bug in falcon\_sense fomat (`-Ofalcon`).
+* **2017/4/3: Version 0.5.0 is released.** New features: SA (supplementary alignment) and MD (mismatch position) tags are enabled with `-TSA` and `-TMD` flags.
 * **Please do not use 0.4.5 and 0.4.6**, since they have bugs in multithreading.
 
 ## Getting started
@@ -127,7 +127,7 @@ The second head seed of each chain is extended upward (3' on the reference side)
 6. Heng Li (2014). Invertible integer hash functions. *GitHub Gist*, [https://gist.github.com/lh3/974ced188be2f90422cc](https://gist.github.com/lh3/974ced188be2f90422cc)
 7. Hajime Suzuki (2016). libgaba: Adaptive semi-global banded alignment on string graphs. *GitHub*, [https://github.com/ocxtal/libgaba](https://github.com/ocxtal/libgaba)
 8. Hajime Suzuki (2016). Assessment on adaptive-banded dynamic programming algorithm for the nucleotide semi-global alignment. *GitHub*, [https://github.com/ocxtal/adaptivebandbench](https://github.com/ocxtal/adaptivebandbench)
-9. Hajime Suzuki (2016). Benchmark on difference recurrence relation. *GitHub*, [https://github.com/ocxtal/diffbench](https://github.com/ocxtal/diffbench)
+9. Hajime Suzuki (2017). Acceleration Of Nucleotide Semi-Global Alignment With Adaptive Banded Dynamic Programming. *bioRxiv*, 130633.
 
 ## FAQs and recipes
 
@@ -198,12 +198,12 @@ $ minialign -X -l index.mai read1.fa read2.fa ... readN.fa > out.sam	# map read[
 
 ## Updates
 
-* 2016/4/21 (0.5.1) Add falcon\_sense input format (`-Ofalcon`), max #alignments (`-M`), sequence length filter (`-L`, `-H`), and name-as-id option (`-N`). Fix a bug in fasta/q parser (comment is leaked at the head of sequence).
-* 2016/4/3 (0.5.0) Add MD (mismatch position) and SA (supplementary alignment) tag options for SAM format. Use CRC32 instruction for 64-bit integer hash. Faster FASTA and FASTQ parsing and SAM formatting. Fix bugs in multithreading.
-* 2016/2/21 (0.4.6) Fix bugs in the indexing routines and the hashmap. Remove `samsplit`. Index file format is modified (now compressed by deflate).
-* 2016/2/9 (0.4.5) Add support for BLAST6 / BLASR1 / BLASR4 / PAF formats. Change the default output format to PAF in the all-versus-all mode. Add support for NH, IH, XS, and NM tags in the sam format. Replaced internal implementations (hashmap and queue) to eliminate overheads.
-* 2016/1/25 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags), change -xpacbio scoring params to -a1 -b2 -p2 -q1 (performed better on recent PacBio reads).
-* 2016/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.
+* 2017/4/21 (0.5.1) Add falcon\_sense input format (`-Ofalcon`), max #alignments (`-M`), sequence length filter (`-L`, `-H`), and name-as-id option (`-N`). Fix a bug in fasta/q parser (comment is leaked at the head of sequence).
+* 2017/4/3 (0.5.0) Add MD (mismatch position) and SA (supplementary alignment) tag options for SAM format. Use CRC32 instruction for 64-bit integer hash. Faster FASTA and FASTQ parsing and SAM formatting. Fix bugs in multithreading.
+* 2017/2/21 (0.4.6) Fix bugs in the indexing routines and the hashmap. Remove `samsplit`. Index file format is modified (now compressed by deflate).
+* 2017/2/9 (0.4.5) Add support for BLAST6 / BLASR1 / BLASR4 / PAF formats. Change the default output format to PAF in the all-versus-all mode. Add support for NH, IH, XS, and NM tags in the sam format. Replaced internal implementations (hashmap and queue) to eliminate overheads.
+* 2017/1/25 (0.4.4) Add all-versus-all alignment mode (enabled by `-X -xava` flags), change -xpacbio scoring params to -a1 -b2 -p2 -q1 (performed better on recent PacBio reads).
+* 2017/1/14 (0.4.3) Add bam parser, quality string output, AS tag output, and RG line modification option. Default parameters are also modified to collect shorter  alignments.
 * 2016/12/6 (0.4.2) Add splitted alignment rescuing algorithm.
 * 2016/12/1 (0.4.1) Fix bug in sam output (broken CIGAR with both reverse-complemented and secondary flags).
 * 2016/11/27 (0.4.0) Added mapping quality output, fix bug in chaining, and change output threshold measure from length to score (note: `-s` flag is changed to minimum score, `-r` is interpreted as score ratio).
