@@ -1178,11 +1178,12 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			s->seq = _beg(q, mem->a);
 			fp->state = 5;
 		case 5:									// parsing seq
-			do {
+			while (1) {
 				m = _readline(p, t, q, dv, _trans);
 				if (p >= t) { m |= fp->is_eof; break; }
+				if (m & 0x01) break;
 				p++;							// skip '\n'
-			} while ((m & 0x01) == 0);
+			}
 			if ((m & 0x01) == 0) goto _refill;
 			s->l_seq = _term(q, mem->a, s->seq);
 			if (p >= t) break;
@@ -1197,17 +1198,19 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 		case 7:									// parsing qual
 			acc = fp->acc, lim = s->l_seq;
 			if (fp->keep_qual) {
-				do {
+				while (1) {
 					const uint8_t *b = q; _readline(p, t, q, lv, _id); acc += q - b;
 					if (p >= t) { fp->acc = acc; goto _refill; }
+					if (acc >= lim) break;
 					p++;						// skip '\n'
-				} while (acc < lim);
+				}
 			} else {
-				do {
+				while (1) {
 					acc += _skipline(p, t);
 					if (p >= t) { fp->acc = acc; goto _refill; }
+					if (acc >= lim) break;
 					p++;						// skip '\n'
-				} while (acc < lim);
+				}
 			}
 			fp->state = 8;
 		case 8:
@@ -3372,7 +3375,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 	int ret = 0;
 	while (optind < argc) {
 		int ch;
-		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:L:H:I:J:S:E:Y:O:PQR:T:U:vh")) < 0) {
+		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:L:H:I:J:S:E:D:Y:O:PQR:T:U:vh")) < 0) {
 			kv_push(void*, *v, argv[optind]); optind++; continue;
 		}
 		switch (ch) {
@@ -3407,6 +3410,7 @@ static int mm_mapopt_parse(mm_mapopt_t *o, int argc, char *argv[], const char **
 			case 'J': o->elim = atoi(optarg); break;
 			case 'S': o->sidx = atoi(optarg); break;
 			case 'E': o->eidx = atoi(optarg); break;
+			case 'D': o->batch_size = atoi(optarg); break;
 			case 'Y': o->xdrop = atoi(optarg); break;
 			case 'O': o->flag &= ~(0xffULL<<56), o->flag |= mm_mapopt_parse_format(o, optarg); break;
 			case 'P': o->flag |= MM_OMIT_REP; break;
