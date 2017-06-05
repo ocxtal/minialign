@@ -1188,7 +1188,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 			s->l_seq = _term(q, mem->a, s->seq);
 			if (p >= t) break;
 			s->qual = _beg(q, mem->a);
-			if (fp->delim == '>') { p--; goto _qual_tail; }
+			if (fp->delim == '>') goto _qual_tail;
 			fp->state = 6;
 		case 6:
 			_skipline(p, t);
