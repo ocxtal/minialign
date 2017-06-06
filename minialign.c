@@ -1639,12 +1639,13 @@ static void mm_sketch(const uint8_t *seq4, uint32_t _len, uint32_t w, uint32_t k
 #define MM_OMIT_REP		( 0x08ULL<<48 )		// omit secondary records
 #define MM_COMP 		( 0x10ULL<<48 )
 
-#define MM_BLAST6		( 0x01ULL<<56 )
-#define MM_BLASR1		( 0x02ULL<<56 )
-#define MM_BLASR4		( 0x03ULL<<56 )
-#define MM_PAF			( 0x04ULL<<56 )
-#define MM_MHAP 		( 0x05ULL<<56 )
-#define MM_FALCON		( 0x06ULL<<56 )
+#define MM_MAF			( 0x01ULL<<56 )
+#define MM_BLAST6		( 0x02ULL<<56 )
+#define MM_BLASR1		( 0x03ULL<<56 )
+#define MM_BLASR4		( 0x04ULL<<56 )
+#define MM_PAF			( 0x05ULL<<56 )
+#define MM_MHAP 		( 0x06ULL<<56 )
+#define MM_FALCON		( 0x07ULL<<56 )
 
 typedef struct {
 	uint32_t sidx, eidx, nth, min, k, w, b, verbose;
@@ -2606,6 +2607,7 @@ static const mm128_t *mm_align_seq(
 	_r = _loadu_v32i8(_q); _b = _shuf_v32i8(_conv, _swap_v32i8(_r)); \
 	_storeu_v32i8((_buf)->p, _b); (_buf)->p += (_l) & 0x1f; \
 }
+#define _putd(b, _id)		_put(b, ((_id)&0x01)? '+' : '-');
 
 #define MM_RG			( 0 )		// Z: read group
 #define MM_CO			( 1 )		// Z: comment
@@ -2847,7 +2849,97 @@ static void mm_print_mapped_sam(mm_align_t *b, const bseq_t *t, uint64_t n_reg, 
 	return;
 }
 
-#define _putd(b, _id)		_put(b, ((_id)&0x01)? '+' : '-');
+static void mm_print_mapped_maf_core(mm_align_t *b, const mm_idx_seq_t *r, const bseq_t *t, const gaba_alignment_t *a, uint16_t mapq, uint16_t flag)
+{
+	#define _load(_ptr, _pos) ({ \
+		uint64_t _rem = (_pos) & 0x3f; \
+		((_ptr)[(_pos)>>6]>>_rem) | (((_ptr)[((_pos)>>6) + 1]<<(63 - _rem))<<1); \
+	})
+	#define _putsnf32(_buf, _q, _len) { \
+		_flush(_buf, 32); \
+		v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8("NACMGRSVTWYHKDBN")); \
+		_storeu_v32i8((_buf)->p, _shuf_v32i8(_conv, _loadu_v32i8(_q))); (_buf)->p += (_len); \
+	}
+	#define _putsnr32(_buf, _q, _len) { \
+		_flush(_buf, 32); \
+		v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8("NTGKCYSBAWRDMHVN")); \
+		_storeu_v32i8((_buf)->p, _shuf_v32i8(_conv, _swap_v32i8(_loadu_v32i8(_q)))); (_buf)->p += (_len); \
+	}
+	#define _putgn32(_buf, _len) { \
+		_flush(_buf, 32); \
+		_storeu_v32i8((_buf)->p, _loadu_v32i8("--------------------------------")); (_buf)->p += (_len); \
+	}
+	const gaba_path_section_t *s = &a->sec[0];
+	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
+	uint64_t arr, cnt;
+	_put(b, 'a'); _cr(b);	// header
+
+	// ref
+	_put(b, 's'); _sp(b); _putsn(b, r->name, r->l_name); _sp(b); _putn(b, rs); _sp(b);
+	_putn(b, s->alen); _sp(b); _put(b, '+'); _sp(b); _putn(b, r->l_seq); _sp(b);
+
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->path->len;
+	const uint8_t *rp = &r->seq[rs];
+	while (pos > 0) {
+		arr = _load(p, pos); pos -= (cnt = lzcnt(~arr)); _putgn32(b, cnt);
+		arr = _load(p, pos); pos -= (cnt = lzcnt(arr) - 1); _putsnf32(b, rp, cnt); rp += cnt;
+		do {
+			arr = _load(p, pos); cnt = lzcnt(arr^0x5555555555555555)>>1; pos -= 2*cnt;
+			_putsnf32(b, rp, cnt); rp += cnt;
+		} while (cnt == 32);
+	}
+	_cr(b);
+
+	// query
+	_put(b, 's'); _sp(b); _putsn(b, t->name, t->l_name); _sp(b); _putn(b, qs); _sp(b);
+	_putn(b, s->blen); _sp(b); _putd(b, s->bid); _sp(b); _putn(b, t->l_seq); _sp(b);
+
+	p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
+	pos = a->path->len;
+	if (flag&0x10) {
+		const uint8_t *qp = &t->seq[(uint64_t)t->l_seq-qs-32];
+		while (pos > 0) {
+			arr = _load(p, pos); pos -= (cnt = lzcnt(~arr)); _putsnr32(b, qp, cnt); qp -= cnt;
+			arr = _load(p, pos); pos -= (cnt = lzcnt(arr) - 1); _putgn32(b, cnt);
+			do {
+				arr = _load(p, pos); cnt = lzcnt(arr^0x5555555555555555)>>1; pos -= 2*cnt;
+				_putsnr32(b, qp, cnt); qp -= cnt;
+			} while (cnt == 32);
+		}
+	} else {
+		const uint8_t *qp = &t->seq[qs];
+		while (pos > 0) {
+			arr = _load(p, pos); pos -= (cnt = lzcnt(~arr)); _putsnf32(b, qp, cnt); qp += cnt;
+			arr = _load(p, pos); pos -= (cnt = lzcnt(arr) - 1); _putgn32(b, cnt);
+			do {
+				arr = _load(p, pos); cnt = lzcnt(arr^0x5555555555555555)>>1; pos -= 2*cnt;
+				_putsnf32(b, qp, cnt); qp += cnt;
+			} while (cnt == 32);
+		}
+	}
+	_cr(b); _cr(b);
+	#undef _load
+	#undef _putsnf32
+	#undef _putsnr32
+	#undef _putgn32
+	return;
+}
+
+static void mm_print_mapped_maf(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
+{
+	const uint64_t f = b->opt->flag;
+	const mm_idx_t *mi = b->mi;
+	const uint32_t n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
+		uint16_t mapq = _mapq(reg[j]), flag = _flag(reg[j]);
+		const gaba_alignment_t *a = _aln(reg[j]);
+		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
+		mm_print_mapped_maf_core(b, r, t, a, mapq, flag);
+	}
+}
+
 // qname rname idt len #x #gi qs qe rs re e-value bitscore
 static void mm_print_mapped_blast6(mm_align_t *b, const bseq_t *t, uint64_t n_reg, const mm128_t *reg)
 {
@@ -3100,6 +3192,7 @@ static mm_align_t *mm_align_init(const mm_mapopt_t *opt, const mm_idx_t *mi)
 {
 	static const mm_printer_t printer[] = {
 		[0] = { .header = mm_print_header_sam, .unmapped = mm_print_unmapped_sam, .mapped = mm_print_mapped_sam },
+		[MM_MAF>>56] = { .mapped = mm_print_mapped_maf },
 		[MM_BLAST6>>56] = { .mapped = mm_print_mapped_blast6 },
 		[MM_BLASR1>>56] = { .mapped = mm_print_mapped_blasr1 },
 		[MM_BLASR4>>56] = { .mapped = mm_print_mapped_blasr4 },
@@ -3245,8 +3338,8 @@ static void mm_print_help(const mm_mapopt_t *opt)
 		fprintf(stderr, "    -A           calculate both topright and bottomright triangles (only effective with -X)\n");
 	}
 	fprintf(stderr, "  Output:\n");
-	fprintf(stderr, "    -O STR       output format {sam,blast6,blasr1,blasr4,paf,mhap,falcon} [%s]\n",
-		(const char *[]){ "sam", "blast6", "blasr1", "blasr4", "paf", "mhap", "falcon" }[opt->flag>>56]);
+	fprintf(stderr, "    -O STR       output format {sam,maf,blast6,blasr1,blasr4,paf,mhap,falcon} [%s]\n",
+		(const char *[]){ "sam", "maf", "blast6", "blasr1", "blasr4", "paf", "mhap", "falcon" }[opt->flag>>56]);
 	if (opt->verbose >= 2)
 		fprintf(stderr, "    -P           omit secondary (repetitive) alignments\n");
 	fprintf(stderr, "    -Q           include quality string\n");
@@ -3360,6 +3453,7 @@ static void mm_mapopt_parse_rg(mm_mapopt_t *o, const char *arg)
 static uint64_t mm_mapopt_parse_format(mm_mapopt_t *o, const char *arg)
 {
 	if (strcmp(arg, "sam") == 0) return 0;
+	else if (strcmp(arg, "maf") == 0) return MM_MAF;
 	else if (strcmp(arg, "blast6") == 0) return MM_BLAST6;
 	else if (strcmp(arg, "blasr1") == 0) return MM_BLASR1;
 	else if (strcmp(arg, "blasr4") == 0) return MM_BLASR4;
