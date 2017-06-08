@@ -2872,7 +2872,7 @@ static void mm_print_mapped_maf_core(mm_align_t *b, const mm_idx_seq_t *r, const
 	const gaba_path_section_t *s = &a->sec[0];
 	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
 	uint64_t arr, cnt;
-	_put(b, 'a'); _cr(b);	// header
+	_put(b, 'a'); _sp(b); _putsk(b, "score="); _putn(b, a->score); _cr(b);	// header
 
 	// ref
 	_put(b, 's'); _sp(b); _putsn(b, r->name, r->l_name); _sp(b); _putn(b, rs); _sp(b);
