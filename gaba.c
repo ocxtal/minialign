@@ -3391,7 +3391,9 @@ struct gaba_alignment_s *suffix(gaba_dp_trace)(
 	if(trace_forward_generate_alignment(this, &fw_leaf, &res.fw) < 0
 	|| trace_reverse_generate_alignment(this, &rv_leaf, &res.rv) < 0) {
 		lmm_t *lmm = (lmm_t *)params->lmm;
-		lmm_free(lmm, (void *)((uint8_t *)res.aln - this->head_margin));
+		if(lmm != NULL) {
+			lmm_free(lmm, (void *)((uint8_t *)res.aln - this->head_margin));
+		}
 		return(NULL);
 	}
 
