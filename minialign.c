@@ -2872,7 +2872,7 @@ static void mm_print_mapped_maf_core(mm_align_t *b, const mm_idx_seq_t *r, const
 	const gaba_path_section_t *s = &a->sec[0];
 	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
 	uint64_t arr, cnt;
-	_put(b, 'a'); _cr(b);	// header
+	_put(b, 'a'); _sp(b); _putsk(b, "score="); _putn(b, a->score); _cr(b);	// header
 
 	// ref
 	_put(b, 's'); _sp(b); _putsn(b, r->name, r->l_name); _sp(b); _putn(b, rs); _sp(b);
@@ -3025,7 +3025,12 @@ static void mm_print_mapped_paf(mm_align_t *b, const bseq_t *t, uint64_t n_reg, 
 		uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos, qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
 		_putsn(b, t->name, t->l_name); _t(b); _putn(b, t->l_seq); _t(b); _putn(b, qs); _t(b); _putn(b, qe); _t(b); _putd(b, s->bid); _t(b);
 		_putsn(b, r->name, r->l_name); _t(b); _putn(b, r->l_seq); _t(b); _putn(b, rs); _t(b); _putn(b, re); _t(b);
-		_putn(b, dcnt - a->xcnt); _t(b); _putn(b, dcnt + a->gecnt); _t(b); _putn(b, mapq>>MAPQ_DEC); _cr(b);
+		_putn(b, dcnt - a->xcnt); _t(b); _putn(b, dcnt + a->gecnt); _t(b); _putn(b, mapq>>MAPQ_DEC);
+
+		const uint64_t f = b->opt->flag;
+		if (f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->score); }
+		if (f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, a->xcnt + a->gecnt); }
+		_cr(b);
 	}
 	return;
 }
