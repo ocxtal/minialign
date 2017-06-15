@@ -40,7 +40,7 @@
 
 /* global consts */
 #ifndef MM_VERSION
-#  define MM_VERSION		"minialign-0.5.2-unknown"
+#  define MM_VERSION		"minialign-0.5.3-unknown"
 #endif
 
 /* max, min */
