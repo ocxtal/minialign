@@ -2576,10 +2576,10 @@ static const mm128_t *mm_align_seq(
 	const uint8_t *_q = (const uint8_t *)(_s) + (_l) - 32; \
 	for (; _q >= _s; _q -= 32) { \
 		_flush(_buf, 32); \
-		_storeu_v32i8((_buf)->p, _loadu_v32i8(_q)); (_buf)->p += 32; \
+		_storeu_v32i8((_buf)->p, _swap_v32i8(_loadu_v32i8(_q))); (_buf)->p += 32; \
 	} \
 	_flush(_buf, 32); \
-	_storeu_v32i8((_buf)->p, _loadu_v32i8(_q)); (_buf)->p += (_l) & 0x1f; \
+	_storeu_v32i8((_buf)->p, _swap_v32i8(_loadu_v32i8(_q))); (_buf)->p += (_l) & 0x1f; \
 }
 #define _putsnt(_buf, _s, _l, _table) { \
 	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
