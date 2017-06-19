@@ -1090,30 +1090,31 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 #define _match(_v1, _v2)	( ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all )
 #define _strip(_p, _t, _v) ({ \
 	v32i8_t _r = _loadu_v32i8(_p); \
-	volatile uint64_t _len = MIN2(tzcnt(~((uint64_t)_match(_r, _v))), _t - _p); \
+	ZCNT_RESULT uint64_t _l = MIN2(tzcnt(~((uint64_t)_match(_r, _v))), _t - _p); \
+	uint64_t _len = _l; \
 	_p += _len; _len; \
 })
 #define _readline(_p, _t, _q, _dv, _op) ({ \
 	uint64_t _m1, _m2; \
-	volatile uint64_t _len; \
+	uint64_t _len; \
 	const v32i8_t _lv = _set_v32i8('\n'); \
 	do { \
 		v32i8_t _r = _loadu_v32i8(_p), _s = _op(_r); _storeu_v32i8(_q, _s); \
 		_m1 = _match(_r, _dv); _m2 = _match(_r, _lv); \
-		_len = MIN2(tzcnt(_m1 | _m2), _t - _p); \
-		_p += 32; _q += 32; \
+		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m1 | _m2), _t - _p); \
+		_len = _l; _p += 32; _q += 32; \
 	} while (_len >= 32); \
 	_p += _len - 32; _q += _len - 32; _q -= _q[-1] == 0x0f; _m1>>_len; \
 })
 #define _skipline(_p, _t) ({ \
 	uint64_t _m; \
-	volatile uint64_t _len; \
+	uint64_t _len; \
 	const uint8_t *_b = _p; \
 	const v32i8_t _lv = _set_v32i8('\n'); \
 	do { \
 		v32i8_t _r = _loadu_v32i8(_p); \
 		_m = _match(_r, _lv); \
-		_len = MIN2(tzcnt(_m), _t - _p); _p += 32; \
+		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m), _t - _p); _len = _l; _p += 32; \
 	} while (_len >= 32); \
 	_p += _len - 32; _p - _b; \
 })
