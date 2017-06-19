@@ -40,7 +40,7 @@
 
 /* global consts */
 #ifndef MM_VERSION
-#  define MM_VERSION		"minialign-0.5.2-unknown"
+#  define MM_VERSION		"minialign-0.5.3-unknown"
 #endif
 
 /* max, min */
@@ -1718,7 +1718,7 @@ static int mm_mapopt_check(mm_mapopt_t *opt, int (*_fprintf)(FILE*,const char*,.
 			_fprintf(_fp, "[E::%s] Frequency thresholds must be inside [0.0,1.0] and descending.\n", __func__), ret = 1;
 	if (ret) return(ret);
 
-	if (opt->nth < 1 || opt->nth > MAX_THREADS) _fprintf(_fp, "[E::%s] Thread counts must be inside [1,%u]. For larger values, recompile is needed.\n", __func__, MAX_THREADS), ret = 1;
+	if (opt->nth < 1 || opt->nth >= MAX_THREADS) _fprintf(_fp, "[E::%s] Thread counts must be inside [1,%u]. For larger values, recompile is needed.\n", __func__, MAX_THREADS), ret = 1;
 	if (opt->batch_size < 64 * 1024) _fprintf(_fp, "[E::%s] Batch size must be > 64k.\n", __func__), ret = 1;
 	if (opt->outbuf_size < 64 * 1024) _fprintf(_fp, "[E::%s] Output buffer size must be > 64k.\n", __func__), ret = 1;
 	if (ret) return(ret);

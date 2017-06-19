@@ -1,6 +1,6 @@
 CC = gcc
 GIT = git
-VERSION = $(shell $(GIT) describe --tags || echo minialign-0.5.2-unknown)
+VERSION = $(shell $(GIT) describe --tags || grep "define MM_VERSION" minialign.c | grep -o '".*"' | sed 's/"//g')
 CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99
 LDFLAGS = -lm -lz -lpthread
 PREFIX = /usr/local
