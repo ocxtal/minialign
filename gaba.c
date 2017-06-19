@@ -3552,7 +3552,7 @@ uint64_t suffix(gaba_dp_print_cigar_forward)(
 			uint64_t m = _parse_count_match_forward(parse_load_uint64(p, lim - ridx));
 			uint64_t a = MIN2(m, ridx) & ~0x01;
 			ridx -= a;
-			volatile uint64_t c = a;
+			ZCNT_RESULT uint64_t c = a;
 			if(c < 64) { break; }
 
 			debug("bulk match, a(%llu)", a);
@@ -3605,7 +3605,7 @@ uint64_t suffix(gaba_dp_dump_cigar_forward)(
 			uint64_t a = MIN2(m, ridx) & ~0x01;
 			debug("a(%lld), ridx(%lld), ridx&~0x01(%lld)", a, ridx, ridx & ~0x01);
 			ridx -= a;
-			volatile uint64_t c = a;
+			ZCNT_RESULT uint64_t c = a;
 			if(c < 64) { break; }
 
 			debug("bulk match");

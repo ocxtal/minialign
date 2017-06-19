@@ -36,6 +36,18 @@
 #endif
 
 /**
+ * @macro ZCNT_RESULT
+ * @brief workaround for a bug in gcc (<= 5), all the results of tzcnt / lzcnt macros must be modified by this label
+ */
+#ifndef ZCNT_RESULT
+#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 600
+#    define ZCNT_RESULT		volatile
+#  else
+#    define ZCNT_RESULT
+#  endif
+#endif
+
+/**
  * @macro tzcnt
  * @brief trailing zero count (count #continuous zeros from LSb)
  */
