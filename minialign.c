@@ -1103,7 +1103,7 @@ static uint64_t bseq_read_bam(bseq_file_t *fp, uint64_t size, bseq_v *seq, uint8
 		_len = MIN2(tzcnt(_m1 | _m2), _t - _p); \
 		_p += 32; _q += 32; \
 	} while (_len >= 32); \
-	_p += _len - 32; _q += _len - 32; _m1>>_len; \
+	_p += _len - 32; _q += _len - 32; _q -= _q[-1] == 0x0f; _m1>>_len; \
 })
 #define _skipline(_p, _t) ({ \
 	uint64_t _m; \
@@ -1137,7 +1137,7 @@ static uint64_t bseq_read_fasta(bseq_file_t *fp, bseq_v *seq, uint8_v *mem)
 	#define _trans(x)		( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
 	const v32i8_t dv = _set_v32i8(fp->delim == '@'? '+' : fp->delim);
 	const v32i8_t sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0xf);
-	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,0,8,2,0,1,0));
+	const v32i8_t cv = _from_v16i8_v32i8(_seta_v16i8(0,0,15,0,0,0,0,0,4,0,0,8,2,0,1,0));
 
 	bseq_t *s = &seq->a[seq->n-1];
 	uint8_t *p = fp->p, *q = &mem->a[mem->n];
