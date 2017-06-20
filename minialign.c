@@ -1811,30 +1811,31 @@ uint64_t bseq_read_bam(
 #define _match(_v1, _v2)	( ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all )
 #define _strip(_p, _t, _v) ({ \
 	v32i8_t _r = _loadu_v32i8(_p); \
-	volatile uint64_t _len = MIN2(tzcnt(~((uint64_t)_match(_r, _v))), _t - _p); \
+	ZCNT_RESULT uint64_t _l = MIN2(tzcnt(~((uint64_t)_match(_r, _v))), _t - _p); \
+	uint64_t _len = _l; \
 	_p += _len; _len; \
 })
 #define _readline(_p, _t, _q, _dv, _op) ({ \
 	uint64_t _m1, _m2; \
-	volatile uint64_t _len; \
+	uint64_t _len; \
 	v32i8_t const _lv = _set_v32i8('\n'); \
 	do { \
 		v32i8_t _r = _loadu_v32i8(_p), _s = _op(_r); _storeu_v32i8(_q, _s); \
 		_m1 = _match(_r, _dv); _m2 = _match(_r, _lv); \
-		_len = MIN2(tzcnt(_m1 | _m2), _t - _p); \
-		_p += 32; _q += 32; \
+		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m1 | _m2), _t - _p); \
+		_len = _l; _p += 32; _q += 32; \
 	} while (_len >= 32); \
-	_p += _len - 32; _q += _len - 32; _m1>>_len; \
+	_p += _len - 32; _q += _len - 32; _q -= _q[-1] == 0x0f; _m1>>_len; \
 })
 #define _skipline(_p, _t) ({ \
 	uint64_t _m; \
-	volatile uint64_t _len; \
+	uint64_t _len; \
 	uint8_t const *_b = _p; \
 	v32i8_t const _lv = _set_v32i8('\n'); \
 	do { \
 		v32i8_t _r = _loadu_v32i8(_p); \
 		_m = _match(_r, _lv); \
-		_len = MIN2(tzcnt(_m), _t - _p); _p += 32; \
+		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m), _t - _p); _len = _l; _p += 32; \
 	} while (_len >= 32); \
 	_p += _len - 32; _p - _b; \
 })
@@ -1871,7 +1872,7 @@ uint64_t bseq_read_fasta(
 	/* keep them on registers */
 	v32i8_t const dv = _set_v32i8(fp->delim == '@'? '+' : fp->delim);
 	v32i8_t const sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0xf);
-	v32i8_t const cv = _from_v16i8_v32i8(_seta_v16i8(0,0,0,0,0,0,0,0,4,0,0,8,2,0,1,0));
+	v32i8_t const cv = _from_v16i8_v32i8(_seta_v16i8(0,0,15,0,0,0,0,0,4,0,8,8,2,0,1,0));
 
 	bseq_t *s = &seq->a[seq->n-1];
 	uint8_t *p = fp->p, *q = &mem->a[mem->n];
@@ -4020,10 +4021,10 @@ mm128_t const *mm_align_seq(
 	uint8_t const *_q = (uint8_t const *)(_s) + (_l) - 32; \
 	for (; _q >= _s; _q -= 32) { \
 		_flush(_buf, 32); \
-		_storeu_v32i8((_buf)->p, _loadu_v32i8(_q)); (_buf)->p += 32; \
+		_storeu_v32i8((_buf)->p, _swap_v32i8(_loadu_v32i8(_q))); (_buf)->p += 32; \
 	} \
 	_flush(_buf, 32); \
-	_storeu_v32i8((_buf)->p, _loadu_v32i8(_q)); (_buf)->p += (_l) & 0x1f; \
+	_storeu_v32i8((_buf)->p, _swap_v32i8(_loadu_v32i8(_q))); (_buf)->p += (_l) & 0x1f; \
 }
 
 /**
