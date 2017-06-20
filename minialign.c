@@ -1886,12 +1886,12 @@ uint64_t bseq_read_fasta(
 			fp->state = 1;						/* transition to spaces between delim and name */
 		case 1:
 			_strip(p, t, sv);
-			if (p >= t) { goto _refill; }
+			if (_unlikely(p >= t)) { goto _refill; }
 			s->name = (char*)_beg(q, mem->a);
 			fp->state = 2;
 		case 2:
 			m = _readline(p, t, q, sv, _id);
-			if (p >= t) { goto _refill; }
+			if (_unlikely(p >= t)) { goto _refill; }
 			p++;								/* skip '\n' or ' ' */
 			s->l_name = _term(q, mem->a, s->name);
 			s->tag = _beg(q, mem->a);
@@ -1899,14 +1899,14 @@ uint64_t bseq_read_fasta(
 			fp->state = 3;
 		case 3:
 			_strip(p, t, sv);
-			if (p >= t) { goto _refill; }
+			if (_unlikely(p >= t)) { goto _refill; }
 			*q++ = 'C'; *q++ = 'O'; *q++ = 'Z';
 			fp->state = 4;
 		case 4:									/* parsing comment */
 			_readline(p, t, q, lv, _id);
-			if (p >= t) { goto _refill; }		/* refill needed, comment continues */
+			if (_unlikely(p >= t)) { goto _refill; }	/* refill needed, comment continues */
 			p++;								/* skip '\n' */
-			while (*--q == ' ') {} q++;			/* strip spaces */
+			while (q[-1] == ' ') { q--; }		/* strip spaces */
 			if (!fp->keep_comment) q = mem->a + (uint64_t)s->tag;
 		_seq_head:
 			s->l_tag = _term(q, mem->a, s->tag);
@@ -1915,19 +1915,19 @@ uint64_t bseq_read_fasta(
 		case 5:									/* parsing seq */
 			while (1) {
 				m = _readline(p, t, q, dv, _trans);
-				if (p >= t) { m |= fp->is_eof; break; }
+				if (_unlikely(p >= t)) { m |= fp->is_eof; break; }
 				if (m & 0x01) { break; }
 				p++;							/* skip '\n' */
 			}
 			if ((m & 0x01) == 0) { goto _refill; }
 			s->l_seq = _term(q, mem->a, s->seq);
-			if (p >= t) { break; }
+			if (_unlikely(p >= t)) { break; }
 			s->qual = _beg(q, mem->a);
 			if (fp->delim == '>') { goto _qual_tail; }
 			fp->state = 6;
 		case 6:
 			_skipline(p, t);
-			if (p >= t) { goto _refill; }
+			if (_unlikely(p >= t)) { goto _refill; }
 			p++;
 			fp->state = 7; fp->acc = 0;
 		case 7:									/* parsing qual */
@@ -1935,21 +1935,21 @@ uint64_t bseq_read_fasta(
 			if (fp->keep_qual) {
 				while (1) {
 					uint8_t const *b = q; _readline(p, t, q, lv, _id); acc += q - b;
-					if (p >= t) { fp->acc = acc; goto _refill; }
+					if (_unlikely(p >= t)) { fp->acc = acc; goto _refill; }
 					if (acc >= lim) { break; }
 					p++;						/* skip '\n' */
 				}
 			} else {
 				while (1) {
 					acc += _skipline(p, t);
-					if (p >= t) { fp->acc = acc; goto _refill; }
+					if (_unlikely(p >= t)) { fp->acc = acc; goto _refill; }
 					if (acc >= lim) { break; }
 					p++;						/* skip '\n' */
 				}
 			}
 			fp->state = 8;
 		case 8:
-			if (p >= t) { goto _refill; }
+			if (_unlikely(p >= t)) { goto _refill; }
 			_strip(p, t, lv);
 		_qual_tail:
 			_term(q, mem->a, s->qual);
