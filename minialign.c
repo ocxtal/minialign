@@ -5611,21 +5611,26 @@ int mm_mapopt_parse_base_ids(
  * @fn mm_mapopt_tag2flag
  */
 static _force_inline
-uint64_t mm_mapopt_tag2flag(uint16_t t)
+uint64_t mm_mapopt_tag2flag(
+	mm_mapopt_t *o,
+	uint16_t t)
 {
-	switch (t) {
-		case _encode("RG"): return(0x01ULL<<MM_RG);
-		case _encode("CO"): return(0x01ULL<<MM_CO);
-		case _encode("NH"): return(0x01ULL<<MM_NH);
-		case _encode("IH"): return(0x01ULL<<MM_IH);
-		case _encode("AS"): return(0x01ULL<<MM_AS);
-		case _encode("XS"): return(0x01ULL<<MM_XS);
-		case _encode("NM"): return(0x01ULL<<MM_NM);
-		case _encode("SA"): return(0x01ULL<<MM_SA);
-		case _encode("MD"): return(0x01ULL<<MM_MD);
-		default:;
-	}
+	#define _test(_str) ( _encode(_str) == t )
+
+	if (_test("RG")) { return(0x01ULL<<MM_RG); }
+	if (_test("CO")) { return(0x01ULL<<MM_CO); }
+	if (_test("NH")) { return(0x01ULL<<MM_NH); }
+	if (_test("IH")) { return(0x01ULL<<MM_IH); }
+	if (_test("AS")) { return(0x01ULL<<MM_AS); }
+	if (_test("XS")) { return(0x01ULL<<MM_XS); }
+	if (_test("NM")) { return(0x01ULL<<MM_NM); }
+	if (_test("SA")) { return(0x01ULL<<MM_SA); }
+	if (_test("MD")) { return(0x01ULL<<MM_MD); }
+
+	o->log(o, 'W', __func__, "Unknown tag: `%c%c'.", t & 0xff, t>>8);
 	return(0);
+
+	#undef _test
 }
 
 /**
@@ -5633,7 +5638,10 @@ uint64_t mm_mapopt_tag2flag(uint16_t t)
  * @brief parse sam tag identifier and convert to flags
  */
 static _force_inline
-uint64_t mm_mapopt_parse_tags(mm_mapopt_t *o, char const *p, uint16_v *buf)
+uint64_t mm_mapopt_parse_tags(
+	mm_mapopt_t *o,
+	char const *p,
+	uint16_v *buf)
 {
 
 	uint32_t flag = 0;
@@ -5658,7 +5666,7 @@ uint64_t mm_mapopt_parse_tags(mm_mapopt_t *o, char const *p, uint16_v *buf)
 		if (buf != NULL) { kv_push(uint16_t, *buf, t); }
 
 		/* set tag */
-		uint64_t f = mm_mapopt_tag2flag(t);
+		uint64_t f = mm_mapopt_tag2flag(o, t);
 		if (f == 0 && o->verbose >= 1) {
 			o->log(o, 'W', __func__, "Unknown tag: `%.*s'.", 2, p);
 		}
@@ -5677,7 +5685,9 @@ uint64_t mm_mapopt_parse_tags(mm_mapopt_t *o, char const *p, uint16_v *buf)
  * @brief parse read group string
  */
 static _force_inline
-void mm_mapopt_parse_rg(mm_mapopt_t *o, char const *arg)
+void mm_mapopt_parse_rg(
+	mm_mapopt_t *o,
+	char const *arg)
 {
 	/* cleanup old ones */
 	free(o->rg_line);	o->rg_line = NULL;
@@ -5725,7 +5735,9 @@ void mm_mapopt_parse_rg(mm_mapopt_t *o, char const *arg)
  * @brief convert format string to flag
  */
 static _force_inline
-uint64_t mm_mapopt_parse_format(mm_mapopt_t *o, char const *arg)
+uint64_t mm_mapopt_parse_format(
+	mm_mapopt_t *o,
+	char const *arg)
 {
 	if (strcmp(arg, "sam") == 0) { return(0); }
 	if (strcmp(arg, "maf") == 0) { return(MM_MAF); }
