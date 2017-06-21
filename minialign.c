@@ -5421,7 +5421,7 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 
 		/* threads */
 		.t = calloc(opt->nth, sizeof(mm_tbuf_t*)),
-		.pt = pt_init(b->opt->nth)
+		.pt = pt_init(opt->nth)
 	};
 
 
