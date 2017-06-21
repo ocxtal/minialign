@@ -57,6 +57,7 @@ int main() {
 
 #define kvec_t(type) struct { size_t n, m; type *a; }
 #define kv_init(v) ((v).n = (v).m = 0, (v).a = 0)
+#define kv_inits(type) ((kvec_t(type)){ .n = 0, .m = 0, .a = 0 })
 #define kv_destroy(v) free((v).a)
 #define kv_A(v, i) ((v).a[(i)])
 #define kv_pop(v) ((v).a[--(v).n])
@@ -126,6 +127,7 @@ int main() {
 
 /** heap queue : elements in v must be orderd in heap */
 #define kv_hq_init(v)		{ (v).n = (v).m = 1; (v).a = NULL; }
+#define kv_hq_inits(type)	((kvec_t(type)){ .n = 0, .m = 0, .a = NULL })
 #define kv_hq_destroy(v)	kv_destroy(v)
 #define kv_hq_clear(v)		( (v).n = 1 )
 
