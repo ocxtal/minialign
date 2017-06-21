@@ -127,7 +127,7 @@ int main() {
 
 /** heap queue : elements in v must be orderd in heap */
 #define kv_hq_init(v)		{ (v).n = (v).m = 1; (v).a = NULL; }
-#define kv_hq_inits(type)	((kvec_t(type)){ .n = 0, .m = 0, .a = NULL })
+#define kv_hq_inits(type)	((kvec_t(type)){ .n = 1, .m = 1, .a = NULL })
 #define kv_hq_destroy(v)	kv_destroy(v)
 #define kv_hq_clear(v)		( (v).n = 1 )
 

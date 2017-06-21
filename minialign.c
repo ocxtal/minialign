@@ -2501,7 +2501,7 @@ typedef struct mm_mapopt_s {
 	/* logger */
 	double inittime;
 	uint32_t verbose;
-	int (*log)(struct mm_mapopt_s *, char, char const *, char const *, ...);
+	int (*log)(struct mm_mapopt_s const *, char, char const *, char const *, ...);
 	void *fp;
 } mm_mapopt_t;
 
@@ -2509,40 +2509,41 @@ typedef struct mm_mapopt_s {
  * @type mm_fprintf_t
  * @brief log printer
  */
-typedef int (*mm_log_t)(mm_mapopt_t *opt, char level, char const *func, char const *fmt, ...);
+typedef int (*mm_log_t)(mm_mapopt_t const *opt, char level, char const *func, char const *fmt, ...);
 
 /**
  * @fn mm_log_printer
  * @brief 0, 1, 2,... for normal message, 8, 9, 10,... for message with timestamp, 16, 17, 18, ... for without header.
  */
 int mm_log_printer(
-	mm_mapopt_t *opt,		/* option object */
+	mm_mapopt_t const *opt,	/* option object */
 	char level,				/* 'E' and 'W' for error and warning, 0, 1,... for message */
 	char const *func,		/* __func__ must be passed */
 	char const *fmt,		/* format string */
 	...)
 {
-	if ((level & 0x07) < opt->verbose) {
+	if ((level & 0x07) > opt->verbose) {
 		return(0);
 	}
 
 	va_list l;
 	va_start(l, fmt);
 
+	FILE *fp = (FILE *)opt->fp;
 	int r = 0;
 	if (level >= ' ' || (level & 0x10) == 0) {
 		if (level >= ' ' || (level & 0x08) == 0) {
-			r += fprintf(opt->fp, "[%c::%s] ", level < ' '? 'M' : level, func);
+			r += fprintf(fp, "[%c::%s] ", level < ' '? 'M' : level, func);
 		} else {
-			r += fprintf(opt->fp, "[%c::%s::%.3f*%.2f] ",
+			r += fprintf(fp, "[%c::%s::%.3f*%.2f] ",
 				level < ' '? 'M' : level,					/* 'E' for error */
 				func,										/* function name */
 				realtime() - opt->inittime,					/* realtime */
 				cputime() / (realtime() - opt->inittime));	/* average cpu usage */
 		}
 	}
-	r += vfprintf(opt->fp, fmt, l);							/* body */
-	r += fprintf(opt->fp, "\n");
+	r += vfprintf(fp, fmt, l);								/* body */
+	r += fprintf(fp, "\n");
 	va_end(l);
 	return(r);
 }
@@ -2803,7 +2804,7 @@ static _force_inline
 uint32_t *mm_idx_cal_max_occ(
 	mm_idx_t const *mi,
 	uint64_t n_frq,
-	double *frq)
+	float const *frq)
 {
 
 	set_info(0, "[mm_idx_cal_max_occ] calculate occurrence thresholds");
@@ -3328,7 +3329,7 @@ struct mm_align_s {
 	uint8_t conv[40];				/* binary -> string conv table */
 	mm_idx_t const *mi;
 	mm_mapopt_t const *opt;
-	uint64_t *occ;
+	uint32_t *occ;
 	uint32_t n_occ;
 	uint32_t icnt, ocnt, base_qid;
 	bseq_file_t *fp;
@@ -3953,7 +3954,7 @@ mm128_t const *mm_align_seq(
 	mm_idx_t const *mi,
 	uint32_t const l_seq, uint8_t const *seq,
 	uint32_t const qid,
-	uint32_t const n_occ, uint64_t const *occ,
+	uint32_t const n_occ, uint32_t const *occ,
 	lmm_t *restrict lmm,
 	uint64_t *restrict n_reg)
 {
@@ -4171,6 +4172,23 @@ mm128_t const *mm_align_seq(
 }
 
 /**
+ * @macro _putsnt32, _putsntr32
+ * @brief dump short string with encoding conversion
+ */
+#define _putsnt32(_buf, _q, _len, _table) { \
+	_flush(_buf, 32); \
+	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
+	_storeu_v32i8((_buf)->p, _shuf_v32i8(_conv, _loadu_v32i8(_q))); \
+	(_buf)->p += (_len); \
+}
+#define _putsntr32(_buf, _q, _len, _table) { \
+	_flush(_buf, 32); \
+	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
+	_storeu_v32i8((_buf)->p, _shuf_v32i8(_conv, _swap_v32i8(_loadu_v32i8(_q)))); \
+	(_buf)->p += (_len); \
+}
+
+/**
  * @macro _putd
  * @brief print direction ('+' for forward, '-' for reverse)
  */
@@ -4206,7 +4224,7 @@ uint64_t mm_load_uint64(
 	uint64_t a = (ptr[pos>>6]>>rem) | ((ptr[(pos>>6) + 1]<<(63 - rem))<<1);
 	return(a);
 }
-#define _load(_ptr, _pos) ({ \
+#define _load_uint64(_ptr, _pos) ({ \
 	uint64_t _rem = (_pos) & 0x3f; \
 	((_ptr)[(_pos)>>6]>>_rem) | (((_ptr)[((_pos)>>6) + 1]<<(63 - _rem))<<1); \
 })
@@ -4413,19 +4431,19 @@ static void mm_print_sam_mapped_core(
 	_putsk(b, "\t*\t0\t0\t");								/* mate tags, unused */
 
 	/* print sequence */
-	if (flag&0x10) {
-		_putsntr(b, &t->seq[t->l_seq-qe], qe-qs, "NTGKCYSBAWRDMHVN");
-	} else {
+	if (s->bid & 0x01) {
 		_putsnt(b, &t->seq[qs], qe-qs, "NACMGRSVTWYHKDBN");
+	} else {
+		_putsntr(b, &t->seq[t->l_seq-qe], qe-qs, "NTGKCYSBAWRDMHVN");
 	}
 	_t(b);
 
 	/* print quality string if available */
 	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
-		if (flag&0x10) {
-			_putsnr(b, &t->qual[t->l_seq-qe], qe-qs);
-		} else {
+		if (s->bid & 0x01) {
 			_putsn(b, &t->qual[qs], qe-qs);
+		} else {
+			_putsnr(b, &t->qual[t->l_seq-qe], qe-qs);
 		}
 	} else {
 		_put(b, '*');
@@ -4481,8 +4499,7 @@ void mm_print_sam_md(
 	mm_align_t *b,
 	mm_idx_seq_t const *r,
 	bseq_t const *t,
-	gaba_alignment_t const *a,
-	uint16_t flag)
+	gaba_alignment_t const *a)
 {
 	/*
 	 * print MD tag
@@ -4492,20 +4509,15 @@ void mm_print_sam_md(
 	uint64_t const f = b->opt->flag;
 	if ((f & 0x01ULL<<MM_MD) == 0) { return; }				/* skip if disabled */
 
-
 	const gaba_path_section_t *s = &a->sec[0];
 	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
-
-	#define _load(_ptr, _pos) ({ \
-		uint64_t _rem = (_pos) & 0x3f; \
-		((_ptr)[(_pos)>>6]>>_rem) | (((_ptr)[((_pos)>>6) + 1]<<(63 - _rem))<<1); \
-	})
 
 	_puts(b, "\tMD:Z:");
 	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
 	int64_t pos = a->path->len;
 
-	uint64_t dir = (flag&0x10)? 1 : 0;
+	// uint64_t dir = (flag&0x10)? 1 : 0;
+	uint64_t dir = (s->bid & 0x01)? 0 : 1;
 	static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
 		0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
 		0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
@@ -4518,7 +4530,7 @@ void mm_print_sam_md(
 	uint8_t const *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[dir? (uint64_t)t->l_seq-qs-32 : qs];
 	while (pos > 0) {
 		/* suppose each indel block is shorter than 32 bases */
-		uint64_t arr = _load(p, pos);
+		uint64_t arr = _load_uint64(p, pos);
 		uint64_t cnt = lzcnt(~arr);						/* count #ins */
 		pos -= cnt;
 		qp += dir? -cnt : cnt;
@@ -4536,7 +4548,7 @@ void mm_print_sam_md(
 		uint64_t acnt = 32;
 		while (acnt == 32) {
 			/* count diagonal */
-			arr = _load(p, pos);
+			arr = _load_uint64(p, pos);
 			acnt = lzcnt(arr^0x5555555555555555)>>1;
 
 			/* load sequence to detect mismatch */
@@ -4569,7 +4581,6 @@ void mm_print_sam_md(
 	if (rp - rb) {
 		_putn(b, (int32_t)(rp-rb));
 	}
-	#undef _load
 	return;
 }
 
@@ -4625,6 +4636,7 @@ uint64_t mm_print_sam_primary_tags(
 	uint32_t n_uniq,				/* #unique */
 	mm128_t const *reg)				/* alignments, 1..n_uniq is printed in SA */
 {
+	mm_idx_t const *mi = b->mi;
 	uint64_t const f = b->opt->flag;
 	uint64_t ret = 0;
 
@@ -4680,7 +4692,7 @@ void mm_print_sam_mapped(
 		mm_print_sam_general_tags(b, a, n_reg, j);
 
 		/* mismatch position (MD) */
-		mm_print_sam_md(b, r, t, a, flag);
+		mm_print_sam_md(b, r, t, a);
 
 		/* primary-specific tags */
 		if ((flag & 0x900) == 0
@@ -4720,17 +4732,17 @@ void mm_print_maf_mapped_ref(
 		uint64_t arr, cnt;
 
 		/* insertion */
-		arr = _load(p, pos);
+		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(~arr));		/* count 1's (insertions) */
 		_putsn32(b, "--------------------------------", cnt);
 
 		/* deletion */
-		arr = _load(p, pos);
+		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(arr) - 1);	/* count 0's (deletions) */
 		_putsnt32(b, rp, cnt, "NACMGRSVTWYHKDBN");
 		rp += cnt;						/* advance pointer */
 		do {
-			arr = _load(p, pos);
+			arr = _load_uint64(p, pos);
 			cnt = lzcnt(arr^0x5555555555555555)>>1;		/* count diagonals */
 			pos -= 2*cnt;
 			_putsnt32(b, rp, cnt, "NACMGRSVTWYHKDBN");
@@ -4747,29 +4759,28 @@ void mm_print_maf_mapped_ref(
 static _force_inline
 void mm_print_maf_query_forward(
 	mm_align_t *b,
-	bseq_t const *t,
-	gaba_alignment_t const *a)
+	gaba_alignment_t const *a,
+	uint8_t const *qp)
 {
 	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
 	int64_t pos = a->path->len;
-	uint8_t const *qp = &t->seq[qs];
 	while (pos > 0) {
 		uint64_t arr, cnt;
 
 		/* insertions */
-		arr = _load(p, pos);
+		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(~arr));
 		_putsnt32(b, qp, cnt, "NACMGRSVTWYHKDBN");
 		qp += cnt;
 
 		/* deletions */
-		arr = _load(p, pos);
+		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(arr) - 1);
 		_putsn32(b, "--------------------------------", cnt);
 		
 		/* diagonals */
 		do {
-			arr = _load(p, pos);
+			arr = _load_uint64(p, pos);
 			cnt = lzcnt(arr^0x5555555555555555)>>1;
 			pos -= 2*cnt;
 			_putsnt32(b, qp, cnt, "NACMGRSVTWYHKDBN");
@@ -4785,29 +4796,28 @@ void mm_print_maf_query_forward(
 static _force_inline
 void mm_print_maf_query_reverse(
 	mm_align_t *b,
-	bseq_t const *t,
-	gaba_alignment_t const *a)
+	gaba_alignment_t const *a,
+	uint8_t const *qp)
 {
 	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
 	int64_t pos = a->path->len;
-	uint8_t const *qp = &t->seq[(uint64_t)t->l_seq-qs-32];
 	while (pos > 0) {
 		uint64_t arr, cnt;
 
 		/* insertions */
-		arr = _load(p, pos);
+		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(~arr));
 		_putsntr32(b, qp, cnt, "NTGKCYSBAWRDMHVN");
 		qp -= cnt;
 
 		/* deletions */
-		arr = _load(p, pos);
+		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(arr) - 1);
 		_putsn32(b, "--------------------------------", cnt);
 		
 		/* diagonals */
 		do {
-			arr = _load(p, pos);
+			arr = _load_uint64(p, pos);
 			cnt = lzcnt(arr^0x5555555555555555)>>1;
 			pos -= 2*cnt;
 			_putsntr32(b, qp, cnt, "NTGKCYSBAWRDMHVN");
@@ -4828,7 +4838,7 @@ void mm_print_maf_mapped_query(
 	gaba_alignment_t const *a)
 {
 	const gaba_path_section_t *s = &a->sec[0];
-	uint32_t qs = t->l_seq-s->bpos-s->blen;
+	uint32_t const qs = t->l_seq-s->bpos-s->blen;
 
 	/* print name, pos, alignment length, sequence length */
 	_put(b, 's'); _sp(b);
@@ -4838,10 +4848,16 @@ void mm_print_maf_mapped_query(
 	_putd(b, s->bid); _sp(b);
 	_putn(b, t->l_seq); _sp(b);
 
-	if (flag & 0x10) {
-		mm_print_maf_query_reverse(b, t, a);
+	if (s->bid & 0x01) {
+		mm_print_maf_query_forward(
+			b, a,
+			&t->seq[qs]
+		);
 	} else {
-		mm_print_maf_query_forward(b, t, a);
+		mm_print_maf_query_reverse(
+			b, a,
+			&t->seq[(uint64_t)t->l_seq - qs - 32]
+		);
 	}
 	_cr(b);
 	return;
@@ -5167,17 +5183,6 @@ void mm_print_falcon_footer(
 #undef _sp
 #undef _aln
 
-typedef struct {
-	/* query sequences */
-	uint32_t id, base_qid, n_seq;
-	bseq_t const *seq;				/* const!!! */
-	void *base;						/* memory block pointer */
-	uint64_t size;					/* memory block size */
-	/* results */
-	lmm_t *lmm;						/* alignment result container */
-	mm128_v reg;					/* alignment result array */
-} mm_align_step_t;
-
 /**
  * @fn mm_align_source
  * @brief source of the alignment pipeline
@@ -5396,7 +5401,7 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 		.opt = opt,
 
 		/* occurrence table */
-		.n_occ = opt->n_frq
+		.n_occ = opt->n_frq,
 		.occ = mm_idx_cal_max_occ(mi, opt->n_frq, opt->frq),
 
 		/* pipeline contexts */
@@ -5411,7 +5416,7 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 			.xdrop = opt->xdrop,
 			.filter_thresh = 7		/* note: can be disabled? */
 		})),
-		.hq = kv_hq_inits(mm128_t),
+		.hq = { .n = 1, .m = 1, .a = NULL },
 		.printer = printer[opt->flag>>56],
 
 		/* threads */
@@ -5524,7 +5529,7 @@ char const *mm_get_version(void)
 static
 void mm_print_version(mm_mapopt_t const *opt)
 {
-	opt->log(opt->fp, "%s\n", mm_get_version());
+	opt->log(opt->fp, 23, __func__, "%s\n", mm_get_version());
 	return;
 }
 
@@ -5543,7 +5548,7 @@ int mm_mapopt_load_preset(mm_mapopt_t *o, char const *arg)
 		o->k = 14; o->w = 5; o->m = 1; o->x = 2; o->gi = 0; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.05;
 		o->flag |= MM_AVA | MM_PAF;
 	} else {
-		opt->log(opt, 'W', __func__, "Warning: Unknown preset tag: `%s'.", arg);
+		o->log(o, 'W', __func__, "Warning: Unknown preset tag: `%s'.", arg);
 		return 1;
 	}
 	return 0;
@@ -5567,7 +5572,7 @@ int mm_mapopt_parse_threshs(
 	}
 	for (uint64_t i = 0; i < o->n_frq; ++i) {
 		if (o->frq[i] < 0.0 || o->frq[i] > 1.0) {
-			opt->log(opt, 'W', __func__, "Warning: Invalid threshold `%f' parsed from `%s'.", o->frq[i], arg);
+			o->log(o, 'W', __func__, "Warning: Invalid threshold `%f' parsed from `%s'.", o->frq[i], arg);
 		}
 	}
 	return 0;
@@ -5618,7 +5623,7 @@ uint64_t mm_mapopt_tag2flag(uint16_t t)
 		case _encode("NM"): return(0x01ULL<<MM_NM);
 		case _encode("SA"): return(0x01ULL<<MM_SA);
 		case _encode("MD"): return(0x01ULL<<MM_MD);
-		default:
+		default:;
 	}
 	return(0);
 }
@@ -5640,7 +5645,7 @@ uint64_t mm_mapopt_parse_tags(mm_mapopt_t *o, char const *p, uint16_v *buf)
 
 		/* skip if the length is not 2 */
 		if (q - p != 2) {
-			opt->log(opt, 'W', __func__,
+			o->log(o, 'W', __func__,
 				"Unparsable tag: `%.*s', must be two-character string like `RG'.",
 				q - p, p
 			);
@@ -5655,7 +5660,7 @@ uint64_t mm_mapopt_parse_tags(mm_mapopt_t *o, char const *p, uint16_v *buf)
 		/* set tag */
 		uint64_t f = mm_mapopt_tag2flag(t);
 		if (f == 0 && o->verbose >= 1) {
-			opt->log(opt, 'W', __func__, "Unknown tag: `%.*s'.", 2, p);
+			o->log(o, 'W', __func__, "Unknown tag: `%.*s'.", 2, p);
 		}
 
 		/* test tail and advance pointer */
@@ -5695,7 +5700,7 @@ void mm_mapopt_parse_rg(mm_mapopt_t *o, char const *arg)
 
 	/* search header and id */
 	if (strstr(b, "@RG") != b || (id = strstr(b, "\tID:")) == 0) {
-		opt->log(opt, 'E', __func__, "RG line must start with @RG and contains ID, like `@RG\\tID:1'.");
+		o->log(o, 'E', __func__, "RG line must start with @RG and contains ID, like `@RG\\tID:1'.");
 		return;
 	}
 
@@ -5730,7 +5735,7 @@ uint64_t mm_mapopt_parse_format(mm_mapopt_t *o, char const *arg)
 	if (strcmp(arg, "paf") == 0) { return(MM_PAF); }
 	if (strcmp(arg, "mhap") == 0) { return(MM_MHAP); }
 	if (strcmp(arg, "falcon") == 0) { return(MM_FALCON); }
-	opt->log(opt, 'W', __func__, "Unknown output format: `%s'.", arg);
+	o->log(o, 'W', __func__, "Unknown output format: `%s'.", arg);
 	return 0;
 }
 
@@ -5740,9 +5745,9 @@ uint64_t mm_mapopt_parse_format(mm_mapopt_t *o, char const *arg)
 static _force_inline
 void mm_mapopt_save_args(
 	mm_mapopt_t *o,
-	int argc, char const *argv[])
+	int argc, char *const *argv)
 {
-	kvec_t(char) v = kv_inits(char);
+	kvec_t(char) v = { .n = 0, .m = 0, .a = NULL };
 	for (uint64_t i = 0; i < (uint64_t)argc; ++i) {
 		kv_pushm(char, v, argv[i], strlen(argv[i]));
 		kv_push(char, v, ' ');
@@ -5912,72 +5917,11 @@ static _force_inline
 int main_align(
 	mm_mapopt_t *opt,
 	FILE *fpr,
-	FILE *fpw)
+	FILE *fpw,
+	ptr_v *query)
 {
 	int ret = 1;
-	mm_idx_t *mi = NULL;
 
-	/* load/generate index for this index-side iteration */
-	if (fpr != NULL) {
-		/* fetch the next block */
-		mi = mm_idx_load(fpr, opt->nth);
-	} else {
-		/* fetch the next file */
-		fp = bseq_open((char const *)query.a[i], opt->batch_size, 0, opt->rmin, 0, NULL);
-		mi = mm_idx_gen(opt, fp);
-		opt->base_rid += bseq_close(fp);
-	}
-
-	/* check sanity of the index */
-	if (mi == NULL) {
-		/* when index is loaded from file, mi == NULL indicates the correct tail of the file */
-		if (fpr && i > 0) { break; }
-
-		/* otherwise error */
-		opt->log(opt, -1, __func__, "failed to %s `%s'. Please check %s.",
-			fpr? "load index file" : "open sequence file",
-			fpr? fnr : (const char*)query.a[i],
-			fpr? "file path, format and its version" : "file path and format"
-		);
-		goto _main_align_error;
-	}
-	opt->log(opt, 1, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
-
-	/* do the task */
-	if (fpw != NULL) {
-		mm_idx_dump(fpw, mi, opt->nth);
-	} else {
-		/* init alignment; create threads and memory arena */
-		mm_align_t *aln = mm_align_init(opt, mi);
-
-		/* iterate over all the queries */
-		for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < query.n; ++j) {
-			/* fetch the next query */
-			if (!(fp = bseq_open((const char*)query.a[j],
-				opt->batch_size,
-				(opt->flag&MM_KEEP_QUAL) != 0,
-				opt->qmin,
-				opt->tags.n, opt->tags.a))
-			) {
-				/* an error occured in loading query */
-				opt->log(opt, -1, __func__,
-					"failed to open sequence file `%s'."
-					"Please check file path and format.",
-					(const char*)query.a[j]
-				);
-				mm_idx_destroy(mi);
-				goto _main_align_error;
-			}
-			mm_align_file(aln, fp);
-			bseq_close(fp);
-		}
-
-		/* finish alignment */
-		mm_align_destroy(aln);
-	}
-	ret = 0;	/* finished properly */
-	/* cleanup index for the current iteration */
-	mm_idx_destroy(mi);
 	return(ret);
 }
 
@@ -5988,9 +5932,8 @@ int main(int argc, char *argv[])
 {
 	int ret = 1;
 	char const *fnr = NULL, *fnw = NULL;
-	bseq_file_t *fp = NULL;
-	ptr_v query = { 0 };
 	FILE *fpr = NULL, *fpw = NULL;
+	ptr_v query = { 0 };
 
 	/* unittest hook, see unittest.h for the details */
 	#if UNITTEST != 0
@@ -6011,7 +5954,7 @@ int main(int argc, char *argv[])
 
 	/* init option object (init base time) and parse args */
 	mm_mapopt_t *opt = mm_mapopt_init();
-	if (mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &v)) {
+	if (mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &query)) {
 		/* set logger to stdout when invoked by option */
 		opt->fp = stdout;
 		if (opt->verbose == 0) {
@@ -6034,7 +5977,7 @@ int main(int argc, char *argv[])
 	/* if not in index construction mode and query-side file is missing, pour stdin to query */
 	if (!fnw && ((fnr && query.n == 0) || (!fnr && query.n == 1 && !(opt->flag&MM_AVA)))) {
 		opt->log(opt, 1, __func__, "query-side input redirected to stdin.");
-		kv_push(void*, v, "-");
+		kv_push(void*, query, "-");
 	}
 
 	/* calculate default window size if not specified */
@@ -6043,14 +5986,14 @@ int main(int argc, char *argv[])
 	}
 
 	/* check options */
-	if (mm_mapopt_check(opt, fprintf, stderr)) {
+	if (mm_mapopt_check(opt)) {
 		goto _final;
 	}
 
 	/* open input index file */
 	set_info(0, "[main] open index file");
 	if (fnr && (fpr = fopen(fnr, "rb")) == NULL) {
-		opt->log(opt, -1, __func__,
+		opt->log(opt, 'E', __func__,
 			"failed to open index file `%s'. Please check file path and it exists.",
 			fnr
 		);
@@ -6059,7 +6002,7 @@ int main(int argc, char *argv[])
 
 	/* fnw != NULL switches to index construction mode */
 	if (fnw && (fpw = fopen(fnw, "wb")) == NULL) {
-		opt->log(opt, -1, __func__,
+		opt->log(opt, 'E', __func__,
 			"failed to open index file `%s' in write mode. Please check file path and its permission.",
 			fnw
 		);
@@ -6071,14 +6014,75 @@ int main(int argc, char *argv[])
 		i < (fpr? UINT64_MAX : (((opt->flag&MM_AVA) || fpw)? query.n : 1));
 		++i
 	) {
-		if (main_align(opt, fpr, fpw) != 0) {
-			goto _final;
+		bseq_file_t *fp = NULL;
+		mm_idx_t *mi = NULL;
+
+		/* load/generate index for this index-side iteration */
+		if (fpr != NULL) {
+			/* fetch the next block */
+			mi = mm_idx_load(fpr, opt->nth);
+		} else {
+			/* fetch the next file */
+			fp = bseq_open((char const *)query.a[i], opt->batch_size, 0, opt->rmin, 0, NULL);
+			mi = mm_idx_gen(opt, fp);
+			opt->base_rid += bseq_close(fp);
 		}
+
+		/* check sanity of the index */
+		if (mi == NULL) {
+			/* when index is loaded from file, mi == NULL indicates the correct tail of the file */
+			if (fpr && i > 0) { break; }
+
+			/* otherwise error */
+			opt->log(opt, 'E', __func__, "failed to %s `%s'. Please check %s.",
+				fpr? "load index file" : "open sequence file",
+				fpr? fnr : (const char*)query.a[i],
+				fpr? "file path, format and its version" : "file path and format"
+			);
+			goto _main_align_error;
+		}
+		opt->log(opt, 2, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
+
+		/* do the task */
+		if (fpw != NULL) {
+			mm_idx_dump(fpw, mi, opt->nth);
+		} else {
+			/* init alignment; create threads and memory arena */
+			mm_align_t *aln = mm_align_init(opt, mi);
+
+			/* iterate over all the queries */
+			for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < query.n; ++j) {
+				/* fetch the next query */
+				if (!(fp = bseq_open((const char*)query.a[j],
+					opt->batch_size,
+					(opt->flag&MM_KEEP_QUAL) != 0,
+					opt->qmin,
+					opt->tags.n, opt->tags.a))
+				) {
+					/* an error occured in loading query */
+					opt->log(opt, 'E', __func__,
+						"failed to open sequence file `%s'."
+						"Please check file path and format.",
+						(const char*)query.a[j]
+					);
+					mm_idx_destroy(mi);
+					goto _main_align_error;
+				}
+				mm_align_file(aln, fp);
+				bseq_close(fp);
+			}
+
+			/* finish alignment */
+			mm_align_destroy(aln);
+		}
+	_main_align_error:
+		/* cleanup index for the current iteration */
+		mm_idx_destroy(mi);
 	}
 
-	opt->log(opt, 0, __func__, "Version: %s", MM_VERSION);
-	opt->log(opt, 0, __func__, "CMD: %s", opt->arg_line);
-	opt->log(opt, 0, __func__, "Real time: %.3f sec; CPU: %.3f sec",
+	opt->log(opt, 1, __func__, "Version: %s", MM_VERSION);
+	opt->log(opt, 1, __func__, "CMD: %s", opt->arg_line);
+	opt->log(opt, 1, __func__, "Real time: %.3f sec; CPU: %.3f sec",
 		realtime() - opt->inittime,
 		cputime()
 	);
