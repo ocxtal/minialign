@@ -21,8 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "log.h"
-
 /* roundup */
 #define _lmm_cutdown(x, base)		( (x) & ~((base) - 1) )
 #define _lmm_roundup(x, base)		( ((x) + (base) - 1) & ~((base) - 1) )
@@ -125,7 +123,6 @@ void *lmm_malloc(
 	&& ((uintptr_t)lmm->ptr + LMM_ALIGN_SIZE + size) < (uintptr_t)lmm->lim) {
 		return(lmm_reserve_mem(lmm, lmm->ptr, size));
 	} else {
-		debug("malloc, lmm(%p), size(%lu)", lmm, size);
 		return(malloc(size));
 	}
 
@@ -147,7 +144,6 @@ void *lmm_realloc(
 
 #else
 
-	debug("lmm_realloc, lmm(%p)", lmm);
 	if(lmm == NULL) {
 		return(realloc(ptr, size));
 	}
@@ -158,11 +154,9 @@ void *lmm_realloc(
 		uint64_t prev_size = *((uint64_t *)((uintptr_t)ptr - LMM_ALIGN_SIZE));
 		if((uintptr_t)ptr + prev_size == (uintptr_t)lmm->ptr
 		&& (uintptr_t)ptr + size < (uintptr_t)lmm->lim) {
-			debug("expand current block");
 			return(lmm_reserve_mem(lmm,
 				(void *)((uintptr_t)ptr - LMM_ALIGN_SIZE), size));
 		}
-		debug("malloc external memory");
 
 		void *np = malloc(size);
 		if(np == NULL) { return(NULL); }
@@ -573,7 +567,6 @@ int main() {
 
 #define lmm_kv_hq_n(v, i) ( *((int64_t *)&v.a[i]) )
 #define lmm_kv_hq_push(lmm, v, x) { \
-	debug("push, n(%llu), m(%llu)", (v).n, (v).m); \
 	lmm_kv_push(lmm, v, x); \
 	uint64_t i = (v).n - 1; \
 	while(i > 1 && (lmm_kv_hq_n(v, i>>1) > lmm_kv_hq_n(v, i))) { \
@@ -584,7 +577,6 @@ int main() {
 	} \
 }
 #define lmm_kv_hq_pop(lmm, v) ({ \
-	debug("push, n(%llu), m(%llu)", (v).n, (v).m); \
 	uint64_t i = 1, j = 2; \
 	(v).a[0] = (v).a[i]; \
 	(v).a[i] = (v).a[--(v).n]; \
