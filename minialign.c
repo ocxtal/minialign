@@ -6051,7 +6051,8 @@ int main(int argc, char *argv[])
 				fpr? fnr : (const char*)query.a[i],
 				fpr? "file path, format and its version" : "file path and format"
 			);
-			goto _main_align_error;
+			mm_idx_destroy(mi);
+			goto _final;
 		}
 		opt->log(opt, 2, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
 
@@ -6077,8 +6078,9 @@ int main(int argc, char *argv[])
 						"Please check file path and format.",
 						(const char*)query.a[j]
 					);
+					mm_align_destroy(aln);
 					mm_idx_destroy(mi);
-					goto _main_align_error;
+					goto _final;
 				}
 				mm_align_file(aln, fp);
 				bseq_close(fp);
@@ -6087,7 +6089,6 @@ int main(int argc, char *argv[])
 			/* finish alignment */
 			mm_align_destroy(aln);
 		}
-	_main_align_error:
 		/* cleanup index for the current iteration */
 		mm_idx_destroy(mi);
 	}
