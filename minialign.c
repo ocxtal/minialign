@@ -6041,7 +6041,7 @@ int main(int argc, char *argv[])
 			);
 			goto _main_align_error;
 		}
-		opt->log(opt, 2, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
+		opt->log(opt, 1, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
 
 		/* do the task */
 		if (fpw != NULL) {
