@@ -2538,8 +2538,7 @@ static const mm128_t *mm_align_seq(
 #define _putfi(type, _buf, _n, _c) ({ \
 	uint64_t _b = 0; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
-	_i += (_i==0); _i += (_c - _i + 1 > 0)? _c - _i + 1 : 0; \
+	while (_m || _i <= _c) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_flush(_buf, _i + 1); \
 	for (int64_t _j = _i; _j > (_c); _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	*(_buf)->p++ = '.'; \
@@ -3060,7 +3059,7 @@ static void mm_print_mapped_mhap(mm_align_t *b, const bseq_t *t, uint64_t n_reg,
 		const mm_idx_seq_t *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t merr = 1000000.0 * (1.0 - (double)(dcnt - a->xcnt) / (double)slen);	// percent error rate
+		int32_t merr = 10000.0 * (1.0 - (double)(dcnt - a->xcnt) / (double)slen);	// error rate
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
