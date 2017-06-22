@@ -3067,9 +3067,7 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
 	free(p);
 	kv_hq_destroy(pl.hq);
-	if (opt->verbose >= 1) {
-		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - opt->inittime, cputime() / (realtime() - opt->inittime));
-	}
+	opt->log(opt, 9, __func__, "collected minimizers");
 
 	/* sort minimizers */
 	mm_idx_post_t *q = (mm_idx_post_t*)calloc(opt->nth, sizeof(mm_idx_post_t));
@@ -3082,12 +3080,10 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 	}
 	pt_parallel(pt, mm_idx_post, NULL, (void**)qq);
 	pt_destroy(pt);
+	opt->log(opt, 9, __func__, "sorted minimizers");
 
 	free(q);
 	free(qq);
-	if (opt->verbose >= 1) {
-		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - opt->inittime, cputime() / (realtime() - opt->inittime));
-	}
 	return(pl.mi);
 }
 
@@ -6054,7 +6050,7 @@ int main(int argc, char *argv[])
 			mm_idx_destroy(mi);
 			goto _final;
 		}
-		opt->log(opt, 1, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
+		opt->log(opt, 9, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
 
 		/* do the task */
 		if (fpw != NULL) {
