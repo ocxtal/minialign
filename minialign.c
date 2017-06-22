@@ -6078,8 +6078,10 @@ int main(int argc, char *argv[])
 
 			/* iterate over all the queries */
 			for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < query.n; ++j) {
+				opt->log(opt, 10, __func__, "fetched `%s'.", (const char *)query.a[j]);
+
 				/* fetch the next query */
-				if (!(fp = bseq_open((const char*)query.a[j],
+				if (!(fp = bseq_open((const char *)query.a[j],
 					opt->batch_size,
 					(opt->flag&MM_KEEP_QUAL) != 0,
 					opt->qmin,
@@ -6097,6 +6099,8 @@ int main(int argc, char *argv[])
 				}
 				mm_align_file(aln, fp);
 				bseq_close(fp);
+
+				opt->log(opt, 10, __func__, "finished `%s'.", (const char *)query.a[j]);
 			}
 
 			/* finish alignment */
