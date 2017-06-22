@@ -4052,8 +4052,7 @@ mm128_t const *mm_align_seq(
 #define _putfi(type, _buf, _n, _c) ({ \
 	uint64_t _b = 0; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
-	_i += (_i==0); _i += (_c - _i + 1 > 0)? _c - _i + 1 : 0; \
+	while (_m || _i <= _c) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_flush(_buf, _i + 1); \
 	for (int64_t _j = _i; _j > (_c); _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	*(_buf)->p++ = '.'; \
@@ -4902,8 +4901,11 @@ void mm_print_blast6_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
@@ -4949,8 +4951,11 @@ void mm_print_blasr1_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
@@ -4997,8 +5002,11 @@ void mm_print_blasr4_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
 		uint16_t mapq = _mapq(reg[j]);
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
@@ -5046,8 +5054,11 @@ void mm_print_paf_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
 		uint16_t mapq = _mapq(reg[j]);
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
@@ -5095,19 +5106,22 @@ void mm_print_mhap_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t mid = 1000000.0 * (double)(dcnt - a->xcnt) / (double)slen;	/* percent identity */
+		int32_t merr = 10000.0 * (1.0 - (double)(dcnt - a->xcnt) / (double)slen);	/* error rate */
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
 		_putsn(b, t->name, t->l_name); _sp(b);			/* qname */
 		_putsn(b, r->name, r->l_name); _sp(b);			/* rname */
-		_putfi(int32_t, b, 1.0-mid, 4); _sp(b);			/* identity */
+		_putfi(int32_t, b, merr, 4); _sp(b);			/* identity */
 		_putn(b, a->score); _sp(b);						/* score */
 
 		/* query-side pos and direction */
@@ -5141,8 +5155,11 @@ void mm_print_falcon_mapped(
 	_putsnt(b, t->seq, t->l_seq, "NACMGRSVTWYHKDBN"); _cr(b);
 	
 	/* print alignment lines */
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
