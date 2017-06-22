@@ -111,6 +111,23 @@ double realtime(void)
 	return(tp.tv_sec + tp.tv_usec * 1e-6);
 }
 
+/**
+ * @fn version
+ * @brief returns pointer to version string
+ */
+static _force_inline
+char const *version(void)
+{
+	char const *prefix = "minialign-";
+	uint64_t spos = strncmp(
+		MM_VERSION,
+		prefix,
+		MIN2(strlen(MM_VERSION), strlen(prefix)))
+			? 0
+			: strlen(prefix);
+	return(&MM_VERSION[spos]);
+}
+
 /* malloc wrappers */
 /**
  * @struct mm_info_t
@@ -4355,7 +4372,11 @@ void mm_print_sam_header(
 	}
 
 	/* program info (note: command line and version should be included) */
-	_putsk(b, "@PG\tID:minialign\tPN:minialign\n");
+	_putsk(b, "@PG\tID:minialign\tPN:minialign\tVN:");
+	_puts(b, version());
+	_putsk(b, "\tCL:");
+	_puts(b, b->opt->arg_line);
+	_cr(b);
 	return;
 }
 
@@ -5503,29 +5524,12 @@ void posixly_correct()
 }
 
 /**
- * @fn mm_get_version
- * @brief returns pointer to version string
- */
-static _force_inline
-char const *mm_get_version(void)
-{
-	char const *prefix = "minialign-";
-	uint64_t spos = strncmp(
-		MM_VERSION,
-		prefix,
-		MIN2(strlen(MM_VERSION), strlen(prefix)))
-			? 0
-			: strlen(prefix);
-	return(&MM_VERSION[spos]);
-}
-
-/**
  * @fn mm_print_version
  */
 static
 void mm_print_version(mm_mapopt_t const *opt)
 {
-	opt->log(opt->fp, 23, __func__, "%s\n", mm_get_version());
+	opt->log(opt->fp, 23, __func__, "%s\n", version());
 	return;
 }
 
@@ -5876,7 +5880,7 @@ void mm_print_help(mm_mapopt_t const *opt)
 	_msg(1, "    -x STR       load preset params {pacbio,ont,ava} [ont]");
 	_msg(1, "    -t INT       number of threads [%d]", opt->nth);
 	_msg(1, "    -X           switch to all-versus-all alignment mode");
-	_msg(1, "    -v           show version number [%s]", mm_get_version());
+	_msg(1, "    -v           show version number [%s]", version());
 	_msg(1, "  Indexing:");
 	_msg(7, "    -c STR,...   treat specified sequences as circular []");
 	_msg(1, "    -k INT       k-mer size [%d]", opt->k);
