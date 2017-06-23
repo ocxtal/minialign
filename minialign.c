@@ -2522,7 +2522,7 @@ int mm_log_printer(
 	char const *fmt,		/* format string */
 	...)
 {
-	if ((level & 0x07) > opt->verbose) {
+	if (level < ' ' && (level & 0x07) > opt->verbose) {
 		return(0);
 	}
 
