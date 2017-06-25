@@ -317,7 +317,7 @@ static _force_inline
 kh_t *kh_init(uint64_t size)
 {
 	kh_t *h = calloc(1, sizeof(kh_t));
-	
+
 	/* roundup to power of two */
 	size = 0x8000000000000000>>(lzcnt(size - 1) - 1);
 	size = MAX2(size, KH_SIZE);
@@ -346,7 +346,7 @@ static _force_inline
 void kh_destroy(kh_t *h)
 {
 	if (h == NULL) { return; }
-	
+
 	free(h->a);
 	free(h);
 	return;
