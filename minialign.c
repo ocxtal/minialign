@@ -3975,6 +3975,15 @@ mm128_t const *mm_align_seq(
 #undef _m
 
 /**
+ * @struct mm_tmpbuf_t
+ * @brief 
+ */
+typedef struct {
+	uint8_t *tail, *p;
+	uint8_t base[240];
+} mm_tmpbuf_t;
+
+/**
  * @macro _flush
  * @brief flush the buffer if there is no room for(margin + 1) bytes
  */
@@ -4655,23 +4664,11 @@ void mm_print_sam_mapped(
 static _force_inline
 void mm_print_maf_mapped_ref(
 	mm_align_t *b,
-	mm_idx_seq_t const *r,
-	gaba_alignment_t const *a)
+	gaba_alignment_t const *a,
+	uint8_t const *rp)
 {
-	const gaba_path_section_t *s = &a->sec[0];
-	uint32_t rs = r->l_seq-s->apos-s->alen;
-
-	/* print name, pos, alignment length, sequence length */
-	_put(b, 's'); _sp(b);
-	_putsn(b, r->name, r->l_name); _sp(b);
-	_putn(b, rs); _sp(b);
-	_putn(b, s->alen); _sp(b);
-	_put(b, '+'); _sp(b);
-	_putn(b, r->l_seq); _sp(b);
-
 	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
 	int64_t pos = a->path->len;
-	uint8_t const *rp = &r->seq[rs];
 	while(pos > 0) {
 		uint64_t arr, cnt;
 
@@ -4772,42 +4769,6 @@ void mm_print_maf_query_reverse(
 }
 
 /**
- * @fn mm_print_maf_mapped_query
- * @brief print header line of a maf record
- */
-static _force_inline
-void mm_print_maf_mapped_query(
-	mm_align_t *b,
-	bseq_t const *t,
-	gaba_alignment_t const *a)
-{
-	const gaba_path_section_t *s = &a->sec[0];
-	uint32_t const qs = t->l_seq-s->bpos-s->blen;
-
-	/* print name, pos, alignment length, sequence length */
-	_put(b, 's'); _sp(b);
-	_putsn(b, t->name, t->l_name); _sp(b);
-	_putn(b, qs); _sp(b);
-	_putn(b, s->blen); _sp(b);
-	_putd(b, s->bid); _sp(b);
-	_putn(b, t->l_seq); _sp(b);
-
-	if(s->bid & 0x01) {
-		mm_print_maf_query_forward(
-			b, a,
-			&t->seq[qs]
-		);
-	} else {
-		mm_print_maf_query_reverse(
-			b, a,
-			&t->seq[(uint64_t)t->l_seq - qs - 32]
-		);
-	}
-	_cr(b);
-	return;
-}
-
-/**
  * @fn mm_print_maf_mapped
  */
 static
@@ -4819,20 +4780,68 @@ void mm_print_maf_mapped(
 {
 	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
+
 	uint32_t const n_uniq = n_reg>>32;
 	n_reg &= 0xffffffff;
 	for(uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); j++) {
 		gaba_alignment_t const *a = _aln(reg[j]);
+		gaba_path_section_t const *s = &a->sec[0];
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 
 		/* header */
 		_put(b, 'a'); _sp(b); _putsk(b, "score="); _putn(b, a->score); _cr(b);
 
+		mm_tmpbuf_t rh, qh;
+		rh.p = rh.base;
+		rh.tail = rh.base + 240;
+
+		/* print name, pos, alignment length, sequence length */
+		uint32_t const rs = r->l_seq-s->apos-s->alen;
+		_put(&rh, 's'); _sp(&rh);
+		_putsn(&rh, r->name, r->l_name); _sp(&rh);
+		_putn(&rh, rs); _sp(&rh);
+		_putn(&rh, s->alen); _sp(&rh);
+		_put(&rh, '+'); _sp(&rh);
+		_putn(&rh, r->l_seq); _sp(&rh);
+
+		qh.p = qh.base;
+		qh.tail = qh.base + 240;
+
+		/* print name, pos, alignment length, sequence length */
+		uint32_t const qs = t->l_seq-s->bpos-s->blen;
+		_put(&qh, 's'); _sp(&qh);
+		_putsn(&qh, t->name, t->l_name); _sp(&qh);
+		_putn(&qh, qs); _sp(&qh);
+		_putn(&qh, s->blen); _sp(&qh);
+		_putd(&qh, s->bid); _sp(&qh);
+		_putn(&qh, t->l_seq); _sp(&qh);
+
+		uint64_t rlen = rh.p - rh.base;
+		uint64_t qlen = qh.p - qh.base;
+		uint64_t tab = MAX2(rlen, qlen);
+
 		/* reference */
-		mm_print_maf_mapped_ref(b, r, a);
+		_putsn(b, rh.base, rlen);
+		while(rlen < tab) {
+			uint64_t l = MIN2(32, tab - rlen);
+			_putsn32(b, "                                ", l);
+			rlen += l;
+		}
+		mm_print_maf_mapped_ref(b, a, &r->seq[rs]);
 
 		/* query */
-		mm_print_maf_mapped_query(b, t, a);
+		_putsn(b, qh.base, qlen);
+		while(qlen < tab) {
+			uint64_t l = MIN2(32, tab - qlen);
+			_putsn32(b, "                                ", l);
+			qlen += l;
+		}
+		if(s->bid & 0x01) {
+			mm_print_maf_query_forward(b, a, &t->seq[qs]);
+		} else {
+			mm_print_maf_query_reverse(b, a, &t->seq[(uint64_t)t->l_seq - qs - 32]);
+		}
+		_cr(b);
 		_cr(b);
 	}
 	return;
