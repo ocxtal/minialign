@@ -144,7 +144,7 @@ void oom_abort(
 		"[E::%s] Out of memory. (required: %zu B, maxrss: %ld MB)\n",
 		name, req, r.ru_maxrss);
 
-	for(uint64_t i = 0; i < MAX_THREADS + 1; ++i) {
+	for(uint64_t i = 0; i < MAX_THREADS + 1; i++) {
 		if(info[i].enabled) {
 			fprintf(stderr,
 				"[E::%s]  thread %" PRIu64 ": %s\n",
@@ -160,7 +160,7 @@ void oom_abort(
  */
 #define mm_malloc(x) ({ \
 	void *_ptr = malloc((size_t)(x)); \
-	if (_unlikely(_ptr == NULL)) { \
+	if(_unlikely(_ptr == NULL)) { \
 		oom_abort(__func__, (x)); \
 	} \
 	_ptr; \
@@ -172,7 +172,7 @@ void oom_abort(
  */
 #define mm_realloc(x, y) ({ \
 	void *_ptr = realloc((void *)(x), (size_t)(y)); \
-	if (_unlikely(_ptr == NULL)) { \
+	if(_unlikely(_ptr == NULL)) { \
 		oom_abort(__func__, (y)); \
 	} \
 	_ptr; \
@@ -184,7 +184,7 @@ void oom_abort(
  */
 #define mm_calloc(x, y) ({ \
 	void *_ptr = calloc((size_t)(x), (size_t)(y)); \
-	if (_unlikely(_ptr == NULL)) { \
+	if(_unlikely(_ptr == NULL)) { \
 		oom_abort(__func__, (y)); \
 	} \
 	_ptr; \
@@ -198,15 +198,20 @@ void oom_abort(
 #define _pnum(type, _buf, _n) ({ \
 	uint8_t _b[16] = {0}; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) _b[_i++] = _m % 10, _m /= 10; \
+	while(_m) { \
+		_b[_i++] = _m % 10; \
+		_m /= 10; \
+	} \
 	uint64_t _len = _i + (_i == 0); \
-	for (int64_t _j = 0; _j < _len; _j++) { _buf[_j] = _b[_len - _j - 1] + '0'; } \
+	for(int64_t _j = 0; _j < _len; _j++) { \
+		_buf[_j] = _b[_len - _j - 1] + '0'; \
+	} \
 	_len; \
 })
 #define _pstr(_buf, _str) ({ \
 	char const *_p = (_str); \
 	char *_q = (_buf); \
-	while ((*_q++ = *_p++)) {} \
+	while((*_q++ = *_p++)) {} \
 	_q - _buf - 1; \
 })
 
@@ -218,7 +223,7 @@ static _force_inline
 uint64_t mm_rand64(void)
 {
 	uint64_t bits = 31, n = 0;
-	for (uint64_t acc = 0; acc < 64; acc += bits) {
+	for(uint64_t acc = 0; acc < 64; acc += bits) {
 		n <<= bits; n ^= (uint64_t)rand();
 	}
 	return n;
@@ -317,7 +322,7 @@ static _force_inline
 kh_t *kh_init(uint64_t size)
 {
 	kh_t *h = calloc(1, sizeof(kh_t));
-	
+
 	/* roundup to power of two */
 	size = 0x8000000000000000>>(lzcnt(size - 1) - 1);
 	size = MAX2(size, KH_SIZE);
@@ -332,7 +337,7 @@ kh_t *kh_init(uint64_t size)
 	};
 
 	/* init table with invalid key-val pairs */
-	for (uint64_t i = 0; i < size; ++i) {
+	for(uint64_t i = 0; i < size; i++) {
 		h->a[i].u64[0] = UINT64_MAX;
 		h->a[i].u64[1] = 0;
 	}
@@ -345,8 +350,8 @@ kh_t *kh_init(uint64_t size)
 static _force_inline
 void kh_destroy(kh_t *h)
 {
-	if (h == NULL) { return; }
-	
+	if(h == NULL) { return; }
+
 	free(h->a);
 	free(h);
 	return;
@@ -377,7 +382,7 @@ void kh_dump(kh_t *h, void *fp, khwrite_t wfp)
 	kh_hdr_t hdr = { 0 };
 
 	/* dump a mark of zero-sized table */
-	if (h == NULL) {
+	if(h == NULL) {
 		wfp(fp, &hdr, sizeof(kh_hdr_t));
 		return;
 	}
@@ -404,7 +409,7 @@ kh_t *kh_load(void *fp, khread_t rfp)
 	kh_hdr_t hdr = { 0 };
 
 	/* read sizes, return NULL if table size is zero */
-	if ((rfp(fp, &hdr, sizeof(kh_hdr_t))) != sizeof(kh_hdr_t) || hdr.size == 0) {
+	if((rfp(fp, &hdr, sizeof(kh_hdr_t))) != sizeof(kh_hdr_t) || hdr.size == 0) {
 		return(NULL);
 	}
 
@@ -419,7 +424,7 @@ kh_t *kh_load(void *fp, khread_t rfp)
 	};
 
 	/* read table */
-	if ((rfp(fp, h->a, sizeof(mm128_t) * hdr.size)) != sizeof(mm128_t) * hdr.size) {
+	if((rfp(fp, h->a, sizeof(mm128_t) * hdr.size)) != sizeof(mm128_t) * hdr.size) {
 		free(h->a);
 		free(h);
 		return NULL;
@@ -434,14 +439,14 @@ kh_t *kh_load(void *fp, khread_t rfp)
 static _force_inline
 void kh_clear(kh_t *h)
 {
-	if (h == 0) { return; }
+	if(h == 0) { return; }
 
 	/* don't clear max since it holds the malloc'd table size */
 	h->mask = KH_SIZE - 1;
 	h->cnt = 0;
 	h->ub = KH_SIZE * KH_THRESH;
 
-	for (uint64_t i = 0; i < KH_SIZE; ++i) {
+	for(uint64_t i = 0; i < KH_SIZE; i++) {
 		h->a[i].u64[0] = UINT64_MAX;
 		h->a[i].u64[1] = 0;
 	}
@@ -456,17 +461,17 @@ static _force_inline
 uint64_t kh_put_intl(mm128_t *a, uint64_t k, uint64_t v, uint64_t mask)
 {
 	uint64_t kc = k, pos = k & mask;		/* current key and candidate pos */
-	while (1) {
+	while(1) {
 		uint64_t kt = a[pos].u64[0];		/* load key onto register */
 
 		/* test if the current key-val pair can be pushed to the pos */
-		if (kc <= kt) {						/* k < kt || is_empty(kt) || is_moved(kt) */
+		if(kc <= kt) {						/* k < kt || is_empty(kt) || is_moved(kt) */
 			uint64_t vt = a[pos].u64[1];	/* save existing val onto register */
 			a[pos] = (mm128_t){
 				.u64 = { k, v }
 			};
-			if (kt + 2 < 2) { return(1); }	/* is_empty(kt) || is_moved(kt) */
-			if (k == kt) { return(0); }		/* k == kt, val was replaced by the new one */
+			if(kt + 2 < 2) { return(1); }	/* is_empty(kt) || is_moved(kt) */
+			if(k == kt) { return(0); }		/* k == kt, val was replaced by the new one */
 			k = kc = kt; v = vt;			/* robinhood swap */
 		}
 
@@ -491,23 +496,23 @@ void kh_extend(kh_t *h)
 	h->ub = size * KH_THRESH;
 
 	/* double the table if needed */
-	if (size > h->max) {
+	if(size > h->max) {
 		h->a = realloc(h->a, sizeof(mm128_t) * size);
 		h->max = size;
 	}
 
 	/* clear the extended area */
-	for (uint64_t i = 0; i < prev_size; ++i) {
+	for(uint64_t i = 0; i < prev_size; i++) {
 		h->a[i + prev_size].u64[0] = UINT64_MAX;
 		h->a[i + prev_size].u64[1] = 0;
 	}
 
 	/* reallocate bins */
-	for (uint64_t i = 0; i < size; ++i) {
+	for(uint64_t i = 0; i < size; i++) {
 		uint64_t k = h->a[i].u64[0];	/* load key */
 
 		/* test if reallocate is required */
-		if (k + 2 < 2 || (k & mask) == i) { continue; }
+		if(k + 2 < 2 || (k & mask) == i) { continue; }
 
 		uint64_t v = h->a[i].u64[1];	/* load val */
 		h->a[i].u64[0] = UINT64_MAX-1;	/* mark the current bin moved */
@@ -522,7 +527,7 @@ void kh_extend(kh_t *h)
 static _force_inline
 void kh_put(kh_t *h, uint64_t key, uint64_t val)
 {
-	if (h->cnt >= h->ub) {
+	if(h->cnt >= h->ub) {
 		kh_extend(h);
 	}
 	h->cnt += kh_put_intl(h->a, key, val, h->mask);
@@ -538,11 +543,11 @@ uint64_t kh_get(kh_t *h, uint64_t key)
 {
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
-		if ((k = h->a[pos].u64[0]) == key) {
+		if((k = h->a[pos].u64[0]) == key) {
 			return h->a[pos].u64[1];
 		}
 		pos = mask & (pos + 1);
-	} while (k + 1 != 0);			/* !is_empty(k) || is_moved(k) */
+	} while(k + 1 != 0);			/* !is_empty(k) || is_moved(k) */
 	return(UINT64_MAX);
 }
 
@@ -554,11 +559,11 @@ static uint64_t const *kh_get_ptr(kh_t *h, uint64_t key)
 {
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
-		if ((k = h->a[pos].u64[0]) == key) {
+		if((k = h->a[pos].u64[0]) == key) {
 			return &h->a[pos].u64[1];
 		}
 		pos = mask & (pos + 1);
-	} while (k + 1 != 0);			/* !is_empty(k) || is_moved(k) */
+	} while(k + 1 != 0);			/* !is_empty(k) || is_moved(k) */
 	return(NULL);
 }
 
@@ -570,22 +575,22 @@ unittest( .name = "kh.base" ) {
 	uint64_t const *p;
 
 	assert(kh_cnt(h) == 0, "cnt(%lu)", kh_cnt(h));
-	for (uint64_t i = 0; i < 2*cnt; i++) {
+	for(uint64_t i = 0; i < 2*cnt; i++) {
 		p = kh_get_ptr(h, i^kmask);
 		assert(p == NULL);
 		assert(kh_get(h, i^kmask) == UINT64_MAX);
 	}
 
 	/* put key-val pairs */
-	for (uint64_t i = 0; i < cnt; i++) kh_put(h, i^kmask, i^vmask);
+	for(uint64_t i = 0; i < cnt; i++) kh_put(h, i^kmask, i^vmask);
 	assert(kh_cnt(h) == cnt, "cnt(%lu)", kh_cnt(h));
-	for (uint64_t i = 0; i < cnt; i++) {
+	for(uint64_t i = 0; i < cnt; i++) {
 		p = kh_get_ptr(h, i^kmask);
 		assert(p != NULL, "i(%lu)", i);
 		assert(*p == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
 		assert(kh_get(h, i^kmask) == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
 	}
-	for (uint64_t i = cnt; i < 2*cnt; i++) {
+	for(uint64_t i = cnt; i < 2*cnt; i++) {
 		p = kh_get_ptr(h, i^kmask);
 		assert(p == NULL);
 		assert(kh_get(h, i^kmask) == UINT64_MAX);
@@ -594,21 +599,21 @@ unittest( .name = "kh.base" ) {
 	/* clear */
 	kh_clear(h);
 	assert(kh_cnt(h) == 0, "cnt(%lu)", kh_cnt(h));
-	for (uint64_t i = 0; i < cnt; i++) {
+	for(uint64_t i = 0; i < cnt; i++) {
 		p = kh_get_ptr(h, i^kmask);
 		assert(p == NULL);
 		assert(kh_get(h, i^kmask) == UINT64_MAX);
 	}
 
 	/* add another set of key-val pairs */
-	for (uint64_t i = cnt; i < 2*cnt; i++) kh_put(h, i^kmask, i^vmask);
+	for(uint64_t i = cnt; i < 2*cnt; i++) kh_put(h, i^kmask, i^vmask);
 	assert(kh_cnt(h) == cnt, "cnt(%lu)", kh_cnt(h));
-	for (uint64_t i = 0; i < cnt; i++) {
+	for(uint64_t i = 0; i < cnt; i++) {
 		p = kh_get_ptr(h, i^kmask);
 		assert(p == NULL);
 		assert(kh_get(h, i^kmask) == UINT64_MAX);
 	}
-	for (uint64_t i = cnt; i < 2*cnt; i++) {
+	for(uint64_t i = cnt; i < 2*cnt; i++) {
 		p = kh_get_ptr(h, i^kmask);
 		assert(p != NULL, "i(%lu)", i);
 		assert(*p == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
@@ -621,7 +626,7 @@ unittest( .name = "kh.base" ) {
 unittest( .name = "kh.io" ) {
 	kh_t *h = kh_init(0);
 	uint64_t const kmask = mm_rand64(), vmask = mm_rand64(), cnt = 1024 * 1024;
-	for (uint64_t i = 0; i < cnt; i++) kh_put(h, i^kmask, i^vmask);
+	for(uint64_t i = 0; i < cnt; i++) kh_put(h, i^kmask, i^vmask);
 
 	/* dump */
 	char const *filename = "./minialign.unittest.kh.tmp";
@@ -640,13 +645,13 @@ unittest( .name = "kh.io" ) {
 
 	uint64_t const *p;
 	assert(kh_cnt(h) == cnt, "cnt(%lu)", kh_cnt(h));
-	for (uint64_t i = 0; i < cnt; i++) {
+	for(uint64_t i = 0; i < cnt; i++) {
 		p = kh_get_ptr(h, i^kmask);
 		assert(p != NULL, "i(%lu)", i);
 		assert(*p == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
 		assert(kh_get(h, i^kmask) == (i^vmask), "i(%lu), val(%lu, %lu)", i, *p, (i^vmask));
 	}
-	for (uint64_t i = cnt; i < 2*cnt; i++) {
+	for(uint64_t i = cnt; i < 2*cnt; i++) {
 		p = kh_get_ptr(h, i^kmask);
 		assert(p == NULL);
 		assert(kh_get(h, i^kmask) == UINT64_MAX);
@@ -711,18 +716,18 @@ uint64_t pt_enq(pt_q_t *q, uint64_t tid, void *elem)
 	uint64_t z, ret = UINT64_MAX;
 
 	/* lock by thread id */
-	do { z = UINT32_MAX; } while (!cas(&q->lock, &z, tid));
+	do { z = UINT32_MAX; } while(!cas(&q->lock, &z, tid));
 
 	/* push element to queue */
 	uint64_t head = q->head, tail = q->tail, size = q->size;
-	if (((head + 1) % size) != tail) {
+	if(((head + 1) % size) != tail) {
 		q->elems[head] = elem;
 		q->head = (head + 1) % size;
 		ret = 0;
 	}
 
 	/* release */
-	do { z = tid; } while (!cas(&q->lock, &z, UINT32_MAX));
+	do { z = tid; } while(!cas(&q->lock, &z, UINT32_MAX));
 	return(ret);
 }
 
@@ -736,16 +741,16 @@ void *pt_deq(pt_q_t *q, uint64_t tid)
 	uint64_t z;
 
 	/* lock by thread id */
-	do { z = UINT32_MAX; } while (!cas(&q->lock, &z, tid));
+	do { z = UINT32_MAX; } while(!cas(&q->lock, &z, tid));
 
 	/* get element from queue */
 	uint64_t head = q->head, tail = q->tail, size = q->size;
-	if (head != tail) {
+	if(head != tail) {
 		elem = q->elems[tail]; q->tail = (tail + 1) % size;
 	}
 
 	/* release */
-	do { z = tid; } while (!cas(&q->lock, &z, UINT32_MAX));
+	do { z = tid; } while(!cas(&q->lock, &z, UINT32_MAX));
 	return(elem);
 }
 
@@ -760,24 +765,24 @@ void *pt_dispatch(void *s)
 	struct timespec tv = { .tv_nsec = 512 * 1024 };
 
 	void *ping = PT_EMPTY, *pong = PT_EMPTY;
-	while (1) {
+	while(1) {
 		ping = pt_deq(c->in, c->tid);		/* prefetch */
-		if (ping == PT_EMPTY && pong == PT_EMPTY) {
+		if(ping == PT_EMPTY && pong == PT_EMPTY) {
 			nanosleep(&tv, NULL);			/* no task is available, sleep for a while */
 		}
-		if (pong != PT_EMPTY) {
+		if(pong != PT_EMPTY) {
 			pt_enq(c->out, c->tid, c->wfp(c->tid, (void*)c->warg, pong));
 		}
-		if (ping == PT_EXIT) { break; }		/* terminate thread */
+		if(ping == PT_EXIT) { break; }		/* terminate thread */
 
 		pong = pt_deq(c->in, c->tid);		/* prefetch */
-		if (ping == PT_EMPTY && pong == PT_EMPTY) {
+		if(ping == PT_EMPTY && pong == PT_EMPTY) {
 			nanosleep(&tv, NULL);			/* no task is available, sleep for a while */
 		}
-		if (ping != PT_EMPTY) {
+		if(ping != PT_EMPTY) {
 			pt_enq(c->out, c->tid, c->wfp(c->tid, (void*)c->warg, ping));
 		}
-		if (pong == PT_EXIT) { break; }		/* terminate thread */
+		if(pong == PT_EXIT) { break; }		/* terminate thread */
 	}
 	return(NULL);
 }
@@ -791,19 +796,19 @@ void pt_destroy(pt_t *pt)
 	void *status;
 
 	/* send termination signal */
-	for (uint64_t i = 1; i < pt->nth; ++i) {
+	for(uint64_t i = 1; i < pt->nth; i++) {
 		pt_enq(pt->c->in, pt->c->tid, PT_EXIT);
 	}
 
 	/* wait for the threads terminate */
-	for (uint64_t i = 1; i < pt->nth; ++i) {
+	for(uint64_t i = 1; i < pt->nth; i++) {
 		disable_info(i);		/* disable debug information */
 		pthread_join(pt->c[i].th, &status);
 	}
 
 	/* clear queues */
-	while (pt_deq(pt->c->in, pt->c->tid) != PT_EMPTY) {}
-	while (pt_deq(pt->c->out, pt->c->tid) != PT_EMPTY) {}
+	while(pt_deq(pt->c->in, pt->c->tid) != PT_EMPTY) {}
+	while(pt_deq(pt->c->out, pt->c->tid) != PT_EMPTY) {}
 
 	/* clear queues and objects */
 	free(pt->in.elems);
@@ -840,7 +845,7 @@ pt_t *pt_init(uint32_t nth)
 	pt->c[0].out = &pt->out;
 
 	/* init children info, create children */
-	for (uint64_t i = 1; i < nth; ++i) {
+	for(uint64_t i = 1; i < nth; i++) {
 		pt->c[i].tid = i;
 		pt->c[i].in = &pt->in;
 		pt->c[i].out = &pt->out;
@@ -863,13 +868,13 @@ int pt_set_worker(
 	void *item;
 
 	/* fails when unprocessed object exists in the queue */
-	if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
+	if((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
 		pt_enq(pt->c->in, pt->c->tid, item);
 		return(-1);
 	}
 
 	/* update pointers */
-	for (uint64_t i = 0; i < pt->nth; ++i) {
+	for(uint64_t i = 0; i < pt->nth; i++) {
 		pt->c[i].wfp = wfp;
 		pt->c[i].warg = warg ? warg[i] : NULL;
 	}
@@ -890,26 +895,26 @@ int pt_stream(
 	pt_worker_t wfp, void **warg,
 	pt_drain_t dfp, void *darg)
 {
-	if (pt_set_worker(pt, wfp, warg)) { return(-1); }
+	if(pt_set_worker(pt, wfp, warg)) { return(-1); }
 
 	/* keep balancer between [lb, ub) */
 	uint64_t const lb = 2 * pt->nth, ub = 4 * pt->nth;
 	uint64_t bal = 0;
 	void *item;
 
-	while ((item = sfp(pt->c->tid, sarg)) != NULL) {
+	while((item = sfp(pt->c->tid, sarg)) != NULL) {
 		pt_enq(pt->c->in, pt->c->tid, item);
-		if (++bal < ub) { continue; }
+		if(++bal < ub) { continue; }
 
-		while (bal > lb) {
+		while(bal > lb) {
 			/* flush to drain (note: while loop is better?) */
-			if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) {
+			if((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) {
 				bal--;
 				dfp(pt->c->tid, darg, item);
 			}
 
 			/* process one in the master (parent) thread */
-			if ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
+			if((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
 				bal--;
 				dfp(pt->c->tid, darg, wfp(pt->c->tid, warg ? *warg : NULL, item));
 			}
@@ -917,13 +922,13 @@ int pt_stream(
 	}
 
 	/* source depleted, process remainings */
-	while ((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
+	while((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
 		pt_enq(pt->c->out, pt->c->tid, wfp(pt->c->tid, warg ? *warg : NULL, item));
 	}
 
 	/* flush results */
-	while (bal > 0) {
-		if ((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) {
+	while(bal > 0) {
+		if((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) {
 			bal--;
 			dfp(pt->c->tid, darg, item);
 		}
@@ -941,10 +946,10 @@ int pt_parallel(
 	void **item)
 {
 	/* fails when unprocessed element exists */
-	if (pt_set_worker(pt, wfp, warg)) { return(-1); }
+	if(pt_set_worker(pt, wfp, warg)) { return(-1); }
 
 	/* push items */
-	for (uint64_t i = 1; i < pt->nth; ++i) {
+	for(uint64_t i = 1; i < pt->nth; i++) {
 		pt_enq(pt->c->in, pt->c->tid, item? item[i] : NULL);
 	}
 
@@ -952,8 +957,8 @@ int pt_parallel(
 	wfp(pt->c->tid, warg? warg[0] : NULL, item? item[0] : NULL);
 
 	/* wait for the children done */
-	for (uint64_t i = 1; i < pt->nth; ++i) {
-		while (pt_deq(pt->c->out, pt->c->tid) == PT_EMPTY) {
+	for(uint64_t i = 1; i < pt->nth; i++) {
+		while(pt_deq(pt->c->out, pt->c->tid) == PT_EMPTY) {
 			struct timespec tv = { .tv_nsec = 512 * 1024 };
 			nanosleep(&tv, NULL);	/* wait for a while */
 			// sched_yield();
@@ -966,7 +971,7 @@ int pt_parallel(
 static void *pt_unittest_source(uint32_t tid, void *arg)
 {
 	uint64_t *s = (uint64_t*)arg;
-	if (*s >= 1024) return NULL;
+	if(*s >= 1024) return NULL;
 	uint64_t *p = malloc(sizeof(uint64_t));
 	*p = *s; *s = *s + 1;
 	return p;
@@ -1010,7 +1015,7 @@ unittest( .name = "pt.multi" ) {
 
 	uint64_t s[4] = { 0,1,2,3 }, *sp[4] = { &s[0],&s[1],&s[2],&s[3] };
 	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp);
-	for (uint64_t i = 0; i < 4; i++) {
+	for(uint64_t i = 0; i < 4; i++) {
 		assert(s[i] == (i+1), "i(%lu), d[i](%lu)", i, s[i]);
 	}
 	pt_destroy(pt);
@@ -1116,7 +1121,7 @@ void *pg_worker(uint32_t tid, void *arg, void *item)
 {
 	pg_t *pg = (pg_t*)arg;
 	pg_block_t *s = (pg_block_t*)item;
-	if (s == NULL || s->len == 0) { return(s); }
+	if(s == NULL || s->len == 0) { return(s); }
 
 	char buf[128], *p = buf;
 	p += _pstr(p, "[pg_worker] bucket id: "); p += _pnum(uint32_t, p, s->id); *p = '\0';
@@ -1134,8 +1139,8 @@ pg_block_t *pg_read_block(pg_t *pg)
 	pg_block_t *s = malloc(sizeof(pg_block_t) + pg->block_size);
 
 	/* read block */
-	if (fread(&s->len, sizeof(uint64_t), 1, pg->fp) != 1 || s->len == 0) { goto _fail; }
-	if (fread(s->buf, sizeof(uint8_t), s->len, pg->fp) != s->len) { goto _fail; }
+	if(fread(&s->len, sizeof(uint64_t), 1, pg->fp) != 1 || s->len == 0) { goto _fail; }
+	if(fread(s->buf, sizeof(uint8_t), s->len, pg->fp) != s->len) { goto _fail; }
 
 	/* set metadata */
 	s->head = 0;
@@ -1155,7 +1160,7 @@ _fail:
 static _force_inline
 void pg_write_block(pg_t *pg, pg_block_t *s)
 {
-	if (s->len == 0) return;
+	if(s->len == 0) return;
 
 	/* dump header then block */
 	fwrite(&s->len, sizeof(uint64_t), 1, pg->fp);
@@ -1182,7 +1187,7 @@ pg_t *pg_init(FILE *fp, uint32_t nth)
 	kv_hq_init(pg->hq);
 
 	/* init worker args */
-	for (uint64_t i = 0; i < nth; ++i) {
+	for(uint64_t i = 0; i < nth; i++) {
 		pg->c[i] = (void*)pg;
 	}
 	pt_set_worker(pg->pt, pg_worker, pg->c);
@@ -1198,9 +1203,9 @@ void pg_destroy(pg_t *pg)
 {
 	/* process current working block */
 	pg_block_t *s = pg->s, *t;
-	if (s && s->flush == 1 && s->head != 0) {
+	if(s && s->flush == 1 && s->head != 0) {
 		s->len = s->head;
-		if (pg->nth == 1) {
+		if(pg->nth == 1) {
 			pg_write_block(pg, pg_deflate(s, pg->block_size));
 		} else {
 			pg->bal++;
@@ -1211,22 +1216,22 @@ void pg_destroy(pg_t *pg)
 	}
 
 	/* process remainings */
-	while (pg->bal > 0) {
-		if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
-			/* wait for a while (note: nanosleep is better?) */
+	while(pg->bal > 0) {
+		if((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
+			/* wait for a while(note: nanosleep is better?) */
 			sched_yield(); continue;
 		}
 
 		/* item fetched, flush if needed */
 		pg->bal--;
-		if (t && !t->flush) { free(t); continue; }
+		if(t && !t->flush) { free(t); continue; }
 
 		/* push heapqueue to sort */
 		kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
 	}
 
 	/* flush heapqueue */
-	while (pg->hq.n > 1) {
+	while(pg->hq.n > 1) {
 		pg->ocnt++;
 		t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
 		pg_write_block(pg, t);
@@ -1251,23 +1256,23 @@ uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 {
 	uint64_t rem = len;
 	pg_block_t *s = pg->s, *t;
-	if (pg->eof == 2) return(0);
+	if(pg->eof == 2) return(0);
 
-	while (rem > 0) {
+	while(rem > 0) {
 		/* check and prepare a valid inflated block */
-		while (s == NULL || s->head == s->len) {
+		while(s == NULL || s->head == s->len) {
 			free(s); s = NULL;
-			if (pg->nth == 1) {
+			if(pg->nth == 1) {
 				/* single-threaded */
-				if ((t = pg_read_block(pg)) == NULL) {
+				if((t = pg_read_block(pg)) == NULL) {
 					pg->eof = 2;
 					return(len-rem);
 				}
 				pg->s = s = pg_inflate(t, pg->block_size);
 			} else {
 				/* multithreaded; read compressed blocks and push them to queue */
-				while (!pg->eof && pg->bal < pg->ub) {
-					if ((t = pg_read_block(pg)) == NULL) {
+				while(!pg->eof && pg->bal < pg->ub) {
+					if((t = pg_read_block(pg)) == NULL) {
 						pg->eof = 1; break;
 					}
 					pg->bal++;
@@ -1275,19 +1280,19 @@ uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 				}
 
 				/* fetch inflated blocks and push heapqueue to sort */
-				while ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) != PT_EMPTY) {
+				while((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) != PT_EMPTY) {
 					pg->bal--;
 					kv_hq_push(mm128_t, incq_comp, pg->hq, ((mm128_t){.u64 = {t->id, (uintptr_t)t}}));
 				}
 
 				/* check if input depleted */
-				if (pg->ocnt >= pg->icnt) {
+				if(pg->ocnt >= pg->icnt) {
 					pg->eof = 2;
 					return(len-rem);
 				}
 
 				/* check if inflated block is available */
-				if (pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) {
+				if(pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) {
 					sched_yield(); continue;	/* wait for a while */
 				}
 
@@ -1313,19 +1318,19 @@ uint64_t pgwrite(pg_t *pg, const void *src, uint64_t len)
 {
 	uint64_t rem = len;
 	pg_block_t *s = pg->s, *t;
-	while (rem > 0) {
+	while(rem > 0) {
 		/* push the current block to queue and prepare an empty one if the current one is full */
-		if (s == NULL || s->head == s->len) {
-			if (pg->nth == 1) {
+		if(s == NULL || s->head == s->len) {
+			if(pg->nth == 1) {
 				/* single-threaded */
-				if (s != NULL) {
+				if(s != NULL) {
 					pg_write_block(pg, pg_deflate(s, pg->block_size));
 				}
 			} else {
 				/* multithreaded; fetch copressed block and push to heapqueue to sort */
-				while (pg->bal > pg->lb) {
-					if ((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
-						if (pg->bal >= pg->ub) {
+				while(pg->bal > pg->lb) {
+					if((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
+						if(pg->bal >= pg->ub) {
 							sched_yield(); continue;		/* queue full, wait for a while */
 						} else {
 							break;							/* unexpected error */
@@ -1336,14 +1341,14 @@ uint64_t pgwrite(pg_t *pg, const void *src, uint64_t len)
 				}
 
 				/* flush heapqueue */
-				while (pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
+				while(pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
 					pg->ocnt++;
 					t = (pg_block_t*)kv_hq_pop(mm128_t, incq_comp, pg->hq).u64[1];
 					pg_write_block(pg, t);
 				}
 
 				/* push the current block to deflate queue */
-				if (s != NULL) {
+				if(s != NULL) {
 					pg->bal++;
 					pt_enq(pg->pt->c->in, pg->pt->c->tid, s);
 				}
@@ -1370,7 +1375,7 @@ uint64_t pgwrite(pg_t *pg, const void *src, uint64_t len)
 unittest( .name = "pg.single" ) {
 	uint64_t const size = 1024 * 1024 * 1024;
 	uint8_t *p = malloc(size), *q = malloc(size);
-	for (uint64_t i = 0; i < size; i++) p[i] = i % 253;
+	for(uint64_t i = 0; i < size; i++) p[i] = i % 253;
 
 	char const *filename = "./minialign.unittest.pg.tmp";
 	FILE *fp = fopen(filename, "w");
@@ -1378,7 +1383,7 @@ unittest( .name = "pg.single" ) {
 	pg_t *pg = pg_init(fp, 1);
 	assert(pg != NULL);
 
-	for (uint64_t i = 0; i < 3; i++) {
+	for(uint64_t i = 0; i < 3; i++) {
 		uint64_t l = pgwrite(pg, p, size);
 		assert(l == size, "l(%lu), size(%lu)", l, size);
 	}
@@ -1391,7 +1396,7 @@ unittest( .name = "pg.single" ) {
 	pg = pg_init(fp, 1);
 	assert(pg != NULL);
 
-	for (uint64_t i = 0; i < 3; i++) {
+	for(uint64_t i = 0; i < 3; i++) {
 		uint64_t l = pgread(pg, q, size);
 		assert(l == size, "l(%lu), size(%lu)", l, size);
 		assert(memcmp(p, q, size) == 0);
@@ -1404,7 +1409,7 @@ unittest( .name = "pg.single" ) {
 unittest( .name = "pg.multi" ) {
 	uint64_t const size = 1024 * 1024 * 1024;
 	uint8_t *p = malloc(size), *q = malloc(size);
-	for (uint64_t i = 0; i < size; i++) p[i] = i % 253;
+	for(uint64_t i = 0; i < size; i++) p[i] = i % 253;
 
 	char const *filename = "./minialign.unittest.pg.tmp";
 	FILE *fp = fopen(filename, "w");
@@ -1412,7 +1417,7 @@ unittest( .name = "pg.multi" ) {
 	pg_t *pg = pg_init(fp, 4);
 	assert(pg != NULL);
 
-	for (uint64_t i = 0; i < 3; i++) {
+	for(uint64_t i = 0; i < 3; i++) {
 		uint64_t l = pgwrite(pg, p, size);
 		assert(l == size, "l(%lu), size(%lu)", l, size);
 	}
@@ -1425,7 +1430,7 @@ unittest( .name = "pg.multi" ) {
 	pg = pg_init(fp, 4);
 	assert(pg != NULL);
 
-	for (uint64_t i = 0; i < 3; i++) {
+	for(uint64_t i = 0; i < 3; i++) {
 		uint64_t l = pgread(pg, q, size);
 		assert(l == size, "l(%lu), size(%lu)", l, size);
 		assert(memcmp(p, q, size) == 0);
@@ -1472,12 +1477,12 @@ _static_assert(sizeof(bam_core_t) == 32);
 static _force_inline
 void bam_header_destroy(bam_header_t *header)
 {
-	if (header == 0) { return; }
+	if(header == 0) { return; }
 
 	/* cleanup name array */
-	if (header->target_name) {
-		for (uint64_t i = 0; i < (uint64_t)header->n_targets; ++i) {
-			if (header->target_name[i] != NULL) {
+	if(header->target_name) {
+		for(uint64_t i = 0; i < (uint64_t)header->n_targets; i++) {
+			if(header->target_name[i] != NULL) {
 				free(header->target_name[i]);
 			}
 		}
@@ -1485,10 +1490,10 @@ void bam_header_destroy(bam_header_t *header)
 	}
 
 	/* cleanup len array */
-	if (header->target_len) { free(header->target_len); }
+	if(header->target_len) { free(header->target_len); }
 
 	/* raw text */
-	if (header->text) { free(header->text); }
+	if(header->text) { free(header->text); }
 	free(header);
 
 	return;
@@ -1502,7 +1507,7 @@ bam_header_t *bam_read_header(gzFile fp)
 {
 	/* read "BAM1" (magic) */
 	char magic[4];
-	if (gzread(fp, magic, 4) != 4 || strncmp(magic, "BAM\001", 4) != 0) {
+	if(gzread(fp, magic, 4) != 4 || strncmp(magic, "BAM\001", 4) != 0) {
 		return NULL;
 	}
 
@@ -1510,31 +1515,31 @@ bam_header_t *bam_read_header(gzFile fp)
 	bam_header_t *header = calloc(1, sizeof(bam_header_t));
 	
 	/* read plain text and the number of reference sequences */
-	if (gzread(fp, &header->l_text, 4) != 4) {
+	if(gzread(fp, &header->l_text, 4) != 4) {
 		goto _bam_read_header_fail;
 	}
 	header->text = (char*)calloc(header->l_text + 1, 1);
-	if ((size_t)gzread(fp, header->text, header->l_text) != header->l_text) {
+	if((size_t)gzread(fp, header->text, header->l_text) != header->l_text) {
 		goto _bam_read_header_fail;
 	}
-	if (gzread(fp, &header->n_targets, 4) != 4) {
+	if(gzread(fp, &header->n_targets, 4) != 4) {
 		goto _bam_read_header_fail;
 	}
 
 	/* read reference sequence names and lengths */
 	header->target_name = (char**)calloc(header->n_targets, sizeof(char*));
 	header->target_len = (uint32_t*)calloc(header->n_targets, 4);
-	for (uint64_t i = 0; i != (uint64_t)header->n_targets; ++i) {
+	for(uint64_t i = 0; i != (uint64_t)header->n_targets; i++) {
 		int32_t name_len;
-		if (gzread(fp, &name_len, 4) != 4) {
+		if(gzread(fp, &name_len, 4) != 4) {
 			goto _bam_read_header_fail;
 		}
 
 		header->target_name[i] = (char*)calloc(name_len, 1);
-		if (gzread(fp, header->target_name[i], name_len) != name_len) {
+		if(gzread(fp, header->target_name[i], name_len) != name_len) {
 			goto _bam_read_header_fail;
 		}
-		if (gzread(fp, &header->target_len[i], 4) != 4) {
+		if(gzread(fp, &header->target_len[i], 4) != 4) {
 			goto _bam_read_header_fail;
 		}
 	}
@@ -1595,8 +1600,8 @@ static _force_inline
 uint64_t bseq_search_tag(uint32_t l_tags, uint16_t const *tags, uint16_t t1, uint16_t t2)
 {
 	v32i16_t tv = _set_v32i16((t2<<8) | t1);
-	for (uint64_t i = 0; i < ((l_tags + 0x1f) & ~0x1f); i+=0x20) {
-		if (((v32_masku_t){ .mask = _mask_v32i16(_eq_v32i16(_loadu_v32i16(&tags[i]), tv)) }).all != 0) {
+	for(uint64_t i = 0; i < ((l_tags + 0x1f) & ~0x1f); i+=0x20) {
+		if(((v32_masku_t){ .mask = _mask_v32i16(_eq_v32i16(_loadu_v32i16(&tags[i]), tv)) }).all != 0) {
 			return(1);
 		}
 	}
@@ -1620,7 +1625,7 @@ bseq_file_t *bseq_open(
 
 	/* open stream */
 	gzFile f = fn && strcmp(fn, "-")? gzopen(fn, "r") : gzdopen(fileno(stdin), "r");
-	if (f == NULL) { return(NULL); }
+	if(f == NULL) { return(NULL); }
 
 	/* create instance */
 	bseq_file_t *fp = (bseq_file_t*)calloc(1, sizeof(bseq_file_t));
@@ -1631,14 +1636,14 @@ bseq_file_t *bseq_open(
 	};
 
 	/* determine file type; allow some invalid spaces at the head */
-	for (uint64_t i = 0; i < 4; i++) {
-		if ((c = gzgetc(fp->fp)) == 'B') {	/* test bam signature */
+	for(uint64_t i = 0; i < 4; i++) {
+		if((c = gzgetc(fp->fp)) == 'B') {	/* test bam signature */
 			gzungetc(c, fp->fp); fp->bh = bam_read_header(fp->fp); break;
-		} else if (c == '>' || c == '@') {	/* test fasta/q delimiter */
+		} else if(c == '>' || c == '@') {	/* test fasta/q delimiter */
 			gzungetc(c, fp->fp); fp->delim = c; break;
 		}
 	}
-	if (!fp->bh && !fp->delim) {
+	if(!fp->bh && !fp->delim) {
 		free(fp);
 		return(NULL);
 	}
@@ -1650,7 +1655,7 @@ bseq_file_t *bseq_open(
 
 	/* init tags */
 	fp->tags = calloc(((fp->l_tags = l_tags) + 0x1f) & ~0x1f, sizeof(uint16_t));
-	if (l_tags && tags) {
+	if(l_tags && tags) {
 		memcpy(fp->tags, tags, l_tags * sizeof(uint16_t));
 	}
 	fp->keep_comment = bseq_search_tag(fp->l_tags, fp->tags, 'C', 'O');
@@ -1665,7 +1670,7 @@ bseq_file_t *bseq_open(
 static _force_inline
 uint32_t bseq_close(bseq_file_t *fp)
 {
-	if (fp == NULL) { return(0); }
+	if(fp == NULL) { return(0); }
 	uint32_t n_seq = fp->n_seq;
 	gzclose(fp->fp);
 	bam_header_destroy(fp->bh);
@@ -1690,24 +1695,24 @@ uint64_t bseq_save_tags(
 		0, 0, 0, 2,     0, 0, 0, 0,  0, 0, 0xff, 0,  0, 0, 0, 0
 	};
 	uint8_t const *p = arr, *tail = arr + l_arr;
-	while (p < tail) {
+	while(p < tail) {
 		/* first check if the tag must be saved */
 		uint64_t keep = bseq_search_tag(l_tags, tags, p[0], p[1]), size;
 
 		/* test the size */
-		if ((size = tag_size[p[2]&0x1f]) == 0xff) {
+		if((size = tag_size[p[2]&0x1f]) == 0xff) {
 			/* string, read until '\0' */
-			if (keep != 0) {
-				while ((*q++ = *p++)) {}	/* save */
+			if(keep != 0) {
+				while((*q++ = *p++)) {}	/* save */
 			} else {
-				while (*p++) {}				/* skip */
+				while(*p++) {}				/* skip */
 			}
 		} else {
 			/* others */
 			uint64_t len = (size == 0xfe)
 				? 8 + tag_size[p[3]&0x1f] * *((uint32_t*)&p[4])		/* array */
 				: 3 + size;											/* single value */
-			if (keep != 0) {
+			if(keep != 0) {
 				memcpy(q, p, len); q += len;
 			}
 			p += len;
@@ -1732,8 +1737,8 @@ uint64_t bseq_read_bam(
 
 	/* test header and length */
 	bam_core_t const *c = (bam_core_t const *)fp->p;
-	if (c->flag&0x900) { return(0); }							/* skip supp / secondary */
-	if ((uint32_t)c->l_qseq < fp->min_len) { return(0); }		/* skip short reads */
+	if(c->flag&0x900) { return(0); }							/* skip supp / secondary */
+	if((uint32_t)c->l_qseq < fp->min_len) { return(0); }		/* skip short reads */
 
 	/* extract pointers */
 	sname = fp->p + sizeof(bam_core_t);
@@ -1764,12 +1769,12 @@ uint64_t bseq_read_bam(
 
 	/* copy seq */
 	s->seq = (uint8_t *)mem->n;
-	if (c->flag&0x10) {
-		for (int64_t i = c->l_qseq-1; i >= 0; --i) {
+	if(c->flag&0x10) {
+		for(int64_t i = c->l_qseq-1; i >= 0; i--) {
 			mem->a[mem->n++] = "\x0\x8\x4\x0\x2\x0\x0\x0\x1"[0x0f & (sseq[i>>1]>>((~i&0x01)<<2))];
 		}
 	} else {
-		for (int64_t i = 0; i < c->l_qseq; ++i) {
+		for(int64_t i = 0; i < c->l_qseq; i++) {
 			mem->a[mem->n++] = 0x0f & (sseq[i>>1]>>((~i&0x01)<<2));
 		}
 	}
@@ -1777,13 +1782,13 @@ uint64_t bseq_read_bam(
 
 	/* copy qual if available */
 	s->qual = (uint8_t *)mem->n;
-	if (fp->keep_qual && *squal != 0xff) {
-		if (c->flag&0x10) {
-			for (int64_t i = c->l_qseq-1; i >= 0; --i) {
+	if(fp->keep_qual && *squal != 0xff) {
+		if(c->flag&0x10) {
+			for(int64_t i = c->l_qseq-1; i >= 0; i--) {
 				mem->a[mem->n++] = squal[i] + 33;
 			}
 		} else {
-			for (int64_t i = 0; i < c->l_qseq; ++i) {
+			for(int64_t i = 0; i < c->l_qseq; i++) {
 				mem->a[mem->n++] = squal[i] + 33;
 			}
 		}
@@ -1792,7 +1797,7 @@ uint64_t bseq_read_bam(
 
 	/* save tags */
 	s->tag = (uint8_t *)mem->n;
-	if (fp->l_tags && l_tag) {
+	if(fp->l_tags && l_tag) {
 		mem->n += bseq_save_tags(fp->l_tags, fp->tags, l_tag, stag, mem->a + mem->n);
 	}
 	mem->a[mem->n++] = '\0';
@@ -1818,7 +1823,7 @@ uint64_t bseq_read_bam(
 		_m1 = _match(_r, _dv); _m2 = _match(_r, _lv); \
 		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m1 | _m2), _t - _p); \
 		_len = _l; _p += 32; _q += 32; \
-	} while (_len >= 32); \
+	} while(_len >= 32); \
 	_p += _len - 32; _q += _len - 32; _q -= _q[-1] == 0x0f; _m1>>_len; \
 })
 #define _skipline(_p, _t) ({ \
@@ -1830,7 +1835,7 @@ uint64_t bseq_read_bam(
 		v32i8_t _r = _loadu_v32i8(_p); \
 		_m = _match(_r, _lv); \
 		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m), _t - _p); _len = _l; _p += 32; \
-	} while (_len >= 32); \
+	} while(_len >= 32); \
 	_p += _len - 32; _p - _b; \
 })
 #define _beg(_q, _b)		( (uint8_t *)(_q - _b) )
@@ -1872,78 +1877,78 @@ uint64_t bseq_read_fasta(
 	uint8_t *p = fp->p, *q = &mem->a[mem->n];
 	uint8_t const *t = fp->tail;
 	uint64_t m, acc, lim, ret = 1;
-	if (p >= t) { return(1); }		/* refill needed */
+	if(p >= t) { return(1); }		/* refill needed */
 	switch (fp->state) {
 		case 0:						/* idle */
-			if (*p++ != fp->delim) { return(2); }/* broken */
+			if(*p++ != fp->delim) { return(2); }/* broken */
 			kv_pushp(bseq_t, *seq, &s);			/* create new sequence */
 			fp->state = 1;						/* transition to spaces between delim and name */
 		case 1:
 			_strip(p, t, sv);
-			if (_unlikely(p >= t)) { goto _refill; }
+			if(_unlikely(p >= t)) { goto _refill; }
 			s->name = (char*)_beg(q, mem->a);
 			fp->state = 2;
 		case 2:
 			m = _readline(p, t, q, sv, _id);
-			if (_unlikely(p >= t)) { goto _refill; }
+			if(_unlikely(p >= t)) { goto _refill; }
 			p++;								/* skip '\n' or ' ' */
 			s->l_name = _term(q, mem->a, s->name);
 			s->tag = _beg(q, mem->a);
-			if ((m & 0x01) == 0) { goto _seq_head; }
+			if((m & 0x01) == 0) { goto _seq_head; }
 			fp->state = 3;
 		case 3:
 			_strip(p, t, sv);
-			if (_unlikely(p >= t)) { goto _refill; }
+			if(_unlikely(p >= t)) { goto _refill; }
 			*q++ = 'C'; *q++ = 'O'; *q++ = 'Z';
 			fp->state = 4;
 		case 4:									/* parsing comment */
 			_readline(p, t, q, lv, _id);
-			if (_unlikely(p >= t)) { goto _refill; }	/* refill needed, comment continues */
+			if(_unlikely(p >= t)) { goto _refill; }	/* refill needed, comment continues */
 			p++;								/* skip '\n' */
-			while (q[-1] == ' ') { q--; }		/* strip spaces */
-			if (!fp->keep_comment) q = mem->a + (uint64_t)s->tag;
+			while(q[-1] == ' ') { q--; }		/* strip spaces */
+			if(!fp->keep_comment) q = mem->a + (uint64_t)s->tag;
 		_seq_head:
 			s->l_tag = _term(q, mem->a, s->tag);
 			s->seq = _beg(q, mem->a);
 			fp->state = 5;
 		case 5:									/* parsing seq */
-			while (1) {
+			while(1) {
 				m = _readline(p, t, q, dv, _trans);
-				if (_unlikely(p >= t)) { m |= fp->is_eof; break; }
-				if (m & 0x01) { break; }
+				if(_unlikely(p >= t)) { m |= fp->is_eof; break; }
+				if(m & 0x01) { break; }
 				p++;							/* skip '\n' */
 			}
-			if ((m & 0x01) == 0) { goto _refill; }
+			if((m & 0x01) == 0) { goto _refill; }
 			s->l_seq = _term(q, mem->a, s->seq);
-			if (_unlikely(p >= t)) { break; }
+			if(_unlikely(p >= t)) { break; }
 			s->qual = _beg(q, mem->a);
-			if (fp->delim == '>') { goto _qual_tail; }
+			if(fp->delim == '>') { goto _qual_tail; }
 			fp->state = 6;
 		case 6:
 			_skipline(p, t);
-			if (_unlikely(p >= t)) { goto _refill; }
+			if(_unlikely(p >= t)) { goto _refill; }
 			p++;
 			fp->state = 7; fp->acc = 0;
 		case 7:									/* parsing qual */
 			acc = fp->acc, lim = s->l_seq;
-			if (fp->keep_qual) {
-				while (1) {
+			if(fp->keep_qual) {
+				while(1) {
 					uint8_t const *b = q; _readline(p, t, q, lv, _id); acc += q - b;
-					if (_unlikely(p >= t)) { fp->acc = acc; goto _refill; }
-					if (acc >= lim) { break; }
+					if(_unlikely(p >= t)) { fp->acc = acc; goto _refill; }
+					if(acc >= lim) { break; }
 					p++;						/* skip '\n' */
 				}
 			} else {
-				while (1) {
+				while(1) {
 					acc += _skipline(p, t);
-					if (_unlikely(p >= t)) { fp->acc = acc; goto _refill; }
-					if (acc >= lim) { break; }
+					if(_unlikely(p >= t)) { fp->acc = acc; goto _refill; }
+					if(acc >= lim) { break; }
 					p++;						/* skip '\n' */
 				}
 			}
 			fp->state = 8;
 		case 8:
-			if (_unlikely(p >= t)) { goto _refill; }
+			if(_unlikely(p >= t)) { goto _refill; }
 			_strip(p, t, lv);
 		_qual_tail:
 			_term(q, mem->a, s->qual);
@@ -1952,7 +1957,7 @@ uint64_t bseq_read_fasta(
 			return(2);							/* broken */
 	}
 	ret = fp->is_eof; fp->state = 0;			/* back to idle */
-	if ((uint32_t)s->l_seq < fp->min_len) {
+	if((uint32_t)s->l_seq < fp->min_len) {
 		seq->n--;
 		q = mem->a + (uint64_t)s->name;
 	}
@@ -1987,23 +1992,23 @@ bseq_t *bseq_read(
 	set_info(0, "[bseq_read] read sequence block from file");
 
 	/* check the context is valid */
-	if (fp->is_eof && fp->p >= fp->tail) { return(NULL); }
+	if(fp->is_eof && fp->p >= fp->tail) { return(NULL); }
 
 	/* reserve mem */
 	kv_reserve(uint8_t, mem, 2*fp->size);
 	kv_pushm(uint8_t, mem, margin, 64);
-	if (fp->bh) {
+	if(fp->bh) {
 		/* bam */
-		while (mem.n < fp->size) {
+		while(mem.n < fp->size) {
 			uint32_t size;
-			if (gzread(fp->fp, &size, 4) != 4) {
+			if(gzread(fp->fp, &size, 4) != 4) {
 				fp->is_eof = 1;
 				break;
 			}
-			if (fp->size < size) {
+			if(fp->size < size) {
 				fp->tail = (fp->base = fp->p = realloc(fp->base, fp->size = size)) + size;
 			}
-			if (gzread(fp->fp, fp->p, size) != size) {
+			if(gzread(fp->fp, fp->p, size) != size) {
 				seq.n = 0;
 				fp->is_eof = 2;
 				break;
@@ -2012,24 +2017,24 @@ bseq_t *bseq_read(
 		}
 	} else {
 		/* fasta/q */
-		while (mem.n < fp->size + 64) {
+		while(mem.n < fp->size + 64) {
 			uint64_t ret;
-			while ((ret = bseq_read_fasta(fp, &seq, &mem)) == 1) {
-				if (fp->is_eof) { goto _tail; }				/* correctly reached the end */
+			while((ret = bseq_read_fasta(fp, &seq, &mem)) == 1) {
+				if(fp->is_eof) { goto _tail; }				/* correctly reached the end */
 
 				/* reload buffer */
 				fp->p = fp->base + BSEQ_MGN;
 				fp->tail = fp->p + gzread(fp->fp, fp->p, fp->size);
 				memset(fp->tail, 0, BSEQ_MGN);				/* fill margin */
 
-				if (fp->tail < fp->base + BSEQ_MGN + fp->size) {
+				if(fp->tail < fp->base + BSEQ_MGN + fp->size) {
 					fp->is_eof = 1;							/* reached the tail */
 				}
-				if (mem.n + 2*fp->size > mem.m) {
+				if(mem.n + 2*fp->size > mem.m) {
 					mem.a = realloc(mem.a, mem.m *= 2);		/* expand mem */
 				}
 			}
-			if (ret > 1) {									/* error occurred */
+			if(ret > 1) {									/* error occurred */
 				seq.n = 0;
 				fp->is_eof = 2;
 				goto _tail;
@@ -2041,7 +2046,7 @@ bseq_t *bseq_read(
 	kv_pushm(uint8_t, mem, margin, 64);
 
 	/* adjust pointers */
-	for (uint64_t i = 0; i < seq.n; i++) {
+	for(uint64_t i = 0; i < seq.n; i++) {
 		seq.a[i].name += (ptrdiff_t)mem.a;
 		seq.a[i].seq += (ptrdiff_t)mem.a;
 		seq.a[i].qual += (ptrdiff_t)mem.a;
@@ -2049,7 +2054,7 @@ bseq_t *bseq_read(
 	}
 
 	/* seq.n == 0 indicates error */
-	if (seq.n == 0) {
+	if(seq.n == 0) {
 		free(mem.a);
 		mem.a = 0;
 		fp->is_eof = 1;
@@ -2300,45 +2305,45 @@ static void mm_sketch(uint8_t const *seq4, uint32_t len, uint32_t w, uint32_t k,
 	assert(len > 0 && w > 0 && k > 0);
 	memset(buf, 0xff, w * sizeof(mm128_t));
 
-	for (i = l = buf_pos = min_pos = 0; i < len; ++i) {
+	for(i = l = buf_pos = min_pos = 0; i < len; ++i) {
 		uint64_t _c = seq4[i];
 		mm128_t info = { .u64 = { UINT64_MAX, UINT64_MAX } };
-		if (_c != 0) { // not an ambiguous base
+		if(_c != 0) { // not an ambiguous base
 			uint64_t c = 0x03 & ((_c>>1) - (_c>>3));
 			k0 = (k0 << 2 | c) & mask;           // forward k-mer
 			k1 = (k1 >> 2) | (3ULL^c) << shift1; // reverse k-mer
-			if (k0 == k1) continue; // skip "symmetric k-mers" as we don't know it strand
-			if (++l >= k) {
+			if(k0 == k1) continue; // skip "symmetric k-mers" as we don't know it strand
+			if(++l >= k) {
 				info.u64[0] = hash64(k0 < k1? k0 : k1, mask);
 				info.u32[2] = k0 < k1? i : ~i; info.u32[3] = rid;
 			}
 		} else l = 0;
 		buf[buf_pos] = info; // need to do this here as appropriate buf_pos and buf[buf_pos] are needed below
-		if (l == w + k - 1) { // special case for the first window - because identical k-mers are not stored yet
-			for (j = buf_pos + 1; j < w; ++j)
-				if (min.u64[0] == buf[j].u64[0] && buf[j].u64[1] != min.u64[1]) kv_push(mm128_t, *p, buf[j]);
-			for (j = 0; j < buf_pos; ++j)
-				if (min.u64[0] == buf[j].u64[0] && buf[j].u64[1] != min.u64[1]) kv_push(mm128_t, *p, buf[j]);
+		if(l == w + k - 1) { // special case for the first window - because identical k-mers are not stored yet
+			for(j = buf_pos + 1; j < w; ++j)
+				if(min.u64[0] == buf[j].u64[0] && buf[j].u64[1] != min.u64[1]) kv_push(mm128_t, *p, buf[j]);
+			for(j = 0; j < buf_pos; ++j)
+				if(min.u64[0] == buf[j].u64[0] && buf[j].u64[1] != min.u64[1]) kv_push(mm128_t, *p, buf[j]);
 		}
-		if (info.u64[0] <= min.u64[0]) { // a new minimum; then write the old min
-			if (l >= w + k) kv_push(mm128_t, *p, min);
+		if(info.u64[0] <= min.u64[0]) { // a new minimum; then write the old min
+			if(l >= w + k) kv_push(mm128_t, *p, min);
 			min = info, min_pos = buf_pos;
-		} else if (buf_pos == min_pos) { // old min has moved outside the window
-			if (l >= w + k - 1) kv_push(mm128_t, *p, min);
-			for (j = buf_pos + 1, min.u64[0] = UINT64_MAX; j < w; ++j) // the two loops are necessary when there are identical k-mers
-				if (min.u64[0] >= buf[j].u64[0]) min = buf[j], min_pos = j; // >= is important s.t. min is always the closest k-mer
-			for (j = 0; j <= buf_pos; ++j)
-				if (min.u64[0] >= buf[j].u64[0]) min = buf[j], min_pos = j;
-			if (l >= w + k - 1) { // write identical k-mers
-				for (j = buf_pos + 1; j < w; ++j) // these two loops make sure the output is sorted
-					if (min.u64[0] == buf[j].u64[0] && min.u64[1] != buf[j].u64[1]) kv_push(mm128_t, *p, buf[j]);
-				for (j = 0; j <= buf_pos; ++j)
-					if (min.u64[0] == buf[j].u64[0] && min.u64[1] != buf[j].u64[1]) kv_push(mm128_t, *p, buf[j]);
+		} else if(buf_pos == min_pos) { // old min has moved outside the window
+			if(l >= w + k - 1) kv_push(mm128_t, *p, min);
+			for(j = buf_pos + 1, min.u64[0] = UINT64_MAX; j < w; ++j) // the two loops are necessary when there are identical k-mers
+				if(min.u64[0] >= buf[j].u64[0]) min = buf[j], min_pos = j; // >= is important s.t. min is always the closest k-mer
+			for(j = 0; j <= buf_pos; ++j)
+				if(min.u64[0] >= buf[j].u64[0]) min = buf[j], min_pos = j;
+			if(l >= w + k - 1) { // write identical k-mers
+				for(j = buf_pos + 1; j < w; ++j) // these two loops make sure the output is sorted
+					if(min.u64[0] == buf[j].u64[0] && min.u64[1] != buf[j].u64[1]) kv_push(mm128_t, *p, buf[j]);
+				for(j = 0; j <= buf_pos; ++j)
+					if(min.u64[0] == buf[j].u64[0] && min.u64[1] != buf[j].u64[1]) kv_push(mm128_t, *p, buf[j]);
 			}
 		}
-		if (++buf_pos == w) buf_pos = 0;
+		if(++buf_pos == w) buf_pos = 0;
 	}
-	if (min.u64[0] != UINT64_MAX)
+	if(min.u64[0] != UINT64_MAX)
 		kv_push(mm128_t, *p, min);
 }
 #else
@@ -2363,7 +2368,7 @@ void mm_sketch(
 	mm128_t *q = p->a+p->n, *t = p->a+p->m;
 	do {
 		/* extend buffer if needed */
-		if (q + 64 > t) {
+		if(q + 64 > t) {
 			p->n = q-p->a;
 			p->m = MAX2(256, p->m*2);
 			p->a = realloc(p->a, p->m*sizeof(mm128_t));
@@ -2374,39 +2379,39 @@ void mm_sketch(
 		uint64_t l = 0, k0 = 0, k1 = 0, min = UINT64_MAX, min_pos = 0;
 
 		/* head */
-		while (l < kk) {
+		while(l < kk) {
 			uint64_t c;
-			if ((c = seq4[++i]) == 0) { goto _loop_tail; }
+			if((c = seq4[++i]) == 0) { goto _loop_tail; }
 			_push_kmer(c);
-			if (k0 == k1) { continue; }
+			if(k0 == k1) { continue; }
 			buf[l&0x0f] = (mm128_t){ .u64 = { UINT64_MAX, 0 } };
 			l++;
 		}
-		while (l < kk + w) {
+		while(l < kk + w) {
 			uint64_t c, h;
-			if ((c = seq4[++i]) == 0) { goto _loop_tail; }
+			if((c = seq4[++i]) == 0) { goto _loop_tail; }
 			_push_kmer(c);
-			if (k0 == k1) { continue; }
+			if(k0 == k1) { continue; }
 			buf[l&0x0f] = (mm128_t){
 				.u64 = {
 					h = hash64(k0 < k1? k0 : k1, k0 < k1 ? k1 : k0, mask),
 					(k0 < k1? 0 : 0xffffffff) ^ i
 				}
 			};
-			if (h <= min) { min = h; min_pos = l & 0x0f; }
+			if(h <= min) { min = h; min_pos = l & 0x0f; }
 			l++;
 		}
-		for (uint64_t j = kk; j < kk + w; ++j) {
-			if (buf[j&0x0f].u64[0] == min) { *q++ = buf[j&0x0f]; }
+		for(uint64_t j = kk; j < kk + w; j++) {
+			if(buf[j&0x0f].u64[0] == min) { *q++ = buf[j&0x0f]; }
 		}
 		q--;
 
 		/* body */
-		while (1) {
+		while(1) {
 			uint64_t c, h;
-			if ((c = seq4[++i]) == 0) { goto _loop_tail; }
+			if((c = seq4[++i]) == 0) { goto _loop_tail; }
 			_push_kmer(c);
-			if (k0 == k1) { continue; }
+			if(k0 == k1) { continue; }
 			buf[l&0x0f] = (mm128_t){
 				.u64 = {
 					h = hash64(k0 < k1? k0 : k1, k0 < k1 ? k1 : k0, mask),
@@ -2414,19 +2419,19 @@ void mm_sketch(
 				}
 			};
 
-			if (h <= min) {
+			if(h <= min) {
 				*q++ = buf[min_pos]; min = h; min_pos = l&0x0f;
-			} else if (min_pos == ((l-w)&0x0f)) {
+			} else if(min_pos == ((l-w)&0x0f)) {
 				*q++ = buf[min_pos]; min = UINT64_MAX;
 
 				/* note: the following loops degrades performance due to the unpredictable branches */
-				for (uint64_t j = l-w+1; j <= l; ++j) {
-					if (buf[j&0x0f].u64[0] <= min) {
+				for(uint64_t j = l-w+1; j <= l; j++) {
+					if(buf[j&0x0f].u64[0] <= min) {
 						min = buf[j&0x0f].u64[0]; min_pos = j&0x0f;
 					}
 				}
-				for (uint64_t j = l-w+1; j <= l; ++j) {
-					if (buf[j&0x0f].u64[0] == min) {
+				for(uint64_t j = l-w+1; j <= l; j++) {
+					if(buf[j&0x0f].u64[0] == min) {
 						*q++ = buf[j&0x0f];
 					}
 				}
@@ -2435,7 +2440,7 @@ void mm_sketch(
 			l++;
 
 			/* extend buffer if needed */
-			if (q+64 <= t) { continue; }
+			if(q+64 <= t) { continue; }
 			p->n = q-p->a;
 			p->m = MAX2(128, p->m*2);
 			p->a = realloc(p->a, p->m*sizeof(mm128_t));
@@ -2444,8 +2449,8 @@ void mm_sketch(
 		}
 	_loop_tail:
 		/* flush tail */
-		if (min != UINT64_MAX) { *q++ = buf[min_pos]; }
-	} while (i < len);
+		if(min != UINT64_MAX) { *q++ = buf[min_pos]; }
+	} while(i < len);
 	p->n = q-p->a;
 	#undef _push_kmer
 	return;
@@ -2531,8 +2536,8 @@ int mm_log_printer(
 
 	FILE *fp = (FILE *)opt->fp;
 	int r = 0;
-	if (level >= ' ' || (level & 0x10) == 0) {
-		if (level >= ' ' || (level & 0x08) == 0) {
+	if(level >= ' ' || (level & 0x10) == 0) {
+		if(level >= ' ' || (level & 0x08) == 0) {
 			r += fprintf(fp, "[%c::%s] ", level < ' '? 'M' : level, func);
 		} else {
 			r += fprintf(fp, "[%c::%s::%.3f*%.2f] ",
@@ -2600,7 +2605,7 @@ static _force_inline
 int mm_mapopt_check(mm_mapopt_t *opt)
 {
 	#define _opt_assert(_cond, _level, ...) { \
-		if ((_cond)) { \
+		if((_cond)) { \
 			ret++; \
 			opt->log(opt, _level, __func__, __VA_ARGS__); \
 		} \
@@ -2640,7 +2645,7 @@ int mm_mapopt_check(mm_mapopt_t *opt)
 
 	/* occurrence filter params */
 	_opt_assert(opt->n_frq >= 16,							'E', "Frequency thresholds must be fewer than 16.");
-	for (uint64_t i = 0; i < opt->n_frq; ++i) {
+	for(uint64_t i = 0; i < opt->n_frq; i++) {
 		_opt_assert(opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i]),
 			'E',
 			"Frequency thresholds must be inside [0.0,1.0] and descending."
@@ -2662,8 +2667,8 @@ int mm_mapopt_check(mm_mapopt_t *opt)
 	_opt_assert(opt->elim >= 10000,							'E', "elim must be inside [0,10000).");
 
 	#define _dup(x)	({ char *_p = malloc(strlen(x)+1); memcpy(_p, (x), strlen(x)); _p[strlen(x)] = '\0'; _p; })
-	if (opt->flag&(0x01ULL<<MM_RG)) {
-		if (opt->rg_line == NULL && opt->rg_id == NULL) {
+	if(opt->flag&(0x01ULL<<MM_RG)) {
+		if(opt->rg_line == NULL && opt->rg_id == NULL) {
 			opt->rg_line = _dup("@RG\tID:1\tSM:default");
 			opt->rg_id = _dup("1");
 		}
@@ -2746,10 +2751,10 @@ mm_idx_t *mm_idx_init(
 static _force_inline
 void mm_idx_destroy(mm_idx_t *mi)
 {
-	if (mi == 0) { return; }
+	if(mi == 0) { return; }
 
 	/* buckets */
-	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
+	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
 		free(mi->bkt[i].p);
 		free(mi->bkt[i].a.a);
 		kh_destroy((kh_t*)mi->bkt[i].h);
@@ -2757,7 +2762,7 @@ void mm_idx_destroy(mm_idx_t *mi)
 	free(mi->bkt);
 
 	/* sequence containers */
-	for (uint64_t i = 0; i < mi->mem.n; ++i) {
+	for(uint64_t i = 0; i < mi->mem.n; i++) {
 		free((void *)mi->mem.a[i].u64[1]);
 	}
 	free(mi->mem.a);
@@ -2782,11 +2787,11 @@ v2u32_t const *mm_idx_get(
 	kh_t *h = (kh_t*)b->h;
 	uint64_t const *p;
 
-	if (h == NULL || (p = kh_get_ptr(h, minier>>mi->b)) == NULL) {
+	if(h == NULL || (p = kh_get_ptr(h, minier>>mi->b)) == NULL) {
 		*n = 0;
 		return(NULL);
 	}
-	if ((int64_t)*p >= 0) {
+	if((int64_t)*p >= 0) {
 		*n = 1;
 		return((v2u32_t const *)p);
 	} else {
@@ -2810,26 +2815,26 @@ uint32_t *mm_idx_cal_max_occ(
 	set_info(0, "[mm_idx_cal_max_occ] calculate occurrence thresholds");
 	/* calc size of occurrence table */
 	uint64_t n = 0;
-	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
-		if (mi->bkt[i].h) {
+	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
+		if(mi->bkt[i].h) {
 			n += kh_cnt((kh_t*)mi->bkt[i].h);
 		}
 	}
 
 	/* build occurrence table */
 	uint32_t *a = (uint32_t*)malloc(n * sizeof(uint32_t));
-	for (uint64_t i = (n = 0); i < 1ULL<<mi->b; ++i) {
+	for(uint64_t i = (n = 0); i < 1ULL<<mi->b; i++) {
 		kh_t *h = (kh_t*)mi->bkt[i].h;
-		if (h == 0) { continue; }
-		for (uint64_t k = 0; k < kh_size(h); ++k) {
-			if (!kh_exist(h, k)) { continue; }
+		if(h == 0) { continue; }
+		for(uint64_t k = 0; k < kh_size(h); k++) {
+			if(!kh_exist(h, k)) { continue; }
 			a[n++] = ((int64_t)kh_val(h, k))>=0? 1 : (uint32_t)kh_val(h, k);
 		}
 	}
 
 	/* calc thresh */
 	uint32_t *thres = calloc(1, sizeof(uint32_t) * n_frq);
-	for (uint64_t i = 0; i < n_frq; ++i) {
+	for(uint64_t i = 0; i < n_frq; i++) {
 		thres[i] = frq[i] <= 0.0
 			? UINT32_MAX
 			: (ks_ksmall_uint32_t(n, a, (uint32_t)((1.0 - frq[i]) * n)) + 1);
@@ -2879,7 +2884,7 @@ void *mm_idx_source(uint32_t tid, void *arg)
 	uint64_t size;
 	void *base;
 	s->seq = bseq_read(q->fp, &s->n_seq, &base, &size);
-	if (s->seq == NULL) {
+	if(s->seq == NULL) {
 		free(s); s = NULL;
 		return NULL;
 	}
@@ -2888,7 +2893,7 @@ void *mm_idx_source(uint32_t tid, void *arg)
 	s->id = q->icnt++;
 
 	/* update base_rid and seq array (for all-versus-all) */
-	if (q->mi->base_rid == UINT32_MAX) {
+	if(q->mi->base_rid == UINT32_MAX) {
 		q->mi->base_rid = atoi(s->seq[0].name);		/* assume first seq name is base_rid */
 	}
 	s->base_rid = q->mi->base_rid + q->mi->s.n;
@@ -2897,13 +2902,13 @@ void *mm_idx_source(uint32_t tid, void *arg)
 	kv_push(mm128_t, q->mi->mem, ((mm128_t){ .u64 = { size, (uintptr_t)base }}));
 
 	/* copy sequence pointers */
-	if (q->mi->s.n + s->n_seq > q->mi->s.m) {
+	if(q->mi->s.n + s->n_seq > q->mi->s.m) {
 		q->mi->s.m = MAX2(256, 2*q->mi->s.m);
 		q->mi->s.a = realloc(q->mi->s.a, sizeof(mm_idx_seq_t) * q->mi->s.m);
 	}
 	bseq_t const *src = s->seq;
 	mm_idx_seq_t *dst = &q->mi->s.a[q->mi->s.n];
-	for (uint64_t i = 0; i < s->n_seq; ++i) {
+	for(uint64_t i = 0; i < s->n_seq; i++) {
 		dst[i] = (mm_idx_seq_t){
 			.seq = src[i].seq,   .l_seq = src[i].l_seq,
 			.name = src[i].name, .l_name = src[i].l_name,
@@ -2928,7 +2933,7 @@ void *mm_idx_worker(uint32_t tid, void *arg, void *item)
 	char buf[128], *p = buf;
 	p += _pstr(p, "[mm_idx_worker] bin id "); p += _pnum(uint32_t, p, s->base_rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->base_rid + s->n_seq - 1); *p = '\0';
 	set_info(tid, buf);
-	for (uint64_t i = 0; i < s->n_seq; ++i) {
+	for(uint64_t i = 0; i < s->n_seq; i++) {
 		mm_sketch(s->seq[i].seq, s->seq[i].l_seq, q->mi->w, q->mi->k, s->base_rid + i, &s->a);
 	}
 	return(s);
@@ -2941,7 +2946,7 @@ static _force_inline
 void mm_idx_drain_intl(mm_idx_pipeline_t *q, mm_idx_step_t *s)
 {
 	uint64_t mask = q->mi->mask;
-	for (uint64_t i = 0; i < s->a.n; ++i) {
+	for(uint64_t i = 0; i < s->a.n; i++) {
 		mm128_v *p = &q->mi->bkt[s->a.a[i].u64[0]&mask].a;
 		kv_push(mm128_t, *p, s->a.a[i]);
 	}
@@ -2964,7 +2969,7 @@ void mm_idx_drain(uint32_t tid, void *arg, void *item)
 	#if STRICT_STREAM_ORDERING != 0
 		/* sorted pipeline (for debugging) */
 		kv_hq_push(mm128_t, incq_comp, q->hq, ((mm128_t){.u64 = {s->id, (uintptr_t)s}}));
-		while (q->hq.n > 1 && q->hq.a[1].u64[0] == q->ocnt) {
+		while(q->hq.n > 1 && q->hq.a[1].u64[0] == q->ocnt) {
 			q->ocnt++;
 			s = (mm_idx_step_t*)kv_hq_pop(mm128_t, incq_comp, q->hq).u64[1];
 			mm_idx_drain_intl(q, s);
@@ -2996,17 +3001,17 @@ void *mm_idx_post(uint32_t tid, void *arg, void *item)
 	mm_idx_post_t *q = (mm_idx_post_t*)item;
 	mm_idx_t *mi = q->mi;
 
-	for (uint64_t i = q->from; i < q->to; ++i) {
+	for(uint64_t i = q->from; i < q->to; i++) {
 		mm_idx_bucket_t *b = &mi->bkt[i];
-		if (b->a.n == 0) { continue; }
+		if(b->a.n == 0) { continue; }
 
 		/* sort by minimizer */
 		radix_sort_128x(b->a.a, b->a.a + b->a.n);
 
 		/* count keys and preallocate buffer */
 		uint64_t n_keys = 0; b->n = 0;
-		for (uint64_t j = 1, n = 1; j <= b->a.n; ++j, ++n) {
-			if (j != b->a.n && b->a.a[j].u64[0] == b->a.a[j-1].u64[0]) { continue; }
+		for(uint64_t j = 1, n = 1; j <= b->a.n; j++, n++) {
+			if(j != b->a.n && b->a.a[j].u64[0] == b->a.a[j-1].u64[0]) { continue; }
 			b->n += (n > 1)? n : 0;
 			n_keys++;
 			n = 0;
@@ -3015,15 +3020,15 @@ void *mm_idx_post(uint32_t tid, void *arg, void *item)
 		b->p = (uint64_t*)malloc(sizeof(uint64_t) * b->n);
 
 		/* create the (2nd-stage) hash table for the bucket */
-		for (uint64_t j = 1, n = 1, sp = 0; j <= b->a.n; ++j, ++n) {
-			if (j != b->a.n && b->a.a[j].u64[0] == b->a.a[j-1].u64[0]) { continue; }
+		for(uint64_t j = 1, n = 1, sp = 0; j <= b->a.n; j++, n++) {
+			if(j != b->a.n && b->a.a[j].u64[0] == b->a.a[j-1].u64[0]) { continue; }
 
 			mm128_t *p = &b->a.a[j-n];
 			uint64_t key = p->u64[0]>>mi->b, val = p->u64[1];
-			if (n != 1) {
+			if(n != 1) {
 				b->p[sp++] = val;
 				val = (sp-1)<<32 | n | 0x01ULL<<63;	// k = 0
-				while (n > 1) {
+				while(n > 1) {
 					b->p[sp++] = b->a.a[j - --n].u64[1];
 				}
 			}
@@ -3052,7 +3057,7 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 	/* init pipeline context */
 	pl.icnt = pl.ocnt = 0;
 	pl.fp = fp;
-	if (pl.fp == NULL) { return(NULL); }		/* fp must be instanciated */
+	if(pl.fp == NULL) { return(NULL); }		/* fp must be instanciated */
 
 	/* initialize index object */
 	pl.mi = mm_idx_init(opt->w, opt->k, opt->b, opt->base_rid, (opt->flag&MM_CIRCULAR) != 0);
@@ -3060,21 +3065,19 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 
 	/* create thread contexts */
 	p = (mm_idx_pipeline_t**)calloc(opt->nth, sizeof(mm_idx_pipeline_t*));
-	for (uint64_t i = 0; i < opt->nth; ++i) { p[i] = &pl; }
+	for(uint64_t i = 0; i < opt->nth; i++) { p[i] = &pl; }
 
 	/* read sequence and collect minimizers */
 	pt_t *pt = pt_init(opt->nth);
 	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
 	free(p);
 	kv_hq_destroy(pl.hq);
-	if (opt->verbose >= 1) {
-		fprintf(stderr, "[M::%s::%.3f*%.2f] collected minimizers\n", __func__, realtime() - opt->inittime, cputime() / (realtime() - opt->inittime));
-	}
+	opt->log(opt, 9, __func__, "collected minimizers");
 
 	/* sort minimizers */
 	mm_idx_post_t *q = (mm_idx_post_t*)calloc(opt->nth, sizeof(mm_idx_post_t));
 	mm_idx_post_t **qq = (mm_idx_post_t**)calloc(opt->nth, sizeof(mm_idx_post_t*));
-	for (uint64_t i = 0; i < opt->nth; ++i) {
+	for(uint64_t i = 0; i < opt->nth; i++) {
 		q[i].mi = pl.mi;
 		q[i].from = (1ULL<<pl.mi->b)*i/opt->nth;
 		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->nth;
@@ -3082,12 +3085,10 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 	}
 	pt_parallel(pt, mm_idx_post, NULL, (void**)qq);
 	pt_destroy(pt);
+	opt->log(opt, 9, __func__, "sorted minimizers");
 
 	free(q);
 	free(qq);
-	if (opt->verbose >= 1) {
-		fprintf(stderr, "[M::%s::%.3f*%.2f] sorted minimizers\n", __func__, realtime() - opt->inittime, cputime() / (realtime() - opt->inittime));
-	}
 	return(pl.mi);
 }
 
@@ -3099,34 +3100,34 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 static _force_inline
 void mm_idx_cmp(mm_mapopt_t const *opt, mm_idx_t const *m1, mm_idx_t const *m2)
 {
-	for (uint64_t i = 0; i < 1ULL<<opt->b; ++i) {
+	for(uint64_t i = 0; i < 1ULL<<opt->b; ++i) {
 		mm_idx_bucket_t *bkt1 = &m1->bkt[i], *bkt2 = &m2->bkt[i];
-		if (bkt1 == NULL || bkt2 == NULL) {
-			if (bkt1 == NULL && bkt2 == NULL) continue;
-			if (bkt1) fprintf(stderr, "i(%lu), bkt1 is instanciated but bkt2 is not\n", i);
-			if (bkt2) fprintf(stderr, "i(%lu), bkt2 is instanciated but bkt1 is not\n", i);
+		if(bkt1 == NULL || bkt2 == NULL) {
+			if(bkt1 == NULL && bkt2 == NULL) continue;
+			if(bkt1) fprintf(stderr, "i(%lu), bkt1 is instanciated but bkt2 is not\n", i);
+			if(bkt2) fprintf(stderr, "i(%lu), bkt2 is instanciated but bkt1 is not\n", i);
 			continue;
 		}
 
-		if (bkt1->n != bkt2->n) fprintf(stderr, "i(%lu), array size differs(%lu, %lu)\n", i, bkt1->n, bkt2->n);
-		for (uint64_t j = 0; j < MIN2(bkt1->n, bkt2->n); ++j) {
-			if (bkt1->p[j] != bkt2->p[j]) fprintf(stderr, "i(%lu), array differs at j(%lu), (%lu, %lu)\n", i, j, bkt1->p[j], bkt2->p[j]);
+		if(bkt1->n != bkt2->n) fprintf(stderr, "i(%lu), array size differs(%lu, %lu)\n", i, bkt1->n, bkt2->n);
+		for(uint64_t j = 0; j < MIN2(bkt1->n, bkt2->n); ++j) {
+			if(bkt1->p[j] != bkt2->p[j]) fprintf(stderr, "i(%lu), array differs at j(%lu), (%lu, %lu)\n", i, j, bkt1->p[j], bkt2->p[j]);
 		}
 
 		kh_t *h1 = bkt1->h, *h2 = bkt2->h;
-		if (h1 == NULL || h2 == NULL) {
-			if (h1 == NULL && h2 == NULL) continue;
-			if (h1) fprintf(stderr, "i(%lu), h1 is instanciated but h2 is not\n", i);
-			if (h2) fprintf(stderr, "i(%lu), h2 is instanciated but h1 is not\n", i);
+		if(h1 == NULL || h2 == NULL) {
+			if(h1 == NULL && h2 == NULL) continue;
+			if(h1) fprintf(stderr, "i(%lu), h1 is instanciated but h2 is not\n", i);
+			if(h2) fprintf(stderr, "i(%lu), h2 is instanciated but h1 is not\n", i);
 			continue;
 		}
-		if (h1->mask != h2->mask) fprintf(stderr, "i(%lu), hash size differs(%u, %u)\n", i, h1->mask, h2->mask);
-		if (h1->max != h2->max) fprintf(stderr, "i(%lu), hash max differs(%u, %u)\n", i, h1->max, h2->max);
-		if (h1->cnt != h2->cnt) fprintf(stderr, "i(%lu), hash cnt differs(%u, %u)\n", i, h1->cnt, h2->cnt);
-		if (h1->ub != h2->ub) fprintf(stderr, "i(%lu), hash ub differs(%u, %u)\n", i, h1->ub, h2->ub);
-		for (uint64_t j = 0; j < MIN2(h1->mask, h2->mask)+1; ++j) {
-			if (h1->a[j].u64[0] != h2->a[j].u64[0]) fprintf(stderr, "i(%lu), hash key differs at j(%lu), (%lu, %lu)\n", i, j, h1->a[j].u64[0], h2->a[j].u64[0]);
-			if (h1->a[j].u64[1] != h2->a[j].u64[1]) fprintf(stderr, "i(%lu), hash val differs at j(%lu), (%lu, %lu)\n", i, j, h1->a[j].u64[1], h2->a[j].u64[1]);
+		if(h1->mask != h2->mask) fprintf(stderr, "i(%lu), hash size differs(%u, %u)\n", i, h1->mask, h2->mask);
+		if(h1->max != h2->max) fprintf(stderr, "i(%lu), hash max differs(%u, %u)\n", i, h1->max, h2->max);
+		if(h1->cnt != h2->cnt) fprintf(stderr, "i(%lu), hash cnt differs(%u, %u)\n", i, h1->cnt, h2->cnt);
+		if(h1->ub != h2->ub) fprintf(stderr, "i(%lu), hash ub differs(%u, %u)\n", i, h1->ub, h2->ub);
+		for(uint64_t j = 0; j < MIN2(h1->mask, h2->mask)+1; ++j) {
+			if(h1->a[j].u64[0] != h2->a[j].u64[0]) fprintf(stderr, "i(%lu), hash key differs at j(%lu), (%lu, %lu)\n", i, j, h1->a[j].u64[0], h2->a[j].u64[0]);
+			if(h1->a[j].u64[1] != h2->a[j].u64[1]) fprintf(stderr, "i(%lu), hash val differs at j(%lu), (%lu, %lu)\n", i, j, h1->a[j].u64[1], h2->a[j].u64[1]);
 		}
 	}
 }
@@ -3168,7 +3169,7 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 	pg_t *pg = pg_init(fp, nth);
 
 	/* calculate sequence block size */
-	for (uint64_t i = 0; i < mi->mem.n; ++i) {
+	for(uint64_t i = 0; i < mi->mem.n; i++) {
 		hdr.size += mi->mem.a[i].u64[0];
 	}
 
@@ -3177,7 +3178,7 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 	pgwrite(pg, &hdr, sizeof(mm_idx_hdr_t));
 
 	/* dump buckets */
-	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
+	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
 		mm_idx_bucket_t *b = &mi->bkt[i];
 		pgwrite(pg, &b->n, sizeof(uint32_t) * 1);			/* value table size */
 		pgwrite(pg, b->p, sizeof(uint64_t) * b->n);			/* value table content */
@@ -3185,14 +3186,14 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 	}
 
 	/* dump sequence contents */
-	for (uint64_t i = 0; i < mi->mem.n; ++i) {
+	for(uint64_t i = 0; i < mi->mem.n; i++) {
 		pgwrite(pg, (void *)mi->mem.a[i].u64[1], sizeof(char) * mi->mem.a[i].u64[0]);
 	}
 
 	/* dump sequence pointer arrays; first convert pointers to offsets */
-	for (uint64_t i = 0, j = 0, s = 0; i < mi->s.n; ++i) {
+	for(uint64_t i = 0, j = 0, s = 0; i < mi->s.n; i++) {
 		/* calculate offset from head */
-		if ((uintptr_t)mi->s.a[i].seq < (uintptr_t)mi->mem.a[j].u64[1]
+		if((uintptr_t)mi->s.a[i].seq < (uintptr_t)mi->mem.a[j].u64[1]
 		|| (uintptr_t)mi->s.a[i].seq >= (uintptr_t)mi->mem.a[j].u64[1] + (ptrdiff_t)mi->mem.a[j].u64[0]) {
 			s += mi->mem.a[j++].u64[0];
 		}
@@ -3204,10 +3205,10 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 	pgwrite(pg, mi->s.a, sizeof(mm_idx_seq_t) * mi->s.n);
 
 	/* restore pointers */
-	for (uint64_t i = 0, j = 0, s = 0; i < mi->s.n; ++i) {
+	for(uint64_t i = 0, j = 0, s = 0; i < mi->s.n; i++) {
 		mi->s.a[i].name -= (ptrdiff_t)s; mi->s.a[i].name += (ptrdiff_t)mi->mem.a[j].u64[1];
 		mi->s.a[i].seq -= (ptrdiff_t)s;  mi->s.a[i].seq += (ptrdiff_t)mi->mem.a[j].u64[1];
-		if ((uintptr_t)mi->s.a[i].name > s + mi->mem.a[j].u64[0]) {
+		if((uintptr_t)mi->s.a[i].name > s + mi->mem.a[j].u64[0]) {
 			s += mi->mem.a[j++].u64[0];
 		}
 	}
@@ -3229,14 +3230,14 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 
 	/* read magic */
 	char magic[4];
-	if (pgread(pg, magic, strlen(MM_IDX_MAGIC)) != strlen(MM_IDX_MAGIC)
+	if(pgread(pg, magic, strlen(MM_IDX_MAGIC)) != strlen(MM_IDX_MAGIC)
 	 || strncmp(magic, MM_IDX_MAGIC, strlen(MM_IDX_MAGIC)) != 0) {
 		goto _mm_idx_load_fail;
 	}
 
 	/* read header */
 	mm_idx_hdr_t hdr;
-	if (pgread(pg, &hdr, sizeof(mm_idx_hdr_t)) != sizeof(mm_idx_hdr_t)) {
+	if(pgread(pg, &hdr, sizeof(mm_idx_hdr_t)) != sizeof(mm_idx_hdr_t)) {
 		goto _mm_idx_load_fail;
 	}
 
@@ -3244,17 +3245,17 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 	mi = mm_idx_init(hdr.w, hdr.k, hdr.b, hdr.base_rid, hdr.circular);
 
 	/* load hash tables */
-	for (uint64_t i = 0; i < 1ULL<<mi->b; ++i) {
+	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
 		mm_idx_bucket_t *b = &mi->bkt[i];
 
 		/* read value table size */
-		if (pgread(pg, &b->n, sizeof(uint32_t) * 1) != sizeof(uint32_t) * 1) {
+		if(pgread(pg, &b->n, sizeof(uint32_t) * 1) != sizeof(uint32_t) * 1) {
 			goto _mm_idx_load_fail;
 		}
 
 		/* read value table content */
 		b->p = (uint64_t*)malloc(b->n * sizeof(uint64_t));
-		if (pgread(pg, b->p, sizeof(uint64_t) * b->n) != sizeof(uint64_t) * (size_t)b->n) {
+		if(pgread(pg, b->p, sizeof(uint64_t) * b->n) != sizeof(uint64_t) * (size_t)b->n) {
 			goto _mm_idx_load_fail;
 		}
 
@@ -3272,12 +3273,12 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 	kv_push(mm128_t, mi->mem, mem);
 	#if 0
 	uint64_t const chunk_size = 1024 * 1024 * 1024;		/* 1G to fit in signed int */
-	for (uint64_t b = 0; b < mi->size.a[0]; b += chunk_size) {
+	for(uint64_t b = 0; b < mi->size.a[0]; b += chunk_size) {
 		uint64_t size = MIN2(chunk_size, mi->size.a[0] - b);
-		if (pgread(pg, mi->mem.a[0] + b, sizeof(char) * size) != sizeof(char) * size) goto _mm_idx_load_fail;
+		if(pgread(pg, mi->mem.a[0] + b, sizeof(char) * size) != sizeof(char) * size) goto _mm_idx_load_fail;
 	}
 	#else
-	if (pgread(pg, (void *)mem.u64[1], sizeof(char) * hdr.size) != sizeof(char) * hdr.size) {
+	if(pgread(pg, (void *)mem.u64[1], sizeof(char) * hdr.size) != sizeof(char) * hdr.size) {
 		goto _mm_idx_load_fail;
 	}
 	#endif
@@ -3285,12 +3286,12 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 	/* load sequence pointer array */
 	mi->s.n = hdr.n_seq;
 	mi->s.a = malloc(sizeof(mm_idx_seq_t) * mi->s.n);
-	if (pgread(pg, mi->s.a, sizeof(mm_idx_seq_t) * mi->s.n) != sizeof(mm_idx_seq_t) * mi->s.n) {
+	if(pgread(pg, mi->s.a, sizeof(mm_idx_seq_t) * mi->s.n) != sizeof(mm_idx_seq_t) * mi->s.n) {
 		goto _mm_idx_load_fail;
 	}
 
 	/* convert offsets to pointers */
-	for (uint64_t i = 0; i < mi->s.n; ++i) {
+	for(uint64_t i = 0; i < mi->s.n; i++) {
 		mi->s.a[i].name += (ptrdiff_t)mem.u64[1];
 		mi->s.a[i].seq += (ptrdiff_t)mem.u64[1];
 	}
@@ -3389,14 +3390,14 @@ void mm_expand(
 	mm128_v *restrict coef)						/* dst array */
 {
 	int32_t const ofs = 0x40000000;
-	if (n == 0) { return; }
+	if(n == 0) { return; }
 
 	/* expand array if needed */
 	kv_reserve(mm128_t, *coef, coef->n + n);
 
 	/* iterate over all the collected minimizers */
-	for (uint64_t i = 0; i < n; ++i) {
-		if (org + r[i].x[1] - qid < thresh) {
+	for(uint64_t i = 0; i < n; i++) {
+		if(org + r[i].x[1] - qid < thresh) {
 			continue;							/* skip if seed is in the lower triangle (all-versus-all) */
 		}
 
@@ -3410,8 +3411,6 @@ void mm_expand(
 				[2] = _rs, [3] = _qs			/* encoded ref and query pos */
 			}
 		};
-		// mm128_t *p = &coef->a[coef->n++];
-		// p->u32[0] = ofs + _rs - (_qs>>1); p->u32[1] = r[i].x[1]; p->u32[2] = _rs; p->u32[3] = _qs;
 	}
 	return;
 }
@@ -3436,14 +3435,14 @@ void mm_collect(
 	mini->n = coef->n = 0;
 	mm_sketch(seq, l_seq, mi->w, mi->k, 0, mini);
 
-	for (uint64_t i = 0; i < mini->n; ++i) {		
+	for(uint64_t i = 0; i < mini->n; i++) {		
 		/* get minimizer at current pos */
 		uint32_t n;
 		v2u32_t const *r = mm_idx_get(mi, mini->a[i].u64[0], &n);
-		if (n > max_occ) { continue; }			/* skip if exceeds repetitive threshold */
+		if(n > max_occ) { continue; }			/* skip if exceeds repetitive threshold */
 
 		int32_t qs = (int32_t)mini->a[i].u32[2];
-		if (n > resc_occ) {						/* save if less than max but exceeds current threshold */
+		if(n > resc_occ) {						/* save if less than max but exceeds current threshold */
 			mm128_t *q = &mini->a[n_resc++];
 			q->u32[0] = qs;
 			q->u32[1] = n;
@@ -3469,21 +3468,21 @@ void mm_chain(
 {
 	int32_t const ofs = 0x40000000;
 	uint32_t const chained = 0x80000000, mask = 0x7fffffff;
-	for (uint64_t i = intv->n = 0, j, k, n; i < l_coef; i = MIN2(j, k)) {
+	for(uint64_t i = intv->n = 0, j, k, n; i < l_coef; i = MIN2(j, k)) {
 		uint32_t rid = coef[i].u32[1];
 		int32_t rs = coef[i].u32[2], qs = coef[i].u32[3], re = rs, qe = qs;
 		int32_t l, h, lub = coef[i].u32[0] + llim, hub = rs - (qs<<1) + ofs, hlb = hub - hlim;
 		uint32_t len = 0;
-		for (j = i+1, k = UINT64_MAX, n = i; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
-			if ((int32_t)coef[j].u32[2] < 0) continue;
+		for(j = i+1, k = UINT64_MAX, n = i; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
+			if((int32_t)coef[j].u32[2] < 0) continue;
 			re = coef[j].u32[2], qe = coef[j].u32[3];	/* tagged seeds are skipped, no need to mask */
-			if (rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }	// out of range, skip
+			if(rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }	// out of range, skip
 			lub = l + llim; hub = h; hlb = h - hlim;
 			coef[j].u32[2] |= chained; n = j;
 		}
 		re = coef[n].u32[2] & mask; qe = coef[n].u32[3]; qs = _m(qs); qe = _m(qe);
 		len = re-rs+_s(qe-qs)*(qe-qs);
-		if (len < min) continue;
+		if(len < min) continue;
 		v2u32_t *p;
 		kv_pushp(v2u32_t, *intv, &p);
 		p->x[0] = (uint32_t)ofs - len; p->x[1] = i;
@@ -3506,17 +3505,17 @@ uint64_t mm_short_chain(
 	int32_t rs = coef->u32[2] & mask, qs = coef->u32[3], re = rs, qe = qs;
 	int32_t l, h, lub = coef->u32[0] + llim, hub = rs - (qs<<1) + ofs, hlb = hub - hlim;
 	uint32_t len = 0;
-	if (rid != coef->u32[1]) { return(1); }
+	if(rid != coef->u32[1]) { return(1); }
 
 	uint64_t j, k;
-	for (j = 1, k = UINT64_MAX; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
+	for(j = 1, k = UINT64_MAX; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
 		re = coef[j].u32[2] & mask, qe = coef[j].u32[3];
-		if (rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) {
+		if(rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) {
 			k = MIN2(j, k);
 			continue;
 		}
 		lub = l + llim; hub = h; hlb = h - hlim;	// n = j;
-		if (++len > eidx) { break; }
+		if(++len > eidx) { break; }
 	}
 	return MIN2(j, k);
 }
@@ -3536,10 +3535,10 @@ uint64_t mm_rescue(
 	int32_t const ofs = 0x40000000, mask = 0x7fffffff;
 	int32_t re = r->u32[2], qe = r->u32[3], l, h;
 	int32_t lt = ofs + re - (qe>>1), ht = ofs + re - (qe<<1), lb = lt - blim, le = lt + elim, hb = ht + blim, he = ht - elim, lub = lt + llim;
-	for (uint64_t i = 0; i < l_coef && (int32_t)coef[i].u32[0] < lb; ++i) {}
-	for (uint64_t i = 0; i < l_coef && (l = (int32_t)coef[i].u32[0]) < lub; ++i) {
+	for(uint64_t i = 0; i < l_coef && (int32_t)coef[i].u32[0] < lb; i++) {}
+	for(uint64_t i = 0; i < l_coef && (l = (int32_t)coef[i].u32[0]) < lub; i++) {
 		uint32_t const rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
-		if ((h = ofs + rs - (qs<<1)) > hb || (l < le && h > he && ((l > lt) ^ (h < ht)))) {
+		if((h = ofs + rs - (qs<<1)) > hb || (l < le && h > he && ((l > lt) ^ (h < ht)))) {
 			continue;
 		}
 		return(mm_short_chain(l_coef - i, coef + i, llim, hlim, ref->rid, eidx));
@@ -3562,24 +3561,24 @@ gaba_fill_t const *mm_extend_core(
 {
 	/* fill root */
 	gaba_fill_t const *f = gaba_dp_fill_root(dp, r, rpos, q, qpos);
-	if (_unlikely(f == NULL)) { goto _mm_extend_core_abort; }
+	if(_unlikely(f == NULL)) { goto _mm_extend_core_abort; }
 
 	gaba_fill_t const *m = f;					/* max */
 	uint32_t flag = GABA_STATUS_TERM;
 	do {
 		/* update section if reached tail */
-		if (f->status & GABA_STATUS_UPDATE_A) { r = rt; }
-		if (f->status & GABA_STATUS_UPDATE_B) { q = qt; }
+		if(f->status & GABA_STATUS_UPDATE_A) { r = rt; }
+		if(f->status & GABA_STATUS_UPDATE_B) { q = qt; }
 
 		/* update flag for tail detection */
 		flag |= f->status & (GABA_STATUS_UPDATE_A | GABA_STATUS_UPDATE_B);
 
 		/* fill the next section */
-		if (_unlikely((f = gaba_dp_fill(dp, f, r, q)) == NULL)) {
+		if(_unlikely((f = gaba_dp_fill(dp, f, r, q)) == NULL)) {
 			goto _mm_extend_core_abort;
 		}
 		m = (f->max > m->max)? f : m;
-	} while (!(flag & f->status));
+	} while(!(flag & f->status));
 	return(m);									/* never be null */
 
 _mm_extend_core_abort:							/* out-of-memory in libgaba */
@@ -3604,30 +3603,30 @@ gaba_alignment_t const *mm_extend(
 	lmm_t *restrict lmm)						/* dp memory arena */
 {
 	uint32_t const mask = 0x7fffffff;
-	uint8_t const *lim = (uint8_t const*)0x800000000000;
+	uint8_t const *lim = (uint8_t const *)0x800000000000;
 
 	/* construct reference-side sections */
-	gaba_section_t rf = {
+	gaba_section_t const rf = {
 		.id = ref->rid<<1,
 		.len = ref->l_seq,
-		.base = (uint8_t const*)ref->seq
+		.base = (uint8_t const *)ref->seq
 	};
-	gaba_section_t rr = {
+	gaba_section_t const rr = {
 		.id = (ref->rid<<1) + 1,
 		.len = ref->l_seq,
-		.base = gaba_rev((uint8_t const*)ref->seq + ref->l_seq - 1, lim)
+		.base = gaba_rev((uint8_t const *)&ref->seq[ref->l_seq - 1], lim)
 	};
 	gaba_dp_flush(dp, lim, lim);
 
 	uint64_t rid = (uint64_t)ref->rid<<32;
-	for (uint64_t i = sidx; i < eidx && i < l_coef; ++i) {
-		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) {
+	for(uint64_t i = sidx; i < eidx && i < l_coef; i++) {
+		if(i != 0 && (int32_t)coef[i].u32[2] >= 0) {
 			continue;	/* skip root seed of another chain */
 		}
 		gaba_stack_t const *stack = gaba_dp_save_stack(dp);
 		int32_t rs = coef[i].u32[2] & mask;
 		int32_t qs = coef[i].u32[3];
-		if (qs < 0) {							/* reverse */
+		if(qs < 0) {							/* reverse */
 			gaba_section_t const *temp = qf; qf = qr; qr = temp;	/* swap */
 			qs = (int32_t)(qf->len - _m(qs) + k - 1);
 		}
@@ -3643,7 +3642,7 @@ gaba_alignment_t const *mm_extend(
 
 		/* check duplication */
 		uint64_t key = rid | (uint32_t)(p.apos - (p.bpos>>1));
-		if (kh_get_ptr(pos, key) != NULL) {
+		if(kh_get_ptr(pos, key) != NULL) {
 			return(NULL);						/* already evaluated */
 		}
 		kh_put(pos, key, (uintptr_t)NULL);		/* mark evaluated */
@@ -3657,108 +3656,20 @@ gaba_alignment_t const *mm_extend(
 			t, t
 		);
 
-		if (fr->max < min) { continue; }
+		if(fr->max < min) { continue; }
 		/* convert alignment to cigar */
 		gaba_alignment_t const *a = gaba_dp_trace(
 			dp,
 			NULL, fr,
 			GABA_TRACE_PARAMS( .lmm = lmm )
 		);
-		if (a != NULL) {
+		if(a != NULL) {
 			kh_put(pos, key, (uintptr_t)a);		/* record head */
 		}
 		return(a);
 	}
 	return(NULL);
 }
-
-#if 0
-/**
- * @fn mm_extend
- * @brief extension frontend
- */
-static _force_inline
-gaba_alignment_t const *mm_extend(
-	mm_idx_seq_t const *ref,					/* index */
-	uint32_t const l_coef, mm128_t const *coef,	/* chained seeds */
-	uint32_t const k,							/* seed (k-mer) length */
-	uint32_t const min,							/* minimum score threshold */
-	uint32_t const sidx, uint32_t const eidx,	/* seed indices to be evaluated */
-	gaba_dp_t *restrict dp,						/* extension dp context */
-	gaba_section_t const *qf, gaba_section_t const *qr,	/* forward and reverse sections */
-	gaba_section_t const *t,					/* tail section */
-	kh_t *restrict pos,							/* dedup hash */
-	lmm_t *restrict lmm)						/* dp memory arena */
-{
-	uint32_t const mask = 0x7fffffff;
-	uint8_t const *lim = (uint8_t const*)0x800000000000;
-	gaba_section_t *qu, *qd, *r, *q;
-
-	/* construct reference-side sections */
-	gaba_section_t rf = {
-		.id = ref->rid<<1,
-		.len = ref->l_seq,
-		.base = (uint8_t const*)ref->seq
-	};
-	gaba_section_t rr = {
-		.id = (ref->rid<<1)+1,
-		.len = ref->l_seq,
-		.base = gaba_rev((uint8_t const*)ref->seq+ref->l_seq-1, lim)
-	};
-	gaba_pos_pair_t p = {0};
-	gaba_dp_flush(dp, lim, lim);
-
-	uint64_t key = (uint64_t)ref->rid<<32;
-	gaba_alignment_t *a = NULL;
-	for (uint64_t i = sidx; i < eidx && i < l_coef; ++i) {
-		if (i != 0 && (int32_t)coef[i].u32[2] >= 0) {
-			continue;	/* skip root seed of another chain */
-		}
-		gaba_stack_t const *stack = gaba_dp_save_stack(dp);
-		int32_t rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
-		uint64_t rev = qs<0; qu = rev? qf : qr; qd = rev? qr : qf;
-		qs = _m(qs); qs = rev? (int32_t)(qf->len-qs+k-1) : qs;
-		// upward extension
-		gaba_fill_t *f = gaba_dp_fill_root(dp, r = &rr, ref->l_seq-rs-1, q = qu, qu->len-qs-1), *m = f;
-		if (f == NULL) goto _abort;
-		uint32_t flag = GABA_STATUS_TERM;
-		do {
-			if (f->status & GABA_STATUS_UPDATE_A) r = t;
-			if (f->status & GABA_STATUS_UPDATE_B) q = t;
-			flag |= f->status & (GABA_STATUS_UPDATE_A | GABA_STATUS_UPDATE_B);
-			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
-			m = (f->max > m->max)? f : m;
-		} while (!(flag & f->status));
-		// find max
-		p = gaba_dp_search_max(dp, m);
-		// check duplicate
-		key |= (uint32_t)(p.apos - (p.bpos>>1));
-		if (kh_get_ptr(pos, key) != NULL) return 0;	// already evaluated
-		kh_put(pos, key, (uintptr_t)NULL);	// mark evaluated
-		// downward extension from max
-		gaba_dp_flush_stack(dp, stack);
-		if ((m = f = gaba_dp_fill_root(dp, r = &rf, ref->l_seq-p.apos-1, q = qd, qd->len-p.bpos-1)) == NULL) goto _abort;
-		flag = GABA_STATUS_TERM;
-		do {
-			if (f->status & GABA_STATUS_UPDATE_A) r = t;
-			if (f->status & GABA_STATUS_UPDATE_B) q = t;
-			flag |= f->status & (GABA_STATUS_UPDATE_A | GABA_STATUS_UPDATE_B);
-			if ((f = gaba_dp_fill(dp, f, r, q)) == NULL) goto _abort;
-			m = (f->max > m->max)? f : m;
-		} while (!(flag & f->status));
-		if (m->max < min) { key &= 0xffffffff00000000; continue; }
-		// convert alignment to cigar
-		a = gaba_dp_trace(dp, NULL, m, GABA_TRACE_PARAMS( .lmm = lmm ));	// might be NULL
-		break;
-	}
-	// record head
-	if (a) kh_put(pos, key, (uintptr_t)a);
-	return a;
-_abort:;
-	oom_abort(__func__, 0);
-	return 0;
-}
-#endif
 
 #define MAPQ_DEC	( 4 )
 #define MAPQ_COEF	( 1<<MAPQ_DEC )
@@ -3777,8 +3688,8 @@ uint64_t mm_prune_regs(
 {
 	uint64_t q = opt->max_cnt? MIN2(opt->max_cnt, n_reg) : n_reg;
 	uint32_t min = (uint32_t)(_aln(reg[0])->score * opt->min_ratio);
-	while (_aln(reg[q-1])->score < min) { q--; }
-	for (uint64_t i = q; i < n_reg; ++i) {
+	while(_aln(reg[q-1])->score < min) { q--; }
+	for(uint64_t i = q; i < n_reg; i++) {
 		lmm_free(lmm, (void*)reg[i].u64[1]);	/* destroy gaba_alignment_t objects */
 	}
 	return(q);
@@ -3796,24 +3707,24 @@ uint64_t mm_collect_supp(
 	/* collect supplementaries */
 	#define _swap_128(x, y)	{ mm128_t _tmp = reg[x]; reg[x] = reg[y]; reg[y] = _tmp; }
 	uint64_t p, q;
-	for (p = 1, q = n_reg; p < q; ++p) {
+	for(p = 1, q = n_reg; p < q; p++) {
 		uint64_t max = 0;
-		for (uint64_t i = p; i < q; ++i) {
+		for(uint64_t i = p; i < q; i++) {
 			const gaba_path_section_t *s = &_aln(reg[i])->sec[0];
 			int32_t lb = s->bpos, ub = s->bpos + s->blen, span = ub - lb;
 
-			for (uint64_t j = 0; j < p; ++j) {
+			for(uint64_t j = 0; j < p; j++) {
 				const gaba_path_section_t *t = &_aln(reg[j])->sec[0];
 				
 				/* update boundary */
-				if (t->bpos + t->blen < ub) {
+				if(t->bpos + t->blen < ub) {
 					lb = MAX2(lb, t->bpos + t->blen);
 				} else {
 					ub = MIN2(ub, t->bpos);
 				}
 
 				/* calculate covered length */
-				if (2*(ub - lb) < span) {		/* check if covered by j */
+				if(2*(ub - lb) < span) {		/* check if covered by j */
 					q--; _swap_128(i, q); i--;	/* move to tail */
 					reg[q].u32[0] |= 0x100<<16;
 					goto _loop_tail;
@@ -3824,7 +3735,7 @@ uint64_t mm_collect_supp(
 			max = MAX2(max, ((uint64_t)(2*(ub - lb) - span)<<32) | i);
 		_loop_tail:;
 		}
-		if (max&0xffffffff) {
+		if(max&0xffffffff) {
 			_swap_128(p, max&0xffffffff);		/* move to head, mark supplementary */
 			reg[p].u32[0] |= 0x800<<16;
 		}
@@ -3848,7 +3759,7 @@ uint64_t mm_post_map(
 
 	/* extract shortest repeat element */
 	int32_t usc = 0, lsc = INT32_MAX, tsc = 0;
-	for (uint64_t i = p; i < n_reg; ++i) {
+	for(uint64_t i = p; i < n_reg; i++) {
 		usc = MAX2(usc, _aln(reg[i])->score);
 		lsc = MIN2(lsc, _aln(reg[i])->score);
 		tsc += _aln(reg[i])->score;
@@ -3857,7 +3768,7 @@ uint64_t mm_post_map(
 
 	/* calc mapq for primary and supplementary alignments */
 	double tpc = 1.0;
-	for (uint64_t i = 0; i < p; ++i) {
+	for(uint64_t i = 0; i < p; i++) {
 		uint32_t score = _aln(reg[0])->score;
 
 		/* calc effective length */
@@ -3877,7 +3788,7 @@ uint64_t mm_post_map(
 
 	/* calc mapq for secondary (repetitive) alignments */
 	double tpe = MIN2(1.0 - tpc, 1.0);
-	for (uint64_t i = p; i < n_reg; ++i) {
+	for(uint64_t i = p; i < n_reg; i++) {
 		reg[i].u32[0] |= _clip(
 			  -10.0
 			* MAPQ_COEF
@@ -3905,9 +3816,9 @@ uint64_t mm_post_map(
 	double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x);
 	double ulen = ec * (score - ssc), pe = 1.0 / (ulen * ulen + (double)n_reg);
 
-	for (i = 1; i < n_reg; ++i) tsc += _aln(reg[i])->score - bsc + 1;
+	for(i = 1; i < n_reg; i++) tsc += _aln(reg[i])->score - bsc + 1;
 	reg[0].u32[0] |= _clip(-10.0 * MAPQ_COEF * log10(pe));
-	for (i = 1; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i) {
+	for(i = 1; i < n_reg && (score = _aln(reg[i])->score) >= min; i++) {
 		reg[i].u32[0] |=
 			  (0x100<<16)
 			| _clip(
@@ -3930,7 +3841,7 @@ uint64_t mm_post_ava(
 	uint32_t const n_reg, mm128_t *reg)
 {
 	uint32_t i, score, min = _aln(reg[0])->score * opt->min_ratio;
-	for (i = 0; i < n_reg && (score = _aln(reg[i])->score) >= min; ++i) {
+	for(i = 0; i < n_reg && (score = _aln(reg[i])->score) >= min; i++) {
 		/* estimate effective length */
 		double elen = (double)gaba_plen(_aln(reg[i])->sec) / 2.0;
 		double pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
@@ -3958,47 +3869,79 @@ mm128_t const *mm_align_seq(
 	lmm_t *restrict lmm,
 	uint64_t *restrict n_reg)
 {
+	if(l_seq == 0) { return(NULL); }
+
 	int32_t min = opt->min;
 	int32_t const ofs = 0x40000000;
 	uint32_t const mask = 0x7fffffff;
-	uint32_t const org = (opt->flag&(MM_AVA|MM_COMP))==MM_AVA? ofs : 0, thresh = (opt->flag&MM_AVA? 1 : 0) + org;
+	uint32_t const org = (opt->flag&(MM_AVA|MM_COMP))==MM_AVA? ofs : 0;
+	uint32_t const thresh = (opt->flag&MM_AVA? 1 : 0) + org;
 
 	mm128_v reg = { 0 };
-	// prepare section info for alignment
-	uint8_t tail[96];
-	uint8_t const *lim = (uint8_t const*)0x800000000000;
-	gaba_section_t qf, qr, mg;
-	if (l_seq == 0) return NULL;
 
-	memset(tail, 0, 96);
-	qf.id = 0; qf.len = l_seq; qf.base = (uint8_t const*)seq;
-	qr.id = 1; qr.len = l_seq; qr.base = gaba_rev((uint8_t const*)seq+l_seq-1, lim);
-	mg.id = 4; mg.len = 32; mg.base = tail+32;
-	b->coef.n = b->resc.n = b->intv.n = 0; kh_clear(b->pos);
-	for (uint64_t i = 0, j = 0; reg.n == 0 && i < n_occ; ++i) {
-		if (i == 0) {
-			mm_collect(mi, l_seq, seq, qid, occ[n_occ-1], occ[0], org, thresh, &b->resc, &b->coef);
+	/* prepare section info for alignment */
+	static uint8_t const tail[96] = { 0 };
+	uint8_t const *lim = (uint8_t const *)0x800000000000;
+	gaba_section_t const qf = {
+		.id = 0,
+		.len = l_seq,
+		.base = (uint8_t const *)seq
+	};
+	gaba_section_t const qr = {
+		.id = 1,
+		.len = l_seq,
+		.base = gaba_rev((uint8_t const *)&seq[l_seq - 1], lim)
+	};
+	gaba_section_t const mg = {
+		.id = 4,
+		.len = 32,
+		.base = tail + 32
+	};
+
+	b->coef.n = b->resc.n = b->intv.n = 0;
+	kh_clear(b->pos);
+	for(uint64_t i = 0, j = 0; reg.n == 0 && i < n_occ; i++) {
+		if(i == 0) {
+			/* first collect seeds */
+			mm_collect(mi,
+				l_seq, seq,
+				qid,
+				occ[n_occ-1], occ[0],
+				org, thresh,
+				&b->resc,
+				&b->coef
+			);
 		} else {
-			if (i == 1) radix_sort_128x(b->resc.a, b->resc.a + b->resc.n);
-			for (uint64_t k = 0; k < b->coef.n; ++k) b->coef.a[k].u32[2] &= mask;
-			for (; j < b->resc.n && b->resc.a[j].u32[1] <= occ[i]; ++j)
+			/* sort rescued array by occurrence */
+			if(i == 1) {
+				radix_sort_128x(b->resc.a, b->resc.a + b->resc.n);
+			}
+
+			/* clear previous chain */
+			for(uint64_t k = 0; k < b->coef.n; k++) {
+				b->coef.a[k].u32[2] &= mask;
+			}
+
+			/* add seeds */
+			for(; j < b->resc.n && b->resc.a[j].u32[1] <= occ[i]; j++) {
 				mm_expand(b->resc.a[j].u32[1], (const v2u32_t*)b->resc.a[j].u64[1], qid, b->resc.a[j].u32[0], org, thresh, &b->coef);
+			}
 		}
 		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
 
 		mm_chain(b->coef.n, b->coef.a, opt->llim, opt->hlim, min>>2, &b->intv);
 		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
-		if (b->intv.a == 0) continue;
-		for (uint64_t k = 0; k < b->intv.n && ofs - (int32_t)b->intv.a[k].x[0] > min>>2; ++k) {
+		if(b->intv.a == 0) continue;
+		for(uint64_t k = 0; k < b->intv.n && ofs - (int32_t)b->intv.a[k].x[0] > min>>2; k++) {
 			gaba_alignment_t const *a = 0;
 			mm128_t *t = &b->coef.a[b->coef.n], r;
 			uint64_t p = b->coef.n-b->intv.a[k].x[1], q = p, l = 0, m = ofs - b->intv.a[k].x[0];
 			mm_idx_seq_t *ref = &mi->s.a[(t-p)->u32[1]-mi->base_rid];
 			do {
 				a = mm_extend(ref, q, t-q, mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &mg, b->pos, lmm);
-				if (p == q && a == 0) break;	// skip chain if first extension did not result in meaningful alignment
+				if(p == q && a == 0) break;	// skip chain if first extension did not result in meaningful alignment
 				r.u32[2] = (t-p)->u32[2] & mask, r.u32[3] = (t-p)->u32[3];
-				if (a != 0) {
+				if(a != 0) {
 					mm128_t *s;
 					kv_pushp(mm128_t, reg, &s);
 					s->u32[0] = (a->sec->bid&0x01? 0 : 0x10)<<16;
@@ -4009,21 +3952,23 @@ mm128_t const *mm_align_seq(
 					l += a->sec->alen+a->sec->blen;
 				}
 				q = p;
-			} while (l < m && (p -= mm_rescue(ref, p, t-p, &r, opt->llim, opt->hlim, opt->elim, opt->blim, opt->eidx)) < q - 1);
+			} while(l < m && (p -= mm_rescue(ref, p, t-p, &r, opt->llim, opt->hlim, opt->elim, opt->blim, opt->eidx)) < q - 1);
 		}
 	}
 	*n_reg = reg.n;
-	if (reg.n == 0) return NULL;
-	#if 0
+	if(reg.n == 0) {
+		return(NULL);
+	}
+
+	/* sort by score in reverse order */
 	radix_sort_128x(reg.a, reg.a + reg.n);
-	*n_reg = ((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a);
-	for (uint64_t i = *n_reg; i < reg.n; ++i) { lmm_free(lmm, (void*)reg.a[i].u64[1]); }
-	#else
-	radix_sort_128x(reg.a, reg.a + reg.n);	// sort by score in reverse order
-	*n_reg = reg.n = mm_prune_regs(opt, lmm, reg.n, reg.a);	// prune alignment whose score is less than min_score threshold
+
+	/* prune alignment whose score is less than min_score threshold */
+	*n_reg = reg.n = mm_prune_regs(opt, lmm, reg.n, reg.a);
+
+	/* collect supplementaries (split-read collection), record n_uniq in higher 32bit */
 	*n_reg |= ((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a)<<32;
-	#endif
-	return reg.a;
+	return(reg.a);
 }
 
 #undef _s
@@ -4031,10 +3976,10 @@ mm128_t const *mm_align_seq(
 
 /**
  * @macro _flush
- * @brief flush the buffer if there is no room for (margin + 1) bytes
+ * @brief flush the buffer if there is no room for(margin + 1) bytes
  */
 #define _flush(_buf, _margin) { \
-	if (_unlikely((uintptr_t)(_buf)->p + (_margin) >= (uintptr_t)(_buf)->tail)) { \
+	if(_unlikely((uintptr_t)(_buf)->p + (_margin) >= (uintptr_t)(_buf)->tail)) { \
 		fwrite((_buf)->base, sizeof(uint8_t), (_buf)->p - (_buf)->base, stdout); \
 		(_buf)->p = (_buf)->base; \
 	} \
@@ -4056,12 +4001,11 @@ mm128_t const *mm_align_seq(
 #define _putfi(type, _buf, _n, _c) ({ \
 	uint64_t _b = 0; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
-	_i += (_i==0); _i += (_c - _i + 1 > 0)? _c - _i + 1 : 0; \
+	while(_m || _i <= _c) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_flush(_buf, _i + 1); \
-	for (int64_t _j = _i; _j > (_c); _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
+	for(int64_t _j = _i; _j > (_c); _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	*(_buf)->p++ = '.'; \
-	for (int64_t _j = (_c); _j > 0; _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
+	for(int64_t _j = (_c); _j > 0; _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
 	_i; \
 })
 
@@ -4072,10 +4016,10 @@ mm128_t const *mm_align_seq(
 #define _puti(type, _buf, _n) ({ \
 	uint64_t _b = 0; \
 	type _m = (type)(_n); int64_t _i = 0; \
-	while (_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
+	while(_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_i += (_i==0); \
 	_flush(_buf, _i); \
-	for (int64_t _j = _i; _j > 0; _j--) { \
+	for(int64_t _j = _i; _j > 0; _j--) { \
 		*(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; \
 	} \
 	_i; \
@@ -4087,14 +4031,14 @@ mm128_t const *mm_align_seq(
  * @brief dump string (_puts for '\0'-terminated, _putsk for const)
  */
 #define _puts(_buf, _s) { \
-	for (uint8_t const *_q = (uint8_t const*)(_s); *_q; _q++) { \
+	for(uint8_t const *_q = (uint8_t const *)(_s); *_q; _q++) { \
 		_put(_buf, *_q); \
 	} \
 }
 #define _putsk(_buf, _s) { \
 	uint64_t const _l = strlen(_s); \
 	_flush(_buf, _l); \
-	for (uint8_t const *_q = (uint8_t const*)(_s), *_t = _q + (_l); _q < _t; _q++) { \
+	for(uint8_t const *_q = (uint8_t const *)(_s), *_t = _q + (_l); _q < _t; _q++) { \
 		*(_buf)->p++ = *(_q); \
 	} \
 }
@@ -4105,7 +4049,7 @@ mm128_t const *mm_align_seq(
  */
 #define _putsn(_buf, _s, _l) { \
 	uint8_t const *_q = (uint8_t const *)(_s); \
-	for (uint8_t const *_t = _q + ((_l) & ~0x1fULL); _q < _t; _q += 32) { \
+	for(uint8_t const *_t = _q + ((_l) & ~0x1fULL); _q < _t; _q += 32) { \
 		_flush(_buf, 32); \
 		_storeu_v32i8((_buf)->p, _loadu_v32i8(_q)); (_buf)->p += 32; \
 	} \
@@ -4114,7 +4058,7 @@ mm128_t const *mm_align_seq(
 }
 #define _putsnr(_buf, _s, _l) { \
 	uint8_t const *_q = (uint8_t const *)(_s) + (_l) - 32; \
-	for (; _q >= _s; _q -= 32) { \
+	for(; _q >= _s; _q -= 32) { \
 		_flush(_buf, 32); \
 		_storeu_v32i8((_buf)->p, _swap_v32i8(_loadu_v32i8(_q))); (_buf)->p += 32; \
 	} \
@@ -4140,7 +4084,7 @@ mm128_t const *mm_align_seq(
 	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
 	v32i8_t _r, _b; \
 	uint8_t const *_q = (uint8_t const *)(_s); \
-	for (uint8_t const *_t = _q + ((_l) & ~0x1fULL); _q < _t; _q += 32) { \
+	for(uint8_t const *_t = _q + ((_l) & ~0x1fULL); _q < _t; _q += 32) { \
 		_flush(_buf, 32); \
 		_r = _loadu_v32i8(_q); \
 		_b = _shuf_v32i8(_conv, _r); \
@@ -4157,7 +4101,7 @@ mm128_t const *mm_align_seq(
 	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
 	v32i8_t _r, _b; \
 	uint8_t const *_q = (uint8_t const *)(_s) + (_l) - 32; \
-	for (; _q >= _s; _q -= 32) { \
+	for(; _q >= _s; _q -= 32) { \
 		_flush(_buf, 32); \
 		_r = _loadu_v32i8(_q); \
 		_b = _shuf_v32i8(_conv, _swap_v32i8(_r)); \
@@ -4237,7 +4181,7 @@ static
 int mm_cigar_printer(void *_b, int64_t len, char c)
 {
 	mm_align_t *b = (mm_align_t*)_b;
-	if (len < 41) {
+	if(len < 41) {
 		_flush(b, 16);
 		*b->p++ = (b->conv[len-1]&0x0f) + '0';
 		*b->p++ = (b->conv[len-1]>>4) + '0';
@@ -4280,7 +4224,7 @@ uint64_t mm_print_sam_num(
 		case 'I': _puti(uint32_t, b, *((uint32_t*)p)); return(4);
 		case 'f': {
 			char buf[32]; uint64_t l = sprintf(buf, "%f", *((float*)p));
-			for (uint64_t i = 0; i < l; ++i) {
+			for(uint64_t i = 0; i < l; i++) {
 				_put(b, buf[i]);
 			}
 			return(4);
@@ -4303,23 +4247,23 @@ void mm_restore_sam_tags(
 		0, 0, 0, 2,     0, 0, 0, 0,  0, 0, 0xff, 0,  0, 0, 0, 0,
 	};
 	uint8_t const *p = t->tag, *tail = p + t->l_tag;
-	while (p < tail) {
+	while(p < tail) {
 		/* print tag label */
 		_t(b); _put(b, p[0]); _put(b, p[1]); _put(b, ':'); _put(b, p[2]); _put(b, ':');
 
 		/* print body */
-		if (p[2] == 'Z') {
+		if(p[2] == 'Z') {
 			/* string */
 			p += 3;
 			while(*p) {
 				_put(b, *p); p++;
 			}
 			p++;
-		} else if (tag_size[p[2]&0x1f] == 0xfe) {
+		} else if(tag_size[p[2]&0x1f] == 0xfe) {
 			/* array */
 			uint8_t type = p[3];
 			uint32_t len = *((uint32_t*)&p[4]); p += 8;
-			for (uint64_t i = 0; i < len; ++i) {
+			for(uint64_t i = 0; i < len; i++) {
 				p += mm_print_sam_num(b, type, p);
 				_put(b, ',');
 			}
@@ -4344,7 +4288,7 @@ void mm_print_sam_header(
 	_putsk(b, "@HD\tVN:1.0\tSO:unsorted\n");
 
 	/* sequences */
-	for (uint64_t i = 0; i < mi->s.n; ++i) {
+	for(uint64_t i = 0; i < mi->s.n; i++) {
 		_putsk(b, "@SQ\tSN:");
 		_putsn(b, mi->s.a[i].name, mi->s.a[i].l_name);		/* sequence name */
 		_putsk(b, "\tLN:");
@@ -4353,7 +4297,7 @@ void mm_print_sam_header(
 	}
 
 	/* print read group */
-	if (b->opt->flag & 0x01ULL<<MM_RG) {
+	if(b->opt->flag & 0x01ULL<<MM_RG) {
 		_puts(b, b->opt->rg_line);
 		_cr(b);
 	}
@@ -4383,7 +4327,7 @@ void mm_print_sam_unmapped(
 	_t(b);
 
 	/* quality if available */
-	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
+	if(b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
 		_putsn(b, t->qual, t->l_seq);
 	} else {
 		_put(b, '*');
@@ -4418,20 +4362,20 @@ static void mm_print_sam_mapped_core(
 	_putn(b, mapq>>MAPQ_DEC); _t(b);						/* mapping quality */
 
 	/* print cigar */
-	if (hl) {
+	if(hl) {
 		_putn(b, hl);
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print head clip */
 	}
 	gaba_dp_print_cigar_reverse(mm_cigar_printer,
 		b, a->path->array, 0, a->path->len);
-	if (tl) {
+	if(tl) {
 		_putn(b, tl);
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print tail clip */
 	}
 	_putsk(b, "\t*\t0\t0\t");								/* mate tags, unused */
 
 	/* print sequence */
-	if (s->bid & 0x01) {
+	if(s->bid & 0x01) {
 		_putsnt(b, &t->seq[qs], qe-qs, "NACMGRSVTWYHKDBN");
 	} else {
 		_putsntr(b, &t->seq[t->l_seq-qe], qe-qs, "NTGKCYSBAWRDMHVN");
@@ -4439,8 +4383,8 @@ static void mm_print_sam_mapped_core(
 	_t(b);
 
 	/* print quality string if available */
-	if (b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
-		if (s->bid & 0x01) {
+	if(b->opt->flag&MM_KEEP_QUAL && t->qual[0] != '\0') {
+		if(s->bid & 0x01) {
 			_putsn(b, &t->qual[qs], qe-qs);
 		} else {
 			_putsnr(b, &t->qual[t->l_seq-qe], qe-qs);
@@ -4474,12 +4418,12 @@ void mm_print_sam_supp(
 	_put(b, (flag&0x04)? '-' : '+'); _c(b);					/* direction */
 
 	/* print cigar */
-	if (hl) {
+	if(hl) {
 		_putn(b, hl); _put(b, (flag&0x900)? 'H' : 'S');
 	}
 	gaba_dp_print_cigar_reverse(mm_cigar_printer,
 		b, a->path->array, 0, a->path->len);
-	if (tl) {
+	if(tl) {
 		_putn(b, tl); _put(b, (flag&0x900)? 'H' : 'S');
 	}
 	_c(b);
@@ -4507,7 +4451,7 @@ void mm_print_sam_md(
 	 *       which may result in several percent performance degradation.
 	 */
 	uint64_t const f = b->opt->flag;
-	if ((f & 0x01ULL<<MM_MD) == 0) { return; }				/* skip if disabled */
+	if((f & 0x01ULL<<MM_MD) == 0) { return; }				/* skip if disabled */
 
 	const gaba_path_section_t *s = &a->sec[0];
 	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
@@ -4528,14 +4472,14 @@ void mm_print_sam_md(
 	};
 	v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(dir? comp : id));
 	uint8_t const *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[dir? (uint64_t)t->l_seq-qs-32 : qs];
-	while (pos > 0) {
+	while(pos > 0) {
 		/* suppose each indel block is shorter than 32 bases */
 		uint64_t arr = _load_uint64(p, pos);
 		uint64_t cnt = lzcnt(~arr);						/* count #ins */
 		pos -= cnt;
 		qp += dir? -cnt : cnt;
 
-		if (((((int64_t)arr)>>62)^0x01) > 0) {			/* is_del */
+		if(((((int64_t)arr)>>62)^0x01) > 0) {			/* is_del */
 			pos -= (cnt = lzcnt(arr) - 1);				/* count #del */
 			_putn(b, (int32_t)(rp - rb));
 			_put(b, '^');
@@ -4546,14 +4490,14 @@ void mm_print_sam_md(
 
 		/* match or mismatch */
 		uint64_t acnt = 32;
-		while (acnt == 32) {
+		while(acnt == 32) {
 			/* count diagonal */
 			arr = _load_uint64(p, pos);
 			acnt = lzcnt(arr^0x5555555555555555)>>1;
 
 			/* load sequence to detect mismatch */
 			v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _loadu_v32i8(qp);
-			if (dir) { qv = _swap_v32i8(qv); }
+			if(dir) { qv = _swap_v32i8(qv); }
 
 			/* compare and count matches */
 			uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
@@ -4564,11 +4508,11 @@ void mm_print_sam_md(
 			rp += mcnt;
 			qp += dir? -mcnt : mcnt;
 
-			if (mcnt >= acnt) { continue; }				/* continues longer than 32bp */
+			if(mcnt >= acnt) { continue; }				/* continues longer than 32bp */
 			_putn(b, (int32_t)(rp - rb));				/* print match length */
 			pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt));
 			qp += dir? -cnt : cnt;
-			for (uint64_t i = 0; i < cnt-1; ++i) {
+			for(uint64_t i = 0; i < cnt-1; i++) {
 				_put(b, "NACMGRSVTWYHKDBN"[*rp]);		/* print mismatch base */
 				_put(b, '0');							/* padding */
 				rp++;
@@ -4578,7 +4522,7 @@ void mm_print_sam_md(
 			rb = rp;
 		}
 	}
-	if (rp - rb) {
+	if(rp - rb) {
 		_putn(b, (int32_t)(rp-rb));
 	}
 	return;
@@ -4597,27 +4541,27 @@ void mm_print_sam_general_tags(
 	uint64_t const f = b->opt->flag;
 
 	/* read group */
-	if (f & 0x01ULL<<MM_RG) {
+	if(f & 0x01ULL<<MM_RG) {
 		_putsk(b, "\tRG:Z:"); _puts(b, b->opt->rg_id);
 	}
 
 	/* #hits, including repetitive */
-	if (f & 0x01ULL<<MM_NH) {
+	if(f & 0x01ULL<<MM_NH) {
 		_putsk(b, "\tNH:i:"); _putn(b, n_reg);			/* note: (f & MM_OMIT_REP)? n_uniq : n_reg is better? */
 	}
 
 	/* record index */
-	if (f & 0x01ULL<<MM_IH) {
+	if(f & 0x01ULL<<MM_IH) {
 		_putsk(b, "\tIH:i:"); _putn(b, j);
 	}
 
 	/* alignment score */
-	if (f & 0x01ULL<<MM_AS) {
+	if(f & 0x01ULL<<MM_AS) {
 		_putsk(b, "\tAS:i:"); _putn(b, a->score);
 	}
 
 	/* editdist to ref */
-	if (f & 0x01ULL<<MM_NM) {
+	if(f & 0x01ULL<<MM_NM) {
 		_putsk(b, "\tNM:i:");
 		_putn(b, a->xcnt + a->gecnt);
 	}
@@ -4641,15 +4585,15 @@ uint64_t mm_print_sam_primary_tags(
 	uint64_t ret = 0;
 
 	/* second best hit score */
-	if ((f & 0x01ULL<<MM_XS)) {
+	if((f & 0x01ULL<<MM_XS)) {
 		_putsk(b, "\tXS:i:");
 		_putn(b, n_reg>1? _aln(reg[1])->score : 0);
 	}
 
 	/* supplementary alignment */
-	if (f & 0x01ULL<<MM_SA && n_uniq > 1) {
+	if(f & 0x01ULL<<MM_SA && n_uniq > 1) {
 		_putsk(b, "\tSA:Z:");
-		for (uint64_t k = 1; k < n_uniq; ++k) {
+		for(uint64_t k = 1; k < n_uniq; k++) {
 			mm_print_sam_supp(b,
 				&mi->s.a[(_aln(reg[k])->sec->aid>>1) - mi->base_rid],
 				t,
@@ -4680,7 +4624,7 @@ void mm_print_sam_mapped(
 	n_reg &= 0xffffffff;
 
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? n_uniq : n_reg;
-	for (uint64_t j = 0; j < n; ++j) {
+	for(uint64_t j = 0; j < n; j++) {
 		uint16_t mapq = _mapq(reg[j]), flag = _flag(reg[j]);
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
@@ -4695,7 +4639,7 @@ void mm_print_sam_mapped(
 		mm_print_sam_md(b, r, t, a);
 
 		/* primary-specific tags */
-		if ((flag & 0x900) == 0
+		if((flag & 0x900) == 0
 		&& mm_print_sam_primary_tags(b, t, n_reg, n_uniq, reg)) {
 			j = n;						/* skip supplementary records when SA tag is enabled */
 		}
@@ -4728,7 +4672,7 @@ void mm_print_maf_mapped_ref(
 	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
 	int64_t pos = a->path->len;
 	uint8_t const *rp = &r->seq[rs];
-	while (pos > 0) {
+	while(pos > 0) {
 		uint64_t arr, cnt;
 
 		/* insertion */
@@ -4747,7 +4691,7 @@ void mm_print_maf_mapped_ref(
 			pos -= 2*cnt;
 			_putsnt32(b, rp, cnt, "NACMGRSVTWYHKDBN");
 			rp += cnt;					/* advance pointer */
-		} while (cnt == 32);
+		} while(cnt == 32);
 	}
 	_cr(b);
 	return;
@@ -4764,7 +4708,7 @@ void mm_print_maf_query_forward(
 {
 	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
 	int64_t pos = a->path->len;
-	while (pos > 0) {
+	while(pos > 0) {
 		uint64_t arr, cnt;
 
 		/* insertions */
@@ -4785,7 +4729,7 @@ void mm_print_maf_query_forward(
 			pos -= 2*cnt;
 			_putsnt32(b, qp, cnt, "NACMGRSVTWYHKDBN");
 			qp += cnt;
-		} while (cnt == 32);
+		} while(cnt == 32);
 	}
 	return;
 }
@@ -4801,7 +4745,7 @@ void mm_print_maf_query_reverse(
 {
 	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
 	int64_t pos = a->path->len;
-	while (pos > 0) {
+	while(pos > 0) {
 		uint64_t arr, cnt;
 
 		/* insertions */
@@ -4822,7 +4766,7 @@ void mm_print_maf_query_reverse(
 			pos -= 2*cnt;
 			_putsntr32(b, qp, cnt, "NTGKCYSBAWRDMHVN");
 			qp -= cnt;
-		} while (cnt == 32);
+		} while(cnt == 32);
 	}
 	return;
 }
@@ -4848,7 +4792,7 @@ void mm_print_maf_mapped_query(
 	_putd(b, s->bid); _sp(b);
 	_putn(b, t->l_seq); _sp(b);
 
-	if (s->bid & 0x01) {
+	if(s->bid & 0x01) {
 		mm_print_maf_query_forward(
 			b, a,
 			&t->seq[qs]
@@ -4877,7 +4821,7 @@ void mm_print_maf_mapped(
 	mm_idx_t const *mi = b->mi;
 	uint32_t const n_uniq = n_reg>>32;
 	n_reg &= 0xffffffff;
-	for (uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); ++j) {
+	for(uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); j++) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 
@@ -4906,8 +4850,11 @@ void mm_print_blast6_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for(uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); j++) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
@@ -4953,8 +4900,11 @@ void mm_print_blasr1_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for(uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); j++) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
@@ -5001,8 +4951,11 @@ void mm_print_blasr4_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for(uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); j++) {
 		uint16_t mapq = _mapq(reg[j]);
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
@@ -5050,8 +5003,11 @@ void mm_print_paf_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for(uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); j++) {
 		uint16_t mapq = _mapq(reg[j]);
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
@@ -5080,8 +5036,8 @@ void mm_print_paf_mapped(
 
 		/* print optional tags */
 		uint64_t const f = b->opt->flag;
-		if (f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->score); }
-		if (f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, a->xcnt + a->gecnt); }
+		if(f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->score); }
+		if(f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, a->xcnt + a->gecnt); }
 		_cr(b);
 	}
 	return;
@@ -5099,19 +5055,22 @@ void mm_print_mhap_mapped(
 	uint64_t n_reg,
 	mm128_t const *reg)
 {
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for(uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); j++) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t mid = 1000000.0 * (double)(dcnt - a->xcnt) / (double)slen;	/* percent identity */
+		int32_t merr = 10000.0 * (1.0 - (double)(dcnt - a->xcnt) / (double)slen);	/* error rate */
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
 		_putsn(b, t->name, t->l_name); _sp(b);			/* qname */
 		_putsn(b, r->name, r->l_name); _sp(b);			/* rname */
-		_putfi(int32_t, b, 1.0-mid, 4); _sp(b);			/* identity */
+		_putfi(int32_t, b, merr, 4); _sp(b);			/* identity */
 		_putn(b, a->score); _sp(b);						/* score */
 
 		/* query-side pos and direction */
@@ -5145,8 +5104,11 @@ void mm_print_falcon_mapped(
 	_putsnt(b, t->seq, t->l_seq, "NACMGRSVTWYHKDBN"); _cr(b);
 	
 	/* print alignment lines */
+	uint64_t const f = b->opt->flag;
 	mm_idx_t const *mi = b->mi;
-	for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+	uint32_t const n_uniq = n_reg>>32;
+	n_reg &= 0xffffffff;
+	for(uint64_t j = 0; j < ((f & MM_OMIT_REP)? n_uniq : n_reg); j++) {
 		gaba_alignment_t const *a = _aln(reg[j]);
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
@@ -5154,7 +5116,7 @@ void mm_print_falcon_mapped(
 
 		/* name seq */
 		_putsn(b, r->name, r->l_name); _sp(b);
-		if (s->bid&0x01) {
+		if(s->bid&0x01) {
 			_putsnt(b, &r->seq[qs], qe-qs, "NACMGRSVTWYHKDBN");
 		} else {
 			_putsntr(b, &r->seq[r->l_seq-qe], qe-qs, "NTGKCYSBAWRDMHVN");
@@ -5196,7 +5158,7 @@ void *mm_align_source(uint32_t tid, void *arg)
 
 	s->lmm = lmm_init(NULL, 512 * 1024);
 	s->seq = bseq_read(b->fp, &s->n_seq, &s->base, &s->size);
-	if (s->seq == NULL) {
+	if(s->seq == NULL) {
 		/* reached the tail (or an error occurred) */
 		lmm_clean(s->lmm);
 		free(s);
@@ -5207,7 +5169,7 @@ void *mm_align_source(uint32_t tid, void *arg)
 	s->id = b->icnt++;
 
 	/* update and assign base_qid */
-	if (b->base_qid == UINT32_MAX) {
+	if(b->base_qid == UINT32_MAX) {
 		b->base_qid = atoi(s->seq[0].name);
 	}
 	s->base_qid = b->base_qid;
@@ -5228,7 +5190,7 @@ void *mm_align_worker(uint32_t tid, void *arg, void *item)
 	p += _pstr(p, "[mm_align_worker] bin id "); p += _pnum(uint32_t, p, s->base_qid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->base_qid + s->n_seq - 1); *p = '\0';
 	set_info(tid, buf);
 
-	for (uint64_t i = 0; i < s->n_seq; ++i) {
+	for(uint64_t i = 0; i < s->n_seq; i++) {
 		mm128_t *r;
 		kv_pushp(mm128_t, s->reg, &r);
 		uint32_t qid = s->base_qid + i;			/* FIXME: parse qid from name with atoi when -M is set */
@@ -5251,13 +5213,13 @@ void *mm_align_worker(uint32_t tid, void *arg, void *item)
 static _force_inline
 void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 {
-	for (uint64_t i = 0; i < s->n_seq; ++i) {
+	for(uint64_t i = 0; i < s->n_seq; i++) {
 		mm128_t *r = (mm128_t*)s->reg.a[i].u64[0];
 		uint64_t n_reg = s->reg.a[i].u64[1];	/* n_reg in lower 32bit, n_uniq in higher 32bit */
 
 		/* unmapped */
-		if (r == NULL) {
-			if (b->printer.unmapped) {
+		if(r == NULL) {
+			if(b->printer.unmapped) {
 				b->printer.unmapped(b, &s->seq[i]);
 			}
 			continue;
@@ -5265,7 +5227,7 @@ void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 
 		/* mapped */
 		b->printer.mapped(b, &s->seq[i], n_reg, r);
-		for (uint64_t j = 0; j < (uint32_t)n_reg; ++j) {
+		for(uint64_t j = 0; j < (uint32_t)n_reg; j++) {
 			lmm_free(s->lmm, (void*)r[j].u64[1]);
 		}
 		free(r);
@@ -5291,7 +5253,7 @@ void mm_align_drain(uint32_t tid, void *arg, void *item)
 
 	#if STRICT_STREAM_ORDERING != 0
 		kv_hq_push(mm128_t, incq_comp, b->hq, ((mm128_t){.u64 = {s->id, (uintptr_t)s}}));
-		while (b->hq.n > 1 && b->hq.a[1].u64[0] == b->ocnt) {
+		while(b->hq.n > 1 && b->hq.a[1].u64[0] == b->ocnt) {
 			b->ocnt++;
 			s = (mm_align_step_t*)kv_hq_pop(mm128_t, incq_comp, b->hq).u64[1];
 			mm_align_drain_intl(b, s);
@@ -5309,7 +5271,7 @@ void mm_align_drain(uint32_t tid, void *arg, void *item)
 static _force_inline
 void mm_tbuf_destroy(mm_tbuf_t *b)
 {
-	if (b == NULL) { return; }
+	if(b == NULL) { return; }
 	free(b->resc.a);
 	free(b->coef.a);
 	free(b->intv.a);
@@ -5326,14 +5288,14 @@ static _force_inline
 mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 {
 	mm_tbuf_t *t = (mm_tbuf_t*)calloc(1, sizeof(mm_tbuf_t));
-	if (t == NULL) {
+	if(t == NULL) {
 		return(NULL);
 	}
 
 	uint8_t const *lim = (uint8_t const *)0x800000000000;
 	t->b = b;
-	if ((t->pos = kh_init(0)) == NULL) { goto _fail; }
-	if ((t->dp = gaba_dp_init(b->gaba, lim, lim)) == 0) { goto _fail; }
+	if((t->pos = kh_init(0)) == NULL) { goto _fail; }
+	if((t->dp = gaba_dp_init(b->gaba, lim, lim)) == 0) { goto _fail; }
 	return(t);
 _fail:
 	mm_tbuf_destroy(t);
@@ -5348,13 +5310,13 @@ static _force_inline
 void mm_align_destroy(mm_align_t *b)
 {
 	/* flush output buffer */
-	if (b->printer.footer) {
+	if(b->printer.footer) {
 		b->printer.footer(b);
 	}
 	fwrite(b->base, sizeof(uint8_t), b->p - b->base, stdout);
 
 	/* destroy threads */
-	for (uint64_t i = 0; i < b->opt->nth; ++i) {
+	for(uint64_t i = 0; i < b->opt->nth; i++) {
 		mm_tbuf_destroy((mm_tbuf_t*)b->t[i]);
 	}
 
@@ -5426,7 +5388,7 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 
 
 	/* init output queue, buf and printer */
-	if (b->occ == NULL || b->gaba == NULL || b->pt == NULL || b->printer.mapped == NULL) {
+	if(b->occ == NULL || b->gaba == NULL || b->pt == NULL || b->printer.mapped == NULL) {
 		opt->log(opt, 'E', __func__, "internal error. failed to create alignment context. debuginfo: (%p, %p, %p, %p)",
 			b->occ, b->gaba, b->pt, b->printer.mapped
 		);
@@ -5434,23 +5396,23 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 	}
 
 	/* initialize threads */
-	for (uint64_t i = 0; i < b->opt->nth; ++i) {
-		if ((b->t[i] = (void*)mm_tbuf_init(b)) == 0) {
+	for(uint64_t i = 0; i < b->opt->nth; i++) {
+		if((b->t[i] = (void*)mm_tbuf_init(b)) == 0) {
 			opt->log(opt, 'E', __func__, "internal error. failed to create worker thread. debuginfo: (%lu)", i);
 			goto _fail;
 		}
 	}
 
 	/* initialize binary->bcd conversion table */
-	for (uint64_t i = 0; i < 9; ++i) {
+	for(uint64_t i = 0; i < 9; i++) {
 		b->conv[i] = (i + 1) % 10;
 	}
-	for (uint64_t i = 9; i < 40; ++i) {
+	for(uint64_t i = 9; i < 40; i++) {
 		b->conv[i] = (((i + 1) % 10)<<4) + (i + 1) / 10;
 	}
 
 	/* print sam header */
-	if (b->printer.header) {
+	if(b->printer.header) {
 		b->printer.header(b);
 	}
 	return(b);
@@ -5466,7 +5428,7 @@ _fail:
 static _force_inline
 int mm_align_file(mm_align_t *b, bseq_file_t *fp)
 {
-	if (fp == 0) { return(-1); }
+	if(fp == 0) { return(-1); }
 	b->fp = fp;
 	return(pt_stream(b->pt,
 		mm_align_source, b,
@@ -5540,11 +5502,11 @@ void mm_print_version(mm_mapopt_t const *opt)
 static _force_inline
 int mm_mapopt_load_preset(mm_mapopt_t *o, char const *arg)
 {
-	if (strcmp(arg, "pacbio") == 0) {
+	if(strcmp(arg, "pacbio") == 0) {
 		o->k = 15; o->w = 10; o->m = 1; o->x = 2; o->gi = 2; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
-	} else if (strcmp(arg, "ont") == 0) {
+	} else if(strcmp(arg, "ont") == 0) {
 		o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
-	} else if (strcmp(arg, "ava") == 0) {
+	} else if(strcmp(arg, "ava") == 0) {
 		o->k = 14; o->w = 5; o->m = 1; o->x = 2; o->gi = 0; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.05;
 		o->flag |= MM_AVA | MM_PAF;
 	} else {
@@ -5564,14 +5526,14 @@ int mm_mapopt_parse_threshs(
 	char const *arg)
 {
 	char const *p = optarg; o->n_frq = 0;
-	while (*p != '\0') {
+	while(*p != '\0') {
 		o->frq[o->n_frq++] = atof(p);
-		while (*p != '\0' && *p != ',') { p++; }
-		if (*p != '\0' || o->n_frq >= 16) { break; }
+		while(*p != '\0' && *p != ',') { p++; }
+		if(*p != '\0' || o->n_frq >= 16) { break; }
 		p++;
 	}
-	for (uint64_t i = 0; i < o->n_frq; ++i) {
-		if (o->frq[i] < 0.0 || o->frq[i] > 1.0) {
+	for(uint64_t i = 0; i < o->n_frq; i++) {
+		if(o->frq[i] < 0.0 || o->frq[i] > 1.0) {
 			o->log(o, 'W', __func__, "Warning: Invalid threshold `%f' parsed from `%s'.", o->frq[i], arg);
 		}
 	}
@@ -5588,14 +5550,14 @@ int mm_mapopt_parse_base_ids(
 	char const *arg)
 {
 	char const *p = optarg;
-	if (!isdigit(*p)) { return(1); }
+	if(!isdigit(*p)) { return(1); }
 
 	/* reference-side id */
 	o->base_rid = atoi(p);
-	while (*p != '\0' && *p != ',') { p++; }
+	while(*p != '\0' && *p != ',') { p++; }
 
 	/* query-side id */
-	if (*p != '\0' && isdigit(p[1])) {
+	if(*p != '\0' && isdigit(p[1])) {
 		o->base_qid = atoi(&p[1]);
 	}
 	return(0);
@@ -5617,15 +5579,15 @@ uint64_t mm_mapopt_tag2flag(
 {
 	#define _test(_str) ( _encode(_str) == t )
 
-	if (_test("RG")) { return(0x01ULL<<MM_RG); }
-	if (_test("CO")) { return(0x01ULL<<MM_CO); }
-	if (_test("NH")) { return(0x01ULL<<MM_NH); }
-	if (_test("IH")) { return(0x01ULL<<MM_IH); }
-	if (_test("AS")) { return(0x01ULL<<MM_AS); }
-	if (_test("XS")) { return(0x01ULL<<MM_XS); }
-	if (_test("NM")) { return(0x01ULL<<MM_NM); }
-	if (_test("SA")) { return(0x01ULL<<MM_SA); }
-	if (_test("MD")) { return(0x01ULL<<MM_MD); }
+	if(_test("RG")) { return(0x01ULL<<MM_RG); }
+	if(_test("CO")) { return(0x01ULL<<MM_CO); }
+	if(_test("NH")) { return(0x01ULL<<MM_NH); }
+	if(_test("IH")) { return(0x01ULL<<MM_IH); }
+	if(_test("AS")) { return(0x01ULL<<MM_AS); }
+	if(_test("XS")) { return(0x01ULL<<MM_XS); }
+	if(_test("NM")) { return(0x01ULL<<MM_NM); }
+	if(_test("SA")) { return(0x01ULL<<MM_SA); }
+	if(_test("MD")) { return(0x01ULL<<MM_MD); }
 
 	o->log(o, 'W', __func__, "Unknown tag: `%c%c'.", t & 0xff, t>>8);
 	return(0);
@@ -5645,14 +5607,14 @@ uint64_t mm_mapopt_parse_tags(
 {
 
 	uint32_t flag = 0;
-	while (*p != '\0') {
+	while(*p != '\0') {
 		char const *q = p;
 
 		/* split first tag */
-		while (*q != '\0' && *q != ',') { q++; }
+		while(*q != '\0' && *q != ',') { q++; }
 
 		/* skip if the length is not 2 */
-		if (q - p != 2) {
+		if(q - p != 2) {
 			o->log(o, 'W', __func__,
 				"Unparsable tag: `%.*s', must be two-character string like `RG'.",
 				q - p, p
@@ -5663,16 +5625,16 @@ uint64_t mm_mapopt_parse_tags(
 
 		/* save if buffer is available */
 		uint16_t t = _encode(p);
-		if (buf != NULL) { kv_push(uint16_t, *buf, t); }
+		if(buf != NULL) { kv_push(uint16_t, *buf, t); }
 
 		/* set tag */
 		uint64_t f = mm_mapopt_tag2flag(o, t);
-		if (f == 0 && o->verbose >= 1) {
+		if(f == 0 && o->verbose >= 1) {
 			o->log(o, 'W', __func__, "Unknown tag: `%.*s'.", 2, p);
 		}
 
 		/* test tail and advance pointer */
-		if (*q == '\0') { break; }
+		if(*q == '\0') { break; }
 		p = q + 1;
 	}
 	return(flag);
@@ -5697,9 +5659,9 @@ void mm_mapopt_parse_rg(
 	/* first unescape tabs */
 	char const *id, *p = arg;
 	char b[256], *q = b;
-	while (q < b+256 && *p != '\0') {
-		if (p[0] == '\\' && p[1] == 't') {
-			if (p[1] == '\0') { break; }
+	while(q < b+256 && *p != '\0') {
+		if(p[0] == '\\' && p[1] == 't') {
+			if(p[1] == '\0') { break; }
 			*q++ = '\t';
 			p += 2;
 		} else {
@@ -5709,7 +5671,7 @@ void mm_mapopt_parse_rg(
 	*q = '\0';
 
 	/* search header and id */
-	if (strstr(b, "@RG") != b || (id = strstr(b, "\tID:")) == 0) {
+	if(strstr(b, "@RG") != b || (id = strstr(b, "\tID:")) == 0) {
 		o->log(o, 'E', __func__, "RG line must start with @RG and contains ID, like `@RG\\tID:1'.");
 		return;
 	}
@@ -5722,7 +5684,7 @@ void mm_mapopt_parse_rg(
 
 	/* truncate tail of id line */
 	char *t = o->rg_id;
-	while (*t != '\t' && *t != '\n' && *t != '\0') { t++; }
+	while(*t != '\t' && *t != '\n' && *t != '\0') { t++; }
 	*t = '\0';
 
 	/* enable rg tag */
@@ -5739,14 +5701,14 @@ uint64_t mm_mapopt_parse_format(
 	mm_mapopt_t *o,
 	char const *arg)
 {
-	if (strcmp(arg, "sam") == 0) { return(0); }
-	if (strcmp(arg, "maf") == 0) { return(MM_MAF); }
-	if (strcmp(arg, "blast6") == 0) { return(MM_BLAST6); }
-	if (strcmp(arg, "blasr1") == 0) { return(MM_BLASR1); }
-	if (strcmp(arg, "blasr4") == 0) { return(MM_BLASR4); }
-	if (strcmp(arg, "paf") == 0) { return(MM_PAF); }
-	if (strcmp(arg, "mhap") == 0) { return(MM_MHAP); }
-	if (strcmp(arg, "falcon") == 0) { return(MM_FALCON); }
+	if(strcmp(arg, "sam") == 0) { return(0); }
+	if(strcmp(arg, "maf") == 0) { return(MM_MAF); }
+	if(strcmp(arg, "blast6") == 0) { return(MM_BLAST6); }
+	if(strcmp(arg, "blasr1") == 0) { return(MM_BLASR1); }
+	if(strcmp(arg, "blasr4") == 0) { return(MM_BLASR4); }
+	if(strcmp(arg, "paf") == 0) { return(MM_PAF); }
+	if(strcmp(arg, "mhap") == 0) { return(MM_MHAP); }
+	if(strcmp(arg, "falcon") == 0) { return(MM_FALCON); }
 	o->log(o, 'W', __func__, "Unknown output format: `%s'.", arg);
 	return 0;
 }
@@ -5760,7 +5722,7 @@ void mm_mapopt_save_args(
 	int argc, char *const *argv)
 {
 	kvec_t(char) v = { .n = 0, .m = 0, .a = NULL };
-	for (uint64_t i = 0; i < (uint64_t)argc; ++i) {
+	for(uint64_t i = 0; i < (uint64_t)argc; i++) {
 		kv_pushm(char, v, argv[i], strlen(argv[i]));
 		kv_push(char, v, ' ');
 	}
@@ -5783,10 +5745,10 @@ int mm_mapopt_parse(
 {
 	int ret = 0;
 	mm_mapopt_save_args(o, argc, argv);
-	while (optind < argc) {
+	while(optind < argc) {
 		int ch;
 
-		if ((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:L:H:I:J:S:E:D:Y:O:PQR:T:U:vh")) < 0) {
+		if((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:L:H:I:J:S:E:D:Y:O:PQR:T:U:vh")) < 0) {
 			/* positional argument */
 			kv_push(void*, *v, argv[optind]);
 			optind++;
@@ -5798,10 +5760,10 @@ int mm_mapopt_parse(
 			case 't': o->nth = atoi(optarg); break;
 			case 'x': mm_mapopt_load_preset(o, optarg); break;
 			case 'V':
-				if (isdigit(optarg[0])) {
+				if(isdigit(optarg[0])) {
 					o->verbose = atoi(optarg);
 				} else {
-					for (char const *p = optarg; *p == 'V'; p++, o->verbose++) {}
+					for(char const *p = optarg; *p == 'V'; p++, o->verbose++) {}
 				}
 				break;
 			case 'k': o->k = atoi(optarg); break;
@@ -5851,7 +5813,7 @@ int mm_mapopt_parse(
 static
 void mm_print_help(mm_mapopt_t const *opt)
 {
-	if (opt->verbose == 0) { return; }
+	if(opt->verbose == 0) { return; }
 
 	#define _msg(_level, ...) { \
 		opt->log(opt, 16 + _level, __func__, __VA_ARGS__); \
@@ -5913,7 +5875,7 @@ void mm_print_help(mm_mapopt_t const *opt)
 	_msg(1, "                   supp. records are omitted when SA tag is enabled");
 	_msg(2, "    -U STR,...   tags to be transferred from the input bam file []");
 	_msg(1, "");
-	if (opt->verbose < 2) {
+	if(opt->verbose < 2) {
 		_msg(0, "  Pass -hVV to show all the options.");
 		_msg(0, "");
 	}
@@ -5949,7 +5911,7 @@ int main(int argc, char *argv[])
 
 	/* unittest hook, see unittest.h for the details */
 	#if UNITTEST != 0
-	if (argc > 1 && strcmp(argv[1], "unittest") == 0) {
+	if(argc > 1 && strcmp(argv[1], "unittest") == 0) {
 		return(unittest_main(argc, argv));
 	}
 	#endif
@@ -5966,10 +5928,10 @@ int main(int argc, char *argv[])
 
 	/* init option object (init base time) and parse args */
 	mm_mapopt_t *opt = mm_mapopt_init();
-	if (mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &query)) {
+	if(mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &query)) {
 		/* set logger to stdout when invoked by option */
 		opt->fp = stdout;
-		if (opt->verbose == 0) {
+		if(opt->verbose == 0) {
 			mm_print_version(opt);
 		} else {
 			mm_print_help(opt);
@@ -5981,30 +5943,30 @@ int main(int argc, char *argv[])
 	}
 
 	/* if no input is given, print help to stderr and exit with 1 */
-	if (!fnr && query.n == 0) {
+	if(!fnr && query.n == 0) {
 		mm_print_help(opt);
 		goto _final;
 	}
 
 	/* if not in index construction mode and query-side file is missing, pour stdin to query */
-	if (!fnw && ((fnr && query.n == 0) || (!fnr && query.n == 1 && !(opt->flag&MM_AVA)))) {
+	if(!fnw && ((fnr && query.n == 0) || (!fnr && query.n == 1 && !(opt->flag&MM_AVA)))) {
 		opt->log(opt, 1, __func__, "query-side input redirected to stdin.");
 		kv_push(void*, query, "-");
 	}
 
 	/* calculate default window size if not specified */
-	if (opt->w >= 16) {
+	if(opt->w >= 16) {
 		opt->w = (int)(.6666667 * opt->k + .499);
 	}
 
 	/* check options */
-	if (mm_mapopt_check(opt)) {
+	if(mm_mapopt_check(opt)) {
 		goto _final;
 	}
 
 	/* open input index file */
 	set_info(0, "[main] open index file");
-	if (fnr && (fpr = fopen(fnr, "rb")) == NULL) {
+	if(fnr && (fpr = fopen(fnr, "rb")) == NULL) {
 		opt->log(opt, 'E', __func__,
 			"failed to open index file `%s'. Please check file path and it exists.",
 			fnr
@@ -6013,7 +5975,7 @@ int main(int argc, char *argv[])
 	}
 
 	/* fnw != NULL switches to index construction mode */
-	if (fnw && (fpw = fopen(fnw, "wb")) == NULL) {
+	if(fnw && (fpw = fopen(fnw, "wb")) == NULL) {
 		opt->log(opt, 'E', __func__,
 			"failed to open index file `%s' in write mode. Please check file path and its permission.",
 			fnw
@@ -6022,15 +5984,15 @@ int main(int argc, char *argv[])
 	}
 
 	/* iterate over index *blocks* */
-	for (uint64_t i = 0;
+	for(uint64_t i = 0;
 		i < (fpr? UINT64_MAX : (((opt->flag&MM_AVA) || fpw)? query.n : 1));
-		++i
+		i++
 	) {
 		bseq_file_t *fp = NULL;
 		mm_idx_t *mi = NULL;
 
 		/* load/generate index for this index-side iteration */
-		if (fpr != NULL) {
+		if(fpr != NULL) {
 			/* fetch the next block */
 			mi = mm_idx_load(fpr, opt->nth);
 		} else {
@@ -6041,9 +6003,9 @@ int main(int argc, char *argv[])
 		}
 
 		/* check sanity of the index */
-		if (mi == NULL) {
+		if(mi == NULL) {
 			/* when index is loaded from file, mi == NULL indicates the correct tail of the file */
-			if (fpr && i > 0) { break; }
+			if(fpr && i > 0) { break; }
 
 			/* otherwise error */
 			opt->log(opt, 'E', __func__, "failed to %s `%s'. Please check %s.",
@@ -6051,21 +6013,24 @@ int main(int argc, char *argv[])
 				fpr? fnr : (const char*)query.a[i],
 				fpr? "file path, format and its version" : "file path and format"
 			);
-			goto _main_align_error;
+			mm_idx_destroy(mi);
+			goto _final;
 		}
-		opt->log(opt, 2, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
+		opt->log(opt, 9, __func__, "loaded/built index for %lu target sequence(s).", mi->s.n);
 
 		/* do the task */
-		if (fpw != NULL) {
+		if(fpw != NULL) {
 			mm_idx_dump(fpw, mi, opt->nth);
 		} else {
 			/* init alignment; create threads and memory arena */
 			mm_align_t *aln = mm_align_init(opt, mi);
 
 			/* iterate over all the queries */
-			for (uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < query.n; ++j) {
+			for(uint64_t j = (!fpr && !(opt->flag&MM_AVA)); j < query.n; j++) {
+				opt->log(opt, 10, __func__, "fetched `%s'.", (const char *)query.a[j]);
+
 				/* fetch the next query */
-				if (!(fp = bseq_open((const char*)query.a[j],
+				if(!(fp = bseq_open((const char *)query.a[j],
 					opt->batch_size,
 					(opt->flag&MM_KEEP_QUAL) != 0,
 					opt->qmin,
@@ -6077,17 +6042,19 @@ int main(int argc, char *argv[])
 						"Please check file path and format.",
 						(const char*)query.a[j]
 					);
+					mm_align_destroy(aln);
 					mm_idx_destroy(mi);
-					goto _main_align_error;
+					goto _final;
 				}
 				mm_align_file(aln, fp);
 				bseq_close(fp);
+
+				opt->log(opt, 10, __func__, "finished `%s'.", (const char *)query.a[j]);
 			}
 
 			/* finish alignment */
 			mm_align_destroy(aln);
 		}
-	_main_align_error:
 		/* cleanup index for the current iteration */
 		mm_idx_destroy(mi);
 	}
@@ -6102,8 +6069,8 @@ int main(int argc, char *argv[])
 _final:
 	free(query.a);
 	mm_mapopt_destroy(opt);
-	if (fpr != NULL) { fclose(fpr); }
-	if (fpw != NULL) { fclose(fpw); }
+	if(fpr != NULL) { fclose(fpr); }
+	if(fpw != NULL) { fclose(fpw); }
 	return(ret);
 }
 
