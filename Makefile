@@ -16,7 +16,7 @@ sse41 avx2:
 	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) -DUNITTEST=0 -DNAMESPACE=$@' NAMESPACE=$@
 
 universal: sse41 avx2
-	$(CC) -static -o $(TARGET) -march=native main.c minialign.*.o gaba_linear.*.o gaba_affine.*.o $(LDFLAGS)
+	$(CC) -o $(TARGET) -march=native main.c minialign.*.o gaba_linear.*.o gaba_affine.*.o $(LDFLAGS)
 
 clean:
 	rm -fr gmon.out *.o a.out $(TARGET) *~ *.a *.dSYM session*
