@@ -44,7 +44,9 @@
  * @macro UNITTEST
  * @brief set zero to disable unittests
  */
-#define UNITTEST 					( 0 )
+#ifndef UNITTEST
+#  define UNITTEST 					( 0 )
+#endif
 
 /* make sure POSIX APIs are properly activated */
 #if defined(__linux__) && !defined(_POSIX_C_SOURCE)
@@ -70,6 +72,7 @@
 #include <sys/types.h>
 #include "sassert.h"
 
+
 /* max, min */
 #define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
 #define MIN2(x,y) 		( (x) < (y) ? (x) : (y) )
@@ -80,6 +83,18 @@
 
 /* _force_inline */
 #define _force_inline	inline
+
+/* add namespace */
+#ifndef _export
+#  ifdef NAMESPACE
+#    define _export_cat(x, y)		x##_##y
+#    define _export_cat2(x, y)		_export_cat(x, y)
+#    define _export(_base)			_export_cat2(NAMESPACE, _base)
+#  else
+#    define _export(_base)			_base
+#  endif
+#endif
+
 
 /**
  * @fn cputime
@@ -231,13 +246,13 @@ uint64_t mm_rand64(void)
 
 /* end of misc.c */
 
-#include "kvec.h"
-#include "gaba.h"
-#include "lmm.h"
-#include "arch/arch.h"
-
 #define UNITTEST_UNIQUE_ID		1
 #include "unittest.h"
+
+#include "lmm.h"
+#include "gaba_wrap.h"
+#include "arch/arch.h"
+#include "kvec.h"
 
 unittest_config( .name = "minialign" );
 
@@ -2520,6 +2535,7 @@ typedef int (*mm_log_t)(mm_mapopt_t const *opt, char level, char const *func, ch
  * @fn mm_log_printer
  * @brief 0, 1, 2,... for normal message, 8, 9, 10,... for message with timestamp, 16, 17, 18, ... for without header.
  */
+static
 int mm_log_printer(
 	mm_mapopt_t const *opt,	/* option object */
 	char level,				/* 'E' and 'W' for error and warning, 0, 1,... for message */
@@ -5902,7 +5918,7 @@ int main_align(
 /**
  * @fn main
  */
-int main(int argc, char *argv[])
+int _export(main)(int argc, char *argv[])
 {
 	int ret = 1;
 	char const *fnr = NULL, *fnw = NULL;
@@ -5928,6 +5944,7 @@ int main(int argc, char *argv[])
 
 	/* init option object (init base time) and parse args */
 	mm_mapopt_t *opt = mm_mapopt_init();
+	opt->log(opt, 1, __func__, "start.");
 	if(mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &query)) {
 		/* set logger to stdout when invoked by option */
 		opt->fp = stdout;

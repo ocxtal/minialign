@@ -39,7 +39,7 @@ typedef struct {
 #define KSORT_SWAP(type_t, a, b) { register type_t t=(a); (a)=(b); (b)=t; }
 
 #define KSORT_INIT(name, type_t, __sort_lt)								\
-	size_t ks_lis_##name(size_t n, const type_t *a, size_t *b, size_t *_p) \
+	static size_t ks_lis_##name(size_t n, const type_t *a, size_t *b, size_t *_p) \
 	{ /* translated from: http://www.algorithmist.com/index.php/Longest_Increasing_Subsequence.cpp */ \
 		size_t i, u, v, *top = b, *p; \
 		if (n == 0) return 0; \
@@ -65,7 +65,7 @@ typedef struct {
 		if (!_p) free(p); \
 		return top - b; \
 	} \
-	type_t ks_ksmall_##name(size_t n, type_t arr[], size_t kk)			\
+	static type_t ks_ksmall_##name(size_t n, type_t arr[], size_t kk)			\
 	{																	\
 		type_t *low, *high, *k, *ll, *hh, *mid;							\
 		low = arr; high = arr + n - 1; k = arr + kk;					\
@@ -109,7 +109,7 @@ typedef const char *ksstr_t;
 	typedef struct { \
 		rstype_t *b, *e; \
 	} rsbucket_##name##_t; \
-	void rs_insertsort_##name(rstype_t *beg, rstype_t *end) \
+	static void rs_insertsort_##name(rstype_t *beg, rstype_t *end) \
 	{ \
 		rstype_t *i; \
 		for (i = beg + 1; i < end; ++i) \
@@ -120,7 +120,7 @@ typedef const char *ksstr_t;
 				*j = tmp; \
 			} \
 	} \
-	void rs_sort_##name(rstype_t *beg, rstype_t *end, int n_bits, int s) \
+	static void rs_sort_##name(rstype_t *beg, rstype_t *end, int n_bits, int s) \
 	{ \
 		rstype_t *i; \
 		int size = 1<<n_bits, m = size - 1; \
@@ -150,7 +150,7 @@ typedef const char *ksstr_t;
 				else if (k->e - k->b > 1) rs_insertsort_##name(k->b, k->e); \
 		} \
 	} \
-	void radix_sort_##name(rstype_t *beg, rstype_t *end) \
+	static void radix_sort_##name(rstype_t *beg, rstype_t *end) \
 	{ \
 		if (end - beg <= RS_MIN_SIZE) rs_insertsort_##name(beg, end); \
 		else rs_sort_##name(beg, end, 8, sizeof_key * 8 - 8); \

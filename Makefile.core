@@ -1,0 +1,17 @@
+
+
+SUFFIX = $(NAMESPACE:$(NAMESPACE)=.$(NAMESPACE))
+
+all: minialign$(SUFFIX).o gaba_linear$(SUFFIX).o gaba_affine$(SUFFIX).o
+
+minialign$(SUFFIX).o: minialign.c
+	$(CC) -c -o $@ $(CFLAGS) $<
+
+gaba_linear$(SUFFIX).o: gaba.c
+	$(CC) -c -o $@ $(CFLAGS) -DMODEL=LINEAR -DSUFFIX $<
+
+gaba_affine$(SUFFIX).o: gaba.c
+	$(CC) -c -o $@ $(CFLAGS) -DMODEL=AFFINE -DSUFFIX $<
+
+gaba.c: gaba.h log.h lmm.h unittest.h sassert.h
+minialign.c: kvec.h ksort.h gaba_wrap.h gaba.h lmm.h unittest.h sassert.h

@@ -29,6 +29,15 @@
 #include <stdint.h>		/** uint8_t, int32_t, int64_t */
 
 /**
+ * @macro GABA_EXPORT_LEVEL
+ */
+#ifdef _GABA_WRAP_H_INCLUDED
+#  define GABA_EXPORT_LEVEL		static inline
+#else
+#  define GABA_EXPORT_LEVEL
+#endif
+
+/**
  * @enum gaba_error
  *
  * @brief (API) error flags. see gaba_init function and status member in the gaba_alignment structure for more details.
@@ -208,6 +217,7 @@ typedef struct gaba_alignment_s gaba_alignment_t;
  * @fn gaba_init
  * @brief (API) gaba_init new API
  */
+GABA_EXPORT_LEVEL
 gaba_t *gaba_init(gaba_params_t const *params);
 
 /**
@@ -221,12 +231,14 @@ gaba_t *gaba_init(gaba_params_t const *params);
  *
  * @sa gaba_init
  */
+GABA_EXPORT_LEVEL
 void gaba_clean(
 	gaba_t *ctx);
 
 /**
  * @fn gaba_dp_init
  */
+GABA_EXPORT_LEVEL
 gaba_dp_t *gaba_dp_init(
 	gaba_t const *ctx,
 	uint8_t const *alim,
@@ -236,6 +248,7 @@ gaba_dp_t *gaba_dp_init(
  * @fn gaba_dp_flush
  * @brief flush stack (flush all if NULL) 
  */
+GABA_EXPORT_LEVEL
 void gaba_dp_flush(
 	gaba_dp_t *dp,
 	uint8_t const *alim,
@@ -244,12 +257,14 @@ void gaba_dp_flush(
 /**
  * @fn gaba_dp_save_stack
  */
+GABA_EXPORT_LEVEL
 gaba_stack_t const *gaba_dp_save_stack(
 	gaba_dp_t *dp);
 
 /**
  * @fn gaba_dp_flush_stack
  */
+GABA_EXPORT_LEVEL
 void gaba_dp_flush_stack(
 	gaba_dp_t *dp,
 	gaba_stack_t const *stack);
@@ -257,12 +272,14 @@ void gaba_dp_flush_stack(
 /**
  * @fn gaba_dp_clean
  */
+GABA_EXPORT_LEVEL
 void gaba_dp_clean(
 	gaba_dp_t *dp);
 
 /**
  * @fn gaba_dp_fill_root
  */
+GABA_EXPORT_LEVEL
 gaba_fill_t *gaba_dp_fill_root(
 	gaba_dp_t *dp,
 	gaba_section_t const *a,
@@ -274,6 +291,7 @@ gaba_fill_t *gaba_dp_fill_root(
  * @fn gaba_dp_fill
  * @brief fill dp matrix inside section pairs
  */
+GABA_EXPORT_LEVEL
 gaba_fill_t *gaba_dp_fill(
 	gaba_dp_t *dp,
 	gaba_fill_t const *prev_sec,
@@ -283,6 +301,7 @@ gaba_fill_t *gaba_dp_fill(
 /**
  * @fn gaba_dp_merge
  */
+GABA_EXPORT_LEVEL
 gaba_fill_t *gaba_dp_merge(
 	gaba_dp_t *dp,
 	gaba_fill_t const *sec_list,
@@ -291,6 +310,7 @@ gaba_fill_t *gaba_dp_merge(
 /**
  * @fn gaba_dp_search_max
  */
+GABA_EXPORT_LEVEL
 gaba_pos_pair_t gaba_dp_search_max(
 	gaba_dp_t *dp,
 	gaba_fill_t const *sec);
@@ -325,6 +345,7 @@ typedef int (*gaba_alignment_writer)(int c);
  *
  * @brief generate alignment result string
  */
+GABA_EXPORT_LEVEL
 gaba_alignment_t *gaba_dp_trace(
 	gaba_dp_t *dp,
 	gaba_fill_t const *fw_tail,
@@ -336,6 +357,7 @@ gaba_alignment_t *gaba_dp_trace(
  *
  * @brief recombine two alignments x and y at xsid and ysid.
  */
+GABA_EXPORT_LEVEL
 gaba_alignment_t *gaba_dp_recombine(
 	gaba_dp_t *dp,
 	gaba_alignment_t *x,
@@ -346,6 +368,7 @@ gaba_alignment_t *gaba_dp_recombine(
 /**
  * @fn gaba_dp_res_free
  */
+GABA_EXPORT_LEVEL
 void gaba_dp_res_free(
 	gaba_alignment_t *aln);
 
@@ -359,6 +382,7 @@ void gaba_dp_res_free(
  * void *fp is an opaque pointer to the context of the printer.
  */
 typedef int (*gaba_dp_printer_t)(void *, int64_t, char);
+GABA_EXPORT_LEVEL
 uint64_t gaba_dp_print_cigar_forward(
 	gaba_dp_printer_t printer,
 	void *fp,
@@ -371,6 +395,7 @@ uint64_t gaba_dp_print_cigar_forward(
  *
  * @brief convert path string to cigar in reverse direction
  */
+GABA_EXPORT_LEVEL
 uint64_t gaba_dp_print_cigar_reverse(
 	gaba_dp_printer_t printer,
 	void *fp,
@@ -381,6 +406,7 @@ uint64_t gaba_dp_print_cigar_reverse(
 /**
  * @fn gaba_dp_dump_cigar_forward
  */
+GABA_EXPORT_LEVEL
 uint64_t gaba_dp_dump_cigar_forward(
 	char *buf,
 	uint64_t buf_size,
@@ -391,6 +417,7 @@ uint64_t gaba_dp_dump_cigar_forward(
 /**
  * @fn gaba_dp_dump_cigar_reverse
  */
+GABA_EXPORT_LEVEL
 uint64_t gaba_dp_dump_cigar_reverse(
 	char *buf,
 	uint64_t buf_size,

@@ -54,14 +54,22 @@
 /* add suffix */
 #ifdef SUFFIX
 #  if MODEL == LINEAR
-#    define suffix(_base)			_base##_linear
+#    define _suffix(_base)			_base##_linear
 #  else
-#    define suffix(_base)			_base##_affine
+#    define _suffix(_base)			_base##_affine
 #  endif
 #else
-#  define suffix(_base)				_base
+#  define _suffix(_base)			_base
 #endif
 
+/* add namespace */
+#ifdef NAMESPACE
+#  define _export_cat(x, y)			x##_##y
+#  define _export_cat2(x, y)		_export_cat(x, y)
+#  define _export(_base)			_export_cat2(NAMESPACE, _suffix(_base))
+#else
+#  define _export(_base)			_suffix(_base)
+#endif
 
 /* constants */
 #define BW_BASE						( 5 )
@@ -1852,7 +1860,7 @@ struct gaba_joint_tail_s *fill_section_seq_bounded(
  *
  * @brief build_root API
  */
-struct gaba_fill_s *suffix(gaba_dp_fill_root)(
+struct gaba_fill_s *_export(gaba_dp_fill_root)(
 	struct gaba_dp_context_s *this,
 	struct gaba_section_s const *a,
 	uint32_t apos,
@@ -1870,7 +1878,7 @@ struct gaba_fill_s *suffix(gaba_dp_fill_root)(
  *
  * @brief fill API
  */
-struct gaba_fill_s *suffix(gaba_dp_fill)(
+struct gaba_fill_s *_export(gaba_dp_fill)(
 	struct gaba_dp_context_s *this,
 	struct gaba_fill_s const *prev_sec,
 	struct gaba_section_s const *a,
@@ -2151,7 +2159,7 @@ void leaf_search(
 /**
  * @fn gaba_dp_search_max
  */
-struct gaba_pos_pair_s suffix(gaba_dp_search_max)(
+struct gaba_pos_pair_s _export(gaba_dp_search_max)(
 	struct gaba_dp_context_s *this,
 	struct gaba_fill_s const *tail)
 {
@@ -3359,7 +3367,7 @@ struct gaba_alignment_s *trace_refine_alignment(
 /**
  * @fn gaba_dp_trace
  */
-struct gaba_alignment_s *suffix(gaba_dp_trace)(
+struct gaba_alignment_s *_export(gaba_dp_trace)(
 	struct gaba_dp_context_s *this,
 	struct gaba_fill_s const *fw_tail,
 	struct gaba_fill_s const *rv_tail,
@@ -3402,9 +3410,23 @@ struct gaba_alignment_s *suffix(gaba_dp_trace)(
 }
 
 /**
+ * @fn gaba_dp_res_free
+ */
+void _export(gaba_dp_res_free)(
+	struct gaba_alignment_s *aln)
+{
+	if(aln->lmm != NULL) {
+		lmm_t *lmm = (lmm_t *)aln->lmm;
+		debug("free mem, ptr(%p), lmm(%p)", (void *)aln - aln->reserved3, lmm);
+		lmm_free(lmm, (void *)((uint8_t *)aln - aln->reserved3));
+	}
+	return;
+}
+
+/**
  * @fn gaba_dp_recombine
  */
-struct gaba_alignment_s *suffix(gaba_dp_recombine)(
+struct gaba_alignment_s *_export(gaba_dp_recombine)(
 	struct gaba_dp_context_s *this,
 	struct gaba_alignment_s *x,
 	uint32_t xsid,
@@ -3415,22 +3437,8 @@ struct gaba_alignment_s *suffix(gaba_dp_recombine)(
 		x, x->score, x->sec[0].apos, x->sec[0].alen, x->sec[0].bpos, x->sec[0].blen,
 		y, y->score, y->sec[0].apos, y->sec[0].alen, y->sec[0].bpos, y->sec[0].blen);
 
-	gaba_dp_res_free(y);
+	_export(gaba_dp_res_free)(y);
 	return(x);
-}
-
-/**
- * @fn gaba_dp_res_free
- */
-void suffix(gaba_dp_res_free)(
-	struct gaba_alignment_s *aln)
-{
-	if(aln->lmm != NULL) {
-		lmm_t *lmm = (lmm_t *)aln->lmm;
-		debug("free mem, ptr(%p), lmm(%p)", (void *)aln - aln->reserved3, lmm);
-		lmm_free(lmm, (void *)((uint8_t *)aln - aln->reserved3));
-	}
-	return;
 }
 
 /**
@@ -3530,7 +3538,7 @@ int64_t parse_dump_gap_string(
  * @fn gaba_dp_print_cigar_forward
  * @brief parse path string and print cigar to file
  */
-uint64_t suffix(gaba_dp_print_cigar_forward)(
+uint64_t _export(gaba_dp_print_cigar_forward)(
 	gaba_dp_printer_t printer,
 	void *fp,
 	uint32_t const *path,
@@ -3581,7 +3589,7 @@ uint64_t suffix(gaba_dp_print_cigar_forward)(
  * @fn gaba_dp_dump_cigar_forward
  * @brief parse path string and store cigar to buffer
  */
-uint64_t suffix(gaba_dp_dump_cigar_forward)(
+uint64_t _export(gaba_dp_dump_cigar_forward)(
 	char *buf,
 	uint64_t buf_size,
 	uint32_t const *path,
@@ -3649,7 +3657,7 @@ uint64_t suffix(gaba_dp_dump_cigar_forward)(
  * @fn gaba_dp_print_cigar_reverse
  * @brief parse path string and print cigar to file
  */
-uint64_t suffix(gaba_dp_print_cigar_reverse)(
+uint64_t _export(gaba_dp_print_cigar_reverse)(
 	gaba_dp_printer_t printer,
 	void *fp,
 	uint32_t const *path,
@@ -3700,7 +3708,7 @@ uint64_t suffix(gaba_dp_print_cigar_reverse)(
  * @fn gaba_dp_dump_cigar_reverse
  * @brief parse path string and store cigar to buffer
  */
-uint64_t suffix(gaba_dp_dump_cigar_reverse)(
+uint64_t _export(gaba_dp_dump_cigar_reverse)(
 	char *buf,
 	uint64_t buf_size,
 	uint32_t const *path,
@@ -4035,7 +4043,7 @@ struct gaba_char_vec_s gaba_init_create_char_vector(
 /**
  * @fn gaba_init
  */
-gaba_t *suffix(gaba_init)(
+gaba_t *_export(gaba_init)(
 	struct gaba_params_s const *params)
 {
 	if(params == NULL) {
@@ -4143,7 +4151,7 @@ gaba_t *suffix(gaba_init)(
 /**
  * @fn gaba_clean
  */
-void suffix(gaba_clean)(
+void _export(gaba_clean)(
 	struct gaba_context_s *ctx)
 {
 	gaba_aligned_free(ctx);
@@ -4153,7 +4161,7 @@ void suffix(gaba_clean)(
 /**
  * @fn gaba_dp_init
  */
-struct gaba_dp_context_s *suffix(gaba_dp_init)(
+struct gaba_dp_context_s *_export(gaba_dp_init)(
 	struct gaba_context_s const *ctx,
 	uint8_t const *alim,
 	uint8_t const *blim)
@@ -4223,7 +4231,7 @@ int32_t gaba_dp_add_stack(
 /**
  * @fn gaba_dp_flush
  */
-void suffix(gaba_dp_flush)(
+void _export(gaba_dp_flush)(
 	struct gaba_dp_context_s *this,
 	uint8_t const *alim,
 	uint8_t const *blim)
@@ -4241,7 +4249,7 @@ void suffix(gaba_dp_flush)(
 /**
  * @fn gaba_dp_save_stack
  */
-struct gaba_stack_s const *suffix(gaba_dp_save_stack)(
+struct gaba_stack_s const *_export(gaba_dp_save_stack)(
 	struct gaba_dp_context_s *this)
 {
 	struct gaba_mem_block_s *mem = this->curr_mem;
@@ -4261,7 +4269,7 @@ struct gaba_stack_s const *suffix(gaba_dp_save_stack)(
 /**
  * @fn gaba_dp_flush_stack
  */
-void suffix(gaba_dp_flush_stack)(
+void _export(gaba_dp_flush_stack)(
 	struct gaba_dp_context_s *this,
 	gaba_stack_t const *stack)
 {
@@ -4302,7 +4310,7 @@ void *gaba_dp_malloc(
 /**
  * @fn gaba_dp_clean
  */
-void suffix(gaba_dp_clean)(
+void _export(gaba_dp_clean)(
 	struct gaba_dp_context_s *this)
 {
 	if(this == NULL) {
@@ -4342,7 +4350,7 @@ static
 void *unittest_build_context(void *params)
 {
 	/* build context */
-	gaba_t *ctx = gaba_init(unittest_default_params);
+	gaba_t *ctx = _export(gaba_init)(unittest_default_params);
 	return((void *)ctx);
 }
 
@@ -4352,7 +4360,7 @@ void *unittest_build_context(void *params)
 static
 void unittest_clean_context(void *ctx)
 {
-	gaba_clean((struct gaba_context_s *)ctx);
+	_export(gaba_clean)((struct gaba_context_s *)ctx);
 	return;
 }
 
@@ -4576,7 +4584,7 @@ int check_cigar(
 
 	debug("path(%x), len(%lld)", aln->path->array[0], aln->path->len);
 
-	uint64_t l = gaba_dp_dump_cigar_forward(
+	uint64_t l = _export(gaba_dp_dump_cigar_forward)(
 		buf, 1024, aln->path->array, 0, aln->path->len);
 
 	debug("cigar(%s)", buf);
@@ -4699,14 +4707,14 @@ unittest(with_seq_pair("A", "A"))
 #define omajinai() \
 	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx; \
 	struct unittest_sections_s const *s = (struct unittest_sections_s const *)ctx; \
-	struct gaba_dp_context_s *d = gaba_dp_init(c, s->alim, s->blim);
+	struct gaba_dp_context_s *d = _export(gaba_dp_init)(c, s->alim, s->blim);
 
 unittest(with_seq_pair("A", "A"))
 {
 	omajinai();
 
 	assert(d != NULL, "%p", d);
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /**
@@ -4717,22 +4725,22 @@ unittest(with_seq_pair("A", "A"))
 	omajinai();
 
 	/* fill root section */
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 0, 0, -29, 1), print_tail(f));
 
 	/* fill again */
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 0, 0, -27, 2), print_tail(f));
 
 	/* fill tail section */
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 4, 13, 13, 3), print_tail(f));
 
 	/* fill tail section again */
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	#if MODEL == LINEAR
 		assert(f->status == 0x1ff, "%x", f->status);
 		assert(check_tail(f, 4, 40, 53, 4), print_tail(f));
@@ -4741,7 +4749,7 @@ unittest(with_seq_pair("A", "A"))
 		assert(check_tail(f, 4, 31, 44, 4), print_tail(f));
 	#endif
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* reverse fetch */
@@ -4750,22 +4758,22 @@ unittest(with_seq_pair("A", "A"))
 	omajinai();
 
 	/* fill root section */
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->arsec, 0, &s->brsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->arsec, 0, &s->brsec, 0);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 0, 0, -29, 1), print_tail(f));
 
 	/* fill again */
-	f = gaba_dp_fill(d, f, &s->arsec, &s->brsec);
+	f = _export(gaba_dp_fill)(d, f, &s->arsec, &s->brsec);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 0, 0, -27, 2), print_tail(f));
 
 	/* fill tail section */
-	f = gaba_dp_fill(d, f, &s->artail, &s->brtail);
+	f = _export(gaba_dp_fill)(d, f, &s->artail, &s->brtail);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 4, 13, 13, 3), print_tail(f));
 
 	/* fill tail section again */
-	f = gaba_dp_fill(d, f, &s->artail, &s->brtail);
+	f = _export(gaba_dp_fill)(d, f, &s->artail, &s->brtail);
 	#if MODEL == LINEAR
 		assert(f->status == 0x1ff, "%x", f->status);
 		assert(check_tail(f, 4, 40, 53, 4), print_tail(f));
@@ -4774,7 +4782,7 @@ unittest(with_seq_pair("A", "A"))
 		assert(check_tail(f, 4, 31, 44, 4), print_tail(f));
 	#endif
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* with longer sequences */
@@ -4783,22 +4791,22 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	omajinai();
 
 	/* fill root section */
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 0, 0, -7, 1), print_tail(f));
 
 	/* fill again */
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 16, 17, 17, 2), print_tail(f));
 
 	/* fill tail section */
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 48, 40, 57, 3), print_tail(f));
 
 	/* fill tail section again */
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	#if MODEL == LINEAR
 		assert(f->status == 0x1ff, "%x", f->status);
 		assert(check_tail(f, 48, 40, 97, 4), print_tail(f));
@@ -4807,7 +4815,7 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 		assert(check_tail(f, 48, 31, 88, 4), print_tail(f));
 	#endif
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* reverse fetch */
@@ -4816,22 +4824,22 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	omajinai();
 
 	/* fill root section */
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->arsec, 0, &s->brsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->arsec, 0, &s->brsec, 0);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 0, 0, -7, 1), print_tail(f));
 
 	/* fill again */
-	f = gaba_dp_fill(d, f, &s->arsec, &s->brsec);
+	f = _export(gaba_dp_fill)(d, f, &s->arsec, &s->brsec);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 16, 17, 17, 2), print_tail(f));
 
 	/* fill tail section */
-	f = gaba_dp_fill(d, f, &s->artail, &s->brtail);
+	f = _export(gaba_dp_fill)(d, f, &s->artail, &s->brtail);
 	assert(f->status == 0x1ff, "%x", f->status);
 	assert(check_tail(f, 48, 40, 57, 3), print_tail(f));
 
 	/* fill tail section again */
-	f = gaba_dp_fill(d, f, &s->artail, &s->brtail);
+	f = _export(gaba_dp_fill)(d, f, &s->artail, &s->brtail);
 	#if MODEL == LINEAR
 		assert(f->status == 0x1ff, "%x", f->status);
 		assert(check_tail(f, 48, 40, 97, 4), print_tail(f));
@@ -4840,7 +4848,7 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 		assert(check_tail(f, 48, 31, 88, 4), print_tail(f));
 	#endif
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* sequences with different lengths (consumed as mismatches) */
@@ -4848,17 +4856,17 @@ unittest(with_seq_pair("GAAAAAAAA", "AAAAAAAA"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	assert(f->status == 0x01ff, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->status == 0x01f0, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
 	assert(f->status == 0x010f, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	assert(f->status == 0x01f0, "%x", f->status);
 	assert(check_tail(f, 22, 37, 42, 4), print_tail(f));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* another pair with different lengths */
@@ -4866,16 +4874,16 @@ unittest(with_seq_pair("TTTTTTTT", "CTTTTTTTT"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	assert(f->status == 0x010f, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->status == 0x01f0, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->status == 0x010f, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bfsec);
 	assert(f->status == 0x01f0, "%x", f->status);
 
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	#if MODEL == LINEAR
 		assert(f->status == 0x010f, "%x", f->status);
 		assert(check_tail(f, 22, 36, 42, 5), print_tail(f));
@@ -4884,7 +4892,7 @@ unittest(with_seq_pair("TTTTTTTT", "CTTTTTTTT"))
 		assert(check_tail(f, 22, 35, 41, 5), print_tail(f));
 	#endif
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* with deletions */
@@ -4892,14 +4900,14 @@ unittest(with_seq_pair("GACGTACGT", "ACGTACGT"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	assert(f->status == 0x01ff, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->status == 0x01f0, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
 	assert(f->status == 0x010f, "%x", f->status);
 
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	#if MODEL == LINEAR
 		assert(f->status == 0x01f0, "%x", f->status);
 		assert(check_tail(f, 20, 37, 42, 4), print_tail(f));
@@ -4908,7 +4916,7 @@ unittest(with_seq_pair("GACGTACGT", "ACGTACGT"))
 		assert(check_tail(f, 20, 38, 43, 4), print_tail(f));
 	#endif
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* with insertions */
@@ -4916,17 +4924,17 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGT"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	assert(f->status == 0x010f, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->status == 0x01f0, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->status == 0x010f, "%x", f->status);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bfsec);
 	assert(f->status == 0x01f0, "%x", f->status);
 
 
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	#if MODEL == LINEAR
 		assert(f->status == 0x010f, "%x", f->status);
 		assert(check_tail(f, 20, 35, 41, 5), print_tail(f));
@@ -4935,7 +4943,7 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGT"))
 		assert(check_tail(f, 20, 36, 42, 5), print_tail(f));
 	#endif
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* print_cigar test */
@@ -4957,59 +4965,59 @@ unittest()
 	char *p = buf;
 
 	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55), 0, 8);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "6M4D8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "6M4I8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "6M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "6M5I8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "2D5M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	#undef _arr
@@ -5022,59 +5030,59 @@ unittest()
 	char *p = buf;
 
 	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55), 0, 8);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "8M4D6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "8M4I6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "8M5D6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I5M2D") == 0, "%s", buf);
 
 	#undef _arr
@@ -5088,46 +5096,46 @@ unittest()
 	char *buf = (char *)malloc(len);
 
 	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555), 0, 32);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55), 0, 8);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55550555), 0, 32);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "6M4D8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x5555f555), 0, 32);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "6M4I8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaaa0555), 0, 33);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "6M5D8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555), 0, 33);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "6M5I8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "2D5M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	#undef _arr
@@ -5140,46 +5148,46 @@ unittest()
 	char *buf = (char *)malloc(len);
 
 	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555), 0, 32);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55), 0, 8);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55550555), 0, 32);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "8M4D6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x5555f555), 0, 32);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "8M4I6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaaa0555), 0, 33);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "8M5D6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555), 0, 33);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "8M5I6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I5M2D") == 0, "%s", buf);
 
 	#undef _arr
@@ -5195,28 +5203,28 @@ unittest(with_seq_pair("A", "A"))
 	omajinai();
 
 	/* fill sections */
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 
 	/* forward-only traceback */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 0, 0, 0, 0, (uint32_t)-1, 0, 0, 0), print_result(r));
 
 	/* forward-reverse traceback */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 0, 0, 0, 0, (uint32_t)-1, 0, 0, 0), print_result(r));
 
 	/* section added */
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 
 	/* forward-only traceback */
-	r = gaba_dp_trace(d, f, NULL, NULL);
+	r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 0, 0, 0, 0, (uint32_t)-1, 0, 0, 0), print_result(r));
 
 	/* forward-reverse traceback */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 0, 0, 0, 0, (uint32_t)-1, 0, 0, 0), print_result(r));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* with short sequences */
@@ -5225,12 +5233,12 @@ unittest(with_seq_pair("A", "A"))
 	omajinai();
 
 	/* fill sections */
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
 	/* forward-only traceback */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 4, 0, 4, 2, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "DRDR"), print_path(r));
 	assert(check_cigar(r, "2M"), print_path(r));
@@ -5238,7 +5246,7 @@ unittest(with_seq_pair("A", "A"))
 	assert(check_section(r->sec[1], s->afsec, 0, 1, s->bfsec, 0, 1, 2, 2), print_section(r->sec[1]));
 
 	/* reverse-only traceback */
-	r = gaba_dp_trace(d, NULL, f, NULL);
+	r = _export(gaba_dp_trace)(d, NULL, f, NULL);
 	assert(check_result(r, 4, 0, 4, 2, 1, 2, 1, 1), print_result(r));
 	assert(check_path(r, "DRDR"), print_path(r));
 	assert(check_cigar(r, "2M"), print_path(r));
@@ -5246,7 +5254,7 @@ unittest(with_seq_pair("A", "A"))
 	assert(check_section(r->sec[1], s->arsec, 0, 1, s->brsec, 0, 1, 2, 2), print_section(r->sec[1]));
 
 	/* forward-reverse traceback */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 8, 0, 8, 4, 2, 0, 0, 0), print_result(r));
 	assert(check_path(r, "DRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "4M"), print_path(r));
@@ -5256,7 +5264,7 @@ unittest(with_seq_pair("A", "A"))
 	assert(check_section(r->sec[3], s->afsec, 0, 1, s->bfsec, 0, 1, 6, 2), print_section(r->sec[3]));
 
 	/* forward-reverse traceback with seed */
-	r = gaba_dp_trace(d, f, f, GABA_TRACE_PARAMS(
+	r = _export(gaba_dp_trace)(d, f, f, GABA_TRACE_PARAMS(
 		.sec = &((struct gaba_path_section_s){
 			.aid = 100, .bid = 102,
 			.apos = 0, .bpos = 0,
@@ -5274,7 +5282,7 @@ unittest(with_seq_pair("A", "A"))
 	assert(check_section(r->sec[3], s->afsec, 0, 1, s->bfsec, 0, 1, 32, 2), print_section(r->sec[3]));
 	assert(check_section(r->sec[4], s->afsec, 0, 1, s->bfsec, 0, 1, 34, 2), print_section(r->sec[4]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* with longer sequences */
@@ -5283,12 +5291,12 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	omajinai();
 
 	/* fill sections */
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
 	/* fw */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 48, 0, 48, 2, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "24M"), print_path(r));
@@ -5296,7 +5304,7 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	assert(check_section(r->sec[1], s->afsec, 0, 12, s->bfsec, 0, 12, 24, 24), print_section(r->sec[1]));
 
 	/* rv */
-	r = gaba_dp_trace(d, NULL, f, NULL);
+	r = _export(gaba_dp_trace)(d, NULL, f, NULL);
 	assert(check_result(r, 48, 0, 48, 2, 1, 24, 12, 12), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "24M"), print_path(r));
@@ -5304,7 +5312,7 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	assert(check_section(r->sec[1], s->arsec, 0, 12, s->brsec, 0, 12, 24, 24), print_section(r->sec[1]));
 
 	/* fw-rv */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 96, 0, 96, 4, 2, 0, 0, 0), print_result(r));
 	assert(check_path(r,
 		"DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"
@@ -5316,7 +5324,7 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	assert(check_section(r->sec[2], s->afsec, 0, 12, s->bfsec, 0, 12, 48, 24), print_section(r->sec[2]));
 	assert(check_section(r->sec[3], s->afsec, 0, 12, s->bfsec, 0, 12, 72, 24), print_section(r->sec[3]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* concatenate */
@@ -5325,33 +5333,33 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	omajinai();
 
 	/* fill forward root section */
-	struct gaba_fill_s *f1 = gaba_dp_fill_root(d, &s->afsec, 6, &s->bfsec, 6);
+	struct gaba_fill_s *f1 = _export(gaba_dp_fill_root)(d, &s->afsec, 6, &s->bfsec, 6);
 	assert(f1->status == 0x1ff, "%x", f1->status);
 	assert(check_tail(f1, 0, 0, -19, 1), print_tail(f1));
 
 	/* fill tail section */
-	f1 = gaba_dp_fill(d, f1, &s->aftail, &s->bftail);
+	f1 = _export(gaba_dp_fill)(d, f1, &s->aftail, &s->bftail);
 	assert(f1->status == 0x1ff, "%x", f1->status);
 	assert(check_tail(f1, 12, 21, 21, 2), print_tail(f1));
 
 	/* fill forward root section */
-	struct gaba_fill_s *f2 = gaba_dp_fill_root(d, &s->arsec, 6, &s->brsec, 6);
+	struct gaba_fill_s *f2 = _export(gaba_dp_fill_root)(d, &s->arsec, 6, &s->brsec, 6);
 	assert(f2->status == 0x1ff, "%x", f2->status);
 	assert(check_tail(f2, 0, 0, -19, 1), print_tail(f2));
 
 	/* fill tail section */
-	f2 = gaba_dp_fill(d, f2, &s->artail, &s->brtail);
+	f2 = _export(gaba_dp_fill)(d, f2, &s->artail, &s->brtail);
 	assert(f2->status == 0x1ff, "%x", f2->status);
 	assert(check_tail(f2, 12, 21, 21, 2), print_tail(f2));
 
 	/* fw-rv */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f1, f2, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f1, f2, NULL);
 	assert(check_result(r, 24, 0, 24, 1, 0, 12, 6, 6), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "12M"), print_path(r));
 	assert(check_section(r->sec[0], s->afsec, 0, 12, s->bfsec, 0, 12, 0, 24), print_section(r->sec[0]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* sequences with different lengths (consumed as mismatches) */
@@ -5359,13 +5367,13 @@ unittest(with_seq_pair("GAAAAAAAA", "AAAAAAAA"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bftail);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
 	/* fw */	
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 22, 2, 32, 3, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "16M"), print_path(r));
@@ -5374,7 +5382,7 @@ unittest(with_seq_pair("GAAAAAAAA", "AAAAAAAA"))
 	assert(check_section(r->sec[2], s->afsec, 0, 7, s->bfsec, 1, 7, 18, 14), print_section(r->sec[2]));
 
 	/* rv */
-	r = gaba_dp_trace(d, NULL, f, NULL);
+	r = _export(gaba_dp_trace)(d, NULL, f, NULL);
 	assert(check_result(r, 22, 2, 32, 3, 2, 16, 9, 8), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "16M"), print_path(r));
@@ -5383,7 +5391,7 @@ unittest(with_seq_pair("GAAAAAAAA", "AAAAAAAA"))
 	assert(check_section(r->sec[2], s->arsec, 1, 8, s->brsec, 0, 8, 16, 16), print_section(r->sec[2]));
 
 	/* fw-rv */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 44, 4, 64, 6, 3, 0, 0, 0), print_result(r));
 	assert(check_path(r,
 		"DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"
@@ -5397,7 +5405,7 @@ unittest(with_seq_pair("GAAAAAAAA", "AAAAAAAA"))
 	assert(check_section(r->sec[4], s->afsec, 8, 1, s->bfsec, 0, 1, 48, 2), print_section(r->sec[4]));
 	assert(check_section(r->sec[5], s->afsec, 0, 7, s->bfsec, 1, 7, 50, 14), print_section(r->sec[5]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* another pair with different lengths */
@@ -5405,14 +5413,14 @@ unittest(with_seq_pair("TTTTTTTT", "CTTTTTTTT"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
 	/* fw */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 22, 2, 32, 3, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "16M"), print_path(r));
@@ -5421,7 +5429,7 @@ unittest(with_seq_pair("TTTTTTTT", "CTTTTTTTT"))
 	assert(check_section(r->sec[2], s->afsec, 1, 7, s->bfsec, 0, 7, 18, 14), print_section(r->sec[2]));
 
 	/* rv */
-	r = gaba_dp_trace(d, NULL, f, NULL);
+	r = _export(gaba_dp_trace)(d, NULL, f, NULL);
 	assert(check_result(r, 22, 2, 32, 3, 2, 16, 8, 9), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "16M"), print_path(r));
@@ -5430,7 +5438,7 @@ unittest(with_seq_pair("TTTTTTTT", "CTTTTTTTT"))
 	assert(check_section(r->sec[2], s->arsec, 0, 8, s->brsec, 1, 8, 16, 16), print_section(r->sec[2]));
 
 	/* fw-rv */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 44, 4, 64, 6, 3, 0, 0, 0), print_result(r));
 	assert(check_path(r,
 		"DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"
@@ -5443,7 +5451,7 @@ unittest(with_seq_pair("TTTTTTTT", "CTTTTTTTT"))
 	assert(check_section(r->sec[4], s->afsec, 0, 1, s->bfsec, 8, 1, 48, 2), print_section(r->sec[4]));
 	assert(check_section(r->sec[5], s->afsec, 1, 7, s->bfsec, 0, 7, 50, 14), print_section(r->sec[5]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* with deletions */
@@ -5451,13 +5459,13 @@ unittest(with_seq_pair("GACGTACGT", "ACGTACGT"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bftail);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
 	/* fw */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 20, 0, 34, 2, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "RDRDRDRDRDRDRDRDRRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "1D8M1D8M"), print_path(r));
@@ -5465,7 +5473,7 @@ unittest(with_seq_pair("GACGTACGT", "ACGTACGT"))
 	assert(check_section(r->sec[1], s->afsec, 0, 9, s->bfsec, 0, 8, 17, 17), print_section(r->sec[1]));
 
 	/* rv */
-	r = gaba_dp_trace(d, NULL, f, NULL);
+	r = _export(gaba_dp_trace)(d, NULL, f, NULL);
 	assert(check_result(r, 20, 0, 34, 2, 1, 17, 9, 8), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRRDRDRDRDRDRDRDRDRR"), print_path(r));
 	assert(check_cigar(r, "8M1D8M1D"), print_path(r));
@@ -5473,7 +5481,7 @@ unittest(with_seq_pair("GACGTACGT", "ACGTACGT"))
 	assert(check_section(r->sec[1], s->arsec, 0, 9, s->brsec, 0, 8, 17, 17), print_section(r->sec[1]));
 
 	/* fw-rv */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	/* fixme!! continuous gaps at the root must be concatenated! */
 	assert(check_result(r, 40, 0, 68, 4, 2, 0, 0, 0), print_result(r));
 	assert(check_path(r,
@@ -5485,7 +5493,7 @@ unittest(with_seq_pair("GACGTACGT", "ACGTACGT"))
 	assert(check_section(r->sec[2], s->afsec, 0, 9, s->bfsec, 0, 8, 34, 17), print_section(r->sec[2]));
 	assert(check_section(r->sec[3], s->afsec, 0, 9, s->bfsec, 0, 8, 51, 17), print_section(r->sec[3]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* with insertions */
@@ -5493,14 +5501,14 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGT"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
 	/* fw */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 20, 0, 34, 2, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "DDRDRDRDRDRDRDRDRDDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "1I8M1I8M"), print_path(r));
@@ -5508,7 +5516,7 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGT"))
 	assert(check_section(r->sec[1], s->afsec, 0, 8, s->bfsec, 0, 9, 17, 17), print_section(r->sec[1]));
 
 	/* rv */
-	r = gaba_dp_trace(d, NULL, f, NULL);
+	r = _export(gaba_dp_trace)(d, NULL, f, NULL);
 	assert(check_result(r, 20, 0, 34, 2, 1, 17, 8, 9), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDDRDRDRDRDRDRDRDRD"), print_path(r));
 	assert(check_cigar(r, "8M1I8M1I"), print_path(r));
@@ -5516,7 +5524,7 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGT"))
 	assert(check_section(r->sec[1], s->arsec, 0, 8, s->brsec, 0, 9, 17, 17), print_section(r->sec[1]));
 
 	/* fw-rv */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 40, 0, 68, 4, 2, 0, 0, 0), print_result(r));
 	assert(check_path(r,
 		"DRDRDRDRDRDRDRDRDDRDRDRDRDRDRDRDRD"
@@ -5527,7 +5535,7 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGT"))
 	assert(check_section(r->sec[2], s->afsec, 0, 8, s->bfsec, 0, 9, 34, 17), print_section(r->sec[2]));
 	assert(check_section(r->sec[3], s->afsec, 0, 8, s->bfsec, 0, 9, 51, 17), print_section(r->sec[3]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 /* breakpoint adjustment */
@@ -5535,13 +5543,13 @@ unittest(with_seq_pair("GACGTACGTGACGTACGT", "ACGTACGT"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bftail);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
 	/* fw */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 20, 0, 34, 2, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "RDRDRDRDRDRDRDRDRRDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "1D8M1D8M"), print_path(r));
@@ -5549,7 +5557,7 @@ unittest(with_seq_pair("GACGTACGTGACGTACGT", "ACGTACGT"))
 	assert(check_section(r->sec[1], s->afsec, 10, 8, s->bfsec, 0, 8, 18, 16), print_section(r->sec[1]));
 
 	/* rv */
-	r = gaba_dp_trace(d, NULL, f, NULL);
+	r = _export(gaba_dp_trace)(d, NULL, f, NULL);
 	assert(check_result(r, 20, 0, 34, 2, 1, 17, 18, 8), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRRDRDRDRDRDRDRDRDRR"), print_path(r));
 	assert(check_cigar(r, "8M1D8M1D"), print_path(r));
@@ -5557,7 +5565,7 @@ unittest(with_seq_pair("GACGTACGTGACGTACGT", "ACGTACGT"))
 	assert(check_section(r->sec[1], s->arsec, 9, 9, s->brsec, 0, 8, 17, 17), print_section(r->sec[1]));
 
 	/* fw-rv */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 40, 0, 68, 4, 2, 0, 0, 0), print_result(r));
 	assert(check_path(r,
 		"DRDRDRDRDRDRDRDRRDRDRDRDRDRDRDRDRR"
@@ -5568,20 +5576,20 @@ unittest(with_seq_pair("GACGTACGTGACGTACGT", "ACGTACGT"))
 	assert(check_section(r->sec[2], s->afsec, 0, 10, s->bfsec, 0, 8, 34, 18), print_section(r->sec[2]));
 	assert(check_section(r->sec[3], s->afsec, 10, 8, s->bfsec, 0, 8, 52, 16), print_section(r->sec[3]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 unittest(with_seq_pair("ACGTACGT", "GACGTACGTGACGTACGT"))
 {
 	omajinai();
 
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, &s->afsec, 0, &s->bfsec, 0);
-	f = gaba_dp_fill(d, f, &s->afsec, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bfsec);
-	f = gaba_dp_fill(d, f, &s->aftail, &s->bftail);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
 	/* fw */
-	struct gaba_alignment_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 20, 0, 34, 2, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "DDRDRDRDRDRDRDRDRDDRDRDRDRDRDRDRDR"), print_path(r));
 	assert(check_cigar(r, "1I8M1I8M"), print_path(r));
@@ -5589,7 +5597,7 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGTGACGTACGT"))
 	assert(check_section(r->sec[1], s->afsec, 0, 8, s->bfsec, 10, 8, 18, 16), print_section(r->sec[1]));
 
 	/* rv */
-	r = gaba_dp_trace(d, NULL, f, NULL);
+	r = _export(gaba_dp_trace)(d, NULL, f, NULL);
 	assert(check_result(r, 20, 0, 34, 2, 1, 17, 8, 18), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDDRDRDRDRDRDRDRDRD"), print_path(r));
 	assert(check_cigar(r, "8M1I8M1I"), print_path(r));
@@ -5597,7 +5605,7 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGTGACGTACGT"))
 	assert(check_section(r->sec[1], s->arsec, 0, 8, s->brsec, 9, 9, 17, 17), print_section(r->sec[1]));
 
 	/* fw-rv */
-	r = gaba_dp_trace(d, f, f, NULL);
+	r = _export(gaba_dp_trace)(d, f, f, NULL);
 	assert(check_result(r, 40, 0, 68, 4, 2, 0, 0, 0), print_result(r));
 	assert(check_path(r,
 		"DRDRDRDRDRDRDRDRDDRDRDRDRDRDRDRDRD"
@@ -5608,7 +5616,7 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGTGACGTACGT"))
 	assert(check_section(r->sec[2], s->afsec, 0, 8, s->bfsec, 0, 10, 34, 18), print_section(r->sec[2]));
 	assert(check_section(r->sec[3], s->afsec, 0, 8, s->bfsec, 10, 8, 52, 16), print_section(r->sec[3]));
 
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 
 
@@ -6193,37 +6201,37 @@ unittest()
 		debug("seed(%d)\n%s", seed, format_string_pair_diff(a, b));
 
 		/* generate dp context */
-		struct gaba_dp_context_s *d = gaba_dp_init(c, sec->alim, sec->blim);
+		struct gaba_dp_context_s *d = _export(gaba_dp_init)(c, sec->alim, sec->blim);
 
 		/* fill section */
 		struct gaba_section_s const *as = &sec->afsec;
 		struct gaba_section_s const *bs = &sec->bfsec;
-		struct gaba_fill_s *f = gaba_dp_fill_root(d, as, 0, bs, 0);
+		struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, as, 0, bs, 0);
 		struct gaba_fill_s *m = f;
 		
 		/* fill tail (1) */
 		as = (f->status & GABA_STATUS_UPDATE_A) ? &sec->aftail : as;
 		bs = (f->status & GABA_STATUS_UPDATE_B) ? &sec->bftail : bs;
-		struct gaba_fill_s *t1 = gaba_dp_fill(d, f, as, bs);
+		struct gaba_fill_s *t1 = _export(gaba_dp_fill)(d, f, as, bs);
 		m = (t1->max > m->max) ? t1 : m;
 
 		/* fill tail (2) */
 		as = (t1->status & GABA_STATUS_UPDATE_A) ? &sec->aftail : as;
 		bs = (t1->status & GABA_STATUS_UPDATE_B) ? &sec->bftail : bs;
-		struct gaba_fill_s *t2 = gaba_dp_fill(d, t1, as, bs);
+		struct gaba_fill_s *t2 = _export(gaba_dp_fill)(d, t1, as, bs);
 		m = (t2->max > m->max) ? t2 : m;
 
 		/* check max */
 		assert(m->max == nf.score, "m->max(%lld), f(%lld, %u), t1->max(%lld, %u), t2->max(%lld, %u), n.score(%d)",
 			m->max, f->max, f->status, t1->max, t1->status, t2->max, t2->status, nf.score);
 		if(m->max != nf.score) {
-			struct gaba_fill_s *f2 = gaba_dp_fill_root(d, &sec->afsec, 0, &sec->bfsec, 0);
+			struct gaba_fill_s *f2 = _export(gaba_dp_fill_root)(d, &sec->afsec, 0, &sec->bfsec, 0);
 			(void)f2;
 			debug("refill f2(%lld, %u)", f2->max, f2->status);
 		}
 
 		/* forward trace */
-		struct gaba_alignment_s *rf = gaba_dp_trace(d, m, NULL, NULL);
+		struct gaba_alignment_s *rf = _export(gaba_dp_trace)(d, m, NULL, NULL);
 
 		/* check results */
 		assert(rf->score == nf.score, "m->max(%lld), rf->score(%lld), nf.score(%d)",
@@ -6251,7 +6259,7 @@ unittest()
 			format_string_pair_diff(decode_path(rf), nf.path));
 
 		/* reverse trace */
-		struct gaba_alignment_s *rr = gaba_dp_trace(d, NULL, m, NULL);
+		struct gaba_alignment_s *rr = _export(gaba_dp_trace)(d, NULL, m, NULL);
 
 		/* check results */
 		assert(rr->score == nr.score, "m->max(%lld), rr->score(%lld), nr.score(%d)",
@@ -6280,7 +6288,7 @@ unittest()
 
 
 		/* cleanup */
-		gaba_dp_clean(d);
+		_export(gaba_dp_clean)(d);
 		free(sec);
 		free(nf.path);
 		free(nr.path);
@@ -6300,20 +6308,20 @@ unittest(with_seq_pair(
 	/* fill section */
 	struct gaba_section_s const *as = &s->afsec;
 	struct gaba_section_s const *bs = &s->bfsec;
-	struct gaba_fill_s *f = gaba_dp_fill_root(d, as, 0, bs, 0);
+	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, as, 0, bs, 0);
 	
 	/* fill tail (1) */
 	as = (f->status & GABA_STATUS_UPDATE_A) ? &s->aftail : as;
 	bs = (f->status & GABA_STATUS_UPDATE_B) ? &s->bftail : bs;
-	struct gaba_fill_s *t1 = gaba_dp_fill(d, f, as, bs);
+	struct gaba_fill_s *t1 = _export(gaba_dp_fill)(d, f, as, bs);
 	f = (t1->max > f->max) ? t1 : f;
 
 	/* fill tail (2) */
 	as = (f->status & GABA_STATUS_UPDATE_A) ? &s->aftail : as;
 	bs = (f->status & GABA_STATUS_UPDATE_B) ? &s->bftail : bs;
-	struct gaba_fill_s *t2 = gaba_dp_fill(d, t1, as, bs);
+	struct gaba_fill_s *t2 = _export(gaba_dp_fill)(d, t1, as, bs);
 	f = (t2->max > f->max) ? t2 : f;
-	struct gaba_result_s *r = gaba_dp_trace(d, f, NULL, NULL);
+	struct gaba_result_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 
 	/* naive */
 	char const *a = (char const *)s->a;
@@ -6331,7 +6339,7 @@ unittest(with_seq_pair(
 		format_string_pair_diff(decode_path(r), n.path));
 
 	/* cleanup */
-	gaba_dp_clean(d);
+	_export(gaba_dp_clean)(d);
 }
 #endif
 
