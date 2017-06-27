@@ -13,7 +13,7 @@
  * @macro MM_VERSION
  */
 #ifndef MM_VERSION
-#  define MM_VERSION		"minialign-0.5.3-unknown"
+#  define MM_VERSION		"minialign-0.6.0-devel"
 #endif
 
 /**
