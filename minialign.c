@@ -5507,7 +5507,7 @@ char const *mm_get_version(void)
 static
 void mm_print_version(mm_mapopt_t const *opt)
 {
-	opt->log(opt->fp, 23, __func__, "%s\n", mm_get_version());
+	opt->log(opt, 16, __func__, "%s", mm_get_version());
 	return;
 }
 
@@ -5944,7 +5944,6 @@ int _export(main)(int argc, char *argv[])
 
 	/* init option object (init base time) and parse args */
 	mm_mapopt_t *opt = mm_mapopt_init();
-	opt->log(opt, 1, __func__, "start.");
 	if(mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &query)) {
 		/* set logger to stdout when invoked by option */
 		opt->fp = stdout;
