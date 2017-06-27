@@ -715,7 +715,7 @@ typedef struct pt_thread_s {
 typedef struct pt_s {
 	pt_q_t in, out;
 	uint32_t nth;
-	pt_thread_t c[];	// [0] is reserved for master
+	pt_thread_t c[];	/* [0] is reserved for master */
 } pt_t;
 
 #define PT_EMPTY	( (void *)(UINT64_MAX) )
@@ -976,7 +976,7 @@ int pt_parallel(
 		while(pt_deq(pt->c->out, pt->c->tid) == PT_EMPTY) {
 			struct timespec tv = { .tv_nsec = 512 * 1024 };
 			nanosleep(&tv, NULL);	/* wait for a while */
-			// sched_yield();
+			/* sched_yield(); */
 		}
 	}
 	return 0;
@@ -2285,11 +2285,11 @@ unittest( .name = "bseq.fastq.skip" ) {
 static _force_inline
 uint64_t hash64(uint64_t key, uint64_t unused, uint64_t mask)
 {
-	key = (~key + (key << 21)) & mask; // key = (key << 21) - key - 1;
+	key = (~key + (key << 21)) & mask; /* key = (key << 21) - key - 1; */
 	key = key ^ key >> 24;
-	key = ((key + (key << 3)) + (key << 8)) & mask; // key * 265
+	key = ((key + (key << 3)) + (key << 8)) & mask; /* key * 265 */
 	key = key ^ key >> 14;
-	key = ((key + (key << 2)) + (key << 4)) & mask; // key * 21
+	key = ((key + (key << 2)) + (key << 4)) & mask; /* key * 21 */
 	key = key ^ key >> 28;
 	key = (key + (key << 31)) & mask;
 	return key;
@@ -3043,7 +3043,7 @@ void *mm_idx_post(uint32_t tid, void *arg, void *item)
 			uint64_t key = p->u64[0]>>mi->b, val = p->u64[1];
 			if(n != 1) {
 				b->p[sp++] = val;
-				val = (sp-1)<<32 | n | 0x01ULL<<63;	// k = 0
+				val = (sp-1)<<32 | n | 0x01ULL<<63;	/* k = 0 */
 				while(n > 1) {
 					b->p[sp++] = b->a.a[j - --n].u64[1];
 				}
@@ -3492,7 +3492,7 @@ void mm_chain(
 		for(j = i+1, k = UINT64_MAX, n = i; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
 			if((int32_t)coef[j].u32[2] < 0) continue;
 			re = coef[j].u32[2], qe = coef[j].u32[3];	/* tagged seeds are skipped, no need to mask */
-			if(rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }	// out of range, skip
+			if(rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }	/* out of range, skip */
 			lub = l + llim; hub = h; hlb = h - hlim;
 			coef[j].u32[2] |= chained; n = j;
 		}
@@ -3530,7 +3530,7 @@ uint64_t mm_short_chain(
 			k = MIN2(j, k);
 			continue;
 		}
-		lub = l + llim; hub = h; hlb = h - hlim;	// n = j;
+		lub = l + llim; hub = h; hlb = h - hlim;	/* n = j; */
 		if(++len > eidx) { break; }
 	}
 	return MIN2(j, k);
@@ -3955,7 +3955,7 @@ mm128_t const *mm_align_seq(
 			mm_idx_seq_t *ref = &mi->s.a[(t-p)->u32[1]-mi->base_rid];
 			do {
 				a = mm_extend(ref, q, t-q, mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &mg, b->pos, lmm);
-				if(p == q && a == 0) break;	// skip chain if first extension did not result in meaningful alignment
+				if(p == q && a == 0) break;	/* skip chain if first extension did not result in meaningful alignment */
 				r.u32[2] = (t-p)->u32[2] & mask, r.u32[3] = (t-p)->u32[3];
 				if(a != 0) {
 					mm128_t *s;
@@ -4219,15 +4219,15 @@ int mm_cigar_printer(void *_b, int64_t len, char c)
 }
 
 /* sam tags */
-#define MM_RG			( 0 )		// Z: read group
-#define MM_CO			( 1 )		// Z: comment
-#define MM_NH			( 2 )		// i: #hits
-#define MM_IH 			( 3 )		// i: index of the record in the hits
-#define MM_AS			( 4 )		// i: score
-#define MM_XS			( 5 )		// i: suboptimal score
-#define MM_NM 			( 6 )		// i: editdist to the reference
-#define MM_SA			( 7 )		// Z: supplementary records
-#define MM_MD			( 8 )		// Z: mismatch positions
+#define MM_RG			( 0 )		/* Z: read group */
+#define MM_CO			( 1 )		/* Z: comment */
+#define MM_NH			( 2 )		/* i: #hits */
+#define MM_IH 			( 3 )		/* i: index of the record in the hits */
+#define MM_AS			( 4 )		/* i: score */
+#define MM_XS			( 5 )		/* i: suboptimal score */
+#define MM_NM 			( 6 )		/* i: editdist to the reference */
+#define MM_SA			( 7 )		/* Z: supplementary records */
+#define MM_MD			( 8 )		/* Z: mismatch positions */
 
 /**
  * @fn mm_print_sam_num
@@ -4485,7 +4485,7 @@ void mm_print_sam_md(
 	uint64_t const *p = (uint64_t const *)((uint64_t)(a->path->array - 1) & ~(sizeof(uint64_t) - 1));
 	int64_t pos = a->path->len;
 
-	// uint64_t dir = (flag&0x10)? 1 : 0;
+	/* uint64_t dir = (flag&0x10)? 1 : 0; */
 	uint64_t dir = (s->bid & 0x01)? 0 : 1;
 	static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
 		0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
@@ -4884,7 +4884,7 @@ void mm_print_blast6_mapped(
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t mid = 100000.0 * (double)(dcnt - a->xcnt) / (double)slen;	// percent identity
+		int32_t mid = 100000.0 * (double)(dcnt - a->xcnt) / (double)slen;	/* percent identity */
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen+1 : r->l_seq-s->apos;
 		uint32_t re = s->bid&0x01? r->l_seq-s->apos : r->l_seq-s->apos-s->alen+1;
 		uint32_t qs = t->l_seq-s->bpos-s->blen+1, qe = t->l_seq-s->bpos;
@@ -4934,7 +4934,7 @@ void mm_print_blasr1_mapped(
 		mm_idx_seq_t const *r = &mi->s.a[(a->sec->aid>>1) - mi->base_rid];
 		const gaba_path_section_t *s = &a->sec[0];
 		int32_t dcnt = (a->path->len - a->gecnt)>>1, slen = dcnt + a->gecnt;
-		int32_t mid = 1000000.0 * (double)(dcnt - a->xcnt) / (double)slen;	// percent identity
+		int32_t mid = 1000000.0 * (double)(dcnt - a->xcnt) / (double)slen;	/* percent identity */
 		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
 
