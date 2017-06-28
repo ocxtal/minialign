@@ -3471,6 +3471,58 @@ void mm_collect(
 	return;
 }
 
+#if 0
+/**
+ * @fn mm_chain
+ * @brief calculate chain for the collect coef
+ */
+static _force_inline
+void mm_chain(
+	uint64_t const l_coef, mm128_t *restrict coef,/* input array (will be modified) */
+	uint32_t const llim, uint32_t const hlim,	/* chainable window size */
+	uint32_t const min,							/* minimum chain length */
+	v2u32_v *restrict intv)						/* dst array */
+{
+	int32_t const ofs = 0x40000000;
+	uint32_t const chained = 0x80000000;		/* root and unchained seeds are positive */
+	uint32_t const mask = 0x7fffffff;			/* ~chained */
+
+	intv->n = 0;
+	uint64_t i = 0;
+	while(i < l_coef) {
+		/* extract root id for the current chain */
+		uint32_t rid = coef[i].u32[1];
+
+		/* extract base coords */
+		int32_t rb = coef[i].u32[2], qb = coef[i].u32[3];
+		for(uint64_t j = i + 1; j < l_coef; j++) {
+			/* terminate when boundary is detected */
+			if(rid != coef[k].u32[1]) { break; }
+
+			for(uint64_t k = j; k < l_coef; k++) {
+				cn = coef[k].u32[0];
+				rn = coef[k].u32[2];
+				qn = coef[k].u32[3];
+
+				if((qs ^ qn) & chained) { break; }
+				if(cn > rb - qb + rn + (qn>>1)) { break; }
+				if(rn + qn - rb - qb < min) {
+					min = rn + qn - rb - qb;
+					n = k;
+				}
+			}
+
+			coef[n].u32[2] |= chained;
+			j = n;
+		}
+
+		/* record chain */
+	}
+
+	return;
+}
+#endif
+
 /**
  * @fn mm_chain
  * @brief calculate chain for the collect coef
@@ -4025,7 +4077,8 @@ typedef struct {
  */
 #define _putfi(type, _buf, _n, _c) ({ \
 	uint64_t _b = 0; \
-	type _m = (type)(_n); int64_t _i = 0; \
+	type _m = (type)(_n); \
+	int64_t _i = 0; \
 	while(_m || _i <= _c) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_flush(_buf, _i + 1); \
 	for(int64_t _j = _i; _j > (_c); _j--) { *(_buf)->p++ = (_b&0x0f) + '0'; _b>>=4; } \
@@ -4040,7 +4093,8 @@ typedef struct {
  */
 #define _puti(type, _buf, _n) ({ \
 	uint64_t _b = 0; \
-	type _m = (type)(_n); int64_t _i = 0; \
+	type _m = (type)(_n); \
+	int64_t _i = 0; \
 	while(_m) { _b <<= 4; _b += _m % 10, _m /= 10; _i++; } \
 	_i += (_i==0); \
 	_flush(_buf, _i); \
@@ -4050,6 +4104,33 @@ typedef struct {
 	_i; \
 })
 #define _putn(_buf, _n) _puti(uint32_t, _buf, _n)
+
+/**
+ * @macro _putpi
+ * @brief format pair of integers into same widths (used in maf formatter for vertical (column) alignment)
+ * _buf1 will be flushed, _buf2 is never flushed nor boundary-tested
+ */
+#define _putpi(type, _buf1, _buf2, _n1, _n2) ({ \
+	uint64_t _b1 = 0, _b2 = 0; \
+	type _m1 = (type)(_n1), _m2 = (type)(_n2); \
+	int64_t _i = 0; \
+	while(_m1 | _m2) { \
+		_b1 <<= 4; _b1 += _m1 % 10, _m1 /= 10; \
+		_b2 <<= 4; _b2 += _m2 % 10, _m2 /= 10; \
+		_i++; \
+	} \
+	_i += (_i==0); \
+	_flush(_buf1, _i); \
+	for(int64_t _j = _i, _z1 = 0, _z2 = 0; _j > 0; _j--) { \
+		uint64_t _c1 = _b1&0x0f, _c2 = _b2&0x0f; \
+		_z1 |= _c1 | (_j == 1); _z2 |= _c2 | (_j == 1); \
+		*(_buf1)->p++ = _c1 + '0' - (_z1? 0 : 0x10); \
+		*(_buf2)->p++ = _c2 + '0' - (_z2? 0 : 0x10); \
+		_b1>>=4; _b2>>=4; \
+	} \
+	_i; \
+})
+#define _putpn(_buf1, _buf2, _n1, _n2)	_putpi(uint32_t, _buf1, _buf2, _n1, _n2)
 
 /**
  * @macro _puts, _putsk
@@ -4099,6 +4180,20 @@ typedef struct {
 	_flush(_buf, 32); \
 	_storeu_v32i8((_buf)->p, _loadu_v32i8(_s)); \
 	(_buf)->p += (_len); \
+}
+
+/**
+ * @macro _putscn
+ * @brief dump constant pattern
+ */
+#define _putscn(_buf, _c, _l) { \
+	v32i8_t const _pattern = _set_v32i8(_c); \
+	for(uint64_t _i = 0; _i < ((_l) & ~0x1fULL); _i += 32) { \
+		_flush(_buf, 32); \
+		_storeu_v32i8((_buf)->p, _pattern); (_buf)->p += 32; \
+	} \
+	_flush(_buf, 32); \
+	_storeu_v32i8((_buf)->p, _pattern); (_buf)->p += (_l) & 0x1f; \
 }
 
 /**
@@ -4807,51 +4902,37 @@ void mm_print_maf_mapped(
 		/* header */
 		_put(b, 'a'); _sp(b); _putsk(b, "score="); _putn(b, a->score); _cr(b);
 
-		mm_tmpbuf_t rh, qh;
-		rh.p = rh.base;
-		rh.tail = rh.base + 240;
+		mm_tmpbuf_t qb;			/* leave buffers uninitialized */
+		qb.p = qb.base; qb.tail = qb.base + 240;
 
-		/* print name, pos, alignment length, sequence length */
 		uint32_t const rs = r->l_seq-s->apos-s->alen;
-		_put(&rh, 's'); _sp(&rh);
-		_putsn(&rh, r->name, r->l_name); _sp(&rh);
-		_putn(&rh, rs); _sp(&rh);
-		_putn(&rh, s->alen); _sp(&rh);
-		_put(&rh, '+'); _sp(&rh);
-		_putn(&rh, r->l_seq); _sp(&rh);
-
-		qh.p = qh.base;
-		qh.tail = qh.base + 240;
-
-		/* print name, pos, alignment length, sequence length */
 		uint32_t const qs = t->l_seq-s->bpos-s->blen;
-		_put(&qh, 's'); _sp(&qh);
-		_putsn(&qh, t->name, t->l_name); _sp(&qh);
-		_putn(&qh, qs); _sp(&qh);
-		_putn(&qh, s->blen); _sp(&qh);
-		_putd(&qh, s->bid); _sp(&qh);
-		_putn(&qh, t->l_seq); _sp(&qh);
 
-		uint64_t rlen = rh.p - rh.base;
-		uint64_t qlen = qh.p - qh.base;
-		uint64_t tab = MAX2(rlen, qlen);
+		/* heads of sequence record */
+		_put(b, 's'); _sp(b);
+		_put(&qb, 's'); _sp(&qb);
 
-		/* reference */
-		_putsn(b, rh.base, rlen);
-		while(rlen < tab) {
-			uint64_t l = MIN2(32, tab - rlen);
-			_putsn32(b, "                                ", l);
-			rlen += l;
-		}
+		/* names */
+		uint64_t l = MAX2(r->l_name, t->l_name);
+		_putscn(b, ' ', l - r->l_name); _putsn(b, r->name, r->l_name); _sp(b);
+		_putscn(&qb, ' ', l - t->l_name); _putsn(&qb, t->name, t->l_name); _sp(&qb);
+
+		/* alignment length */
+		_putpn(b, &qb, rs, qs); _sp(b); _sp(&qb);
+		_putpn(b, &qb, s->alen, s->blen); _sp(b); _sp(&qb);
+
+		/* directions */
+		_put(b, '+'); _sp(b);
+		_putd(&qb, s->bid); _sp(&qb);
+
+		/* sequence lengths */
+		_putpn(b, &qb, r->l_seq, t->l_seq); _sp(b); _sp(&qb);
+
+		/* reference alignment */
 		mm_print_maf_mapped_ref(b, a, &r->seq[rs]);
 
 		/* query */
-		_putsn(b, qh.base, qlen);
-		while(qlen < tab) {
-			uint64_t l = MIN2(32, tab - qlen);
-			_putsn32(b, "                                ", l);
-			qlen += l;
-		}
+		_putsn(b, qb.base, qb.p - qb.base);
 		if(s->bid & 0x01) {
 			mm_print_maf_query_forward(b, a, &t->seq[qs]);
 		} else {
