@@ -206,7 +206,7 @@ _static_assert(sizeof(struct gaba_char_vec_s) == 32);
  * @struct gaba_block_s
  */
 struct gaba_block_s {
-	union gaba_mask_pair_u mask[BLK];/** (256 / 512) mask vectors */
+	union gaba_mask_pair_u mask[BLK];	/** (256 / 512) mask vectors */
 	struct gaba_diff_vec_s diff; 		/** (64) */
 	struct gaba_small_delta_s sd;		/** (64) */
 	union gaba_dir_u dir;				/** (8) */
