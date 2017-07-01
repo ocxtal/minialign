@@ -131,14 +131,16 @@ typedef struct v16i16_s {
 /* mask */
 #define _mask_v16i16(a) ( \
 	(v16_mask_t) { \
-		.m1 = _i_v16i16(movemask)((a).v1) \
+		.m1 = _mm256_movemask_epi8( \
+			_mm256_packs_epi16((a).v1, \
+			_mm256_castsi128_si256(_mm256_extracti128_si256((a).v1, 1)))) \
 	} \
 )
 
 /* horizontal max */
 #define _hmax_v16i16(a) ({ \
-	_vmax = _mm256_max_epi16(_vmax, \
-		_mm256_castsi128_si256(_mm256_extracti128_si256(_vmax, 1))); \
+	__m256i _vmax = _mm256_max_epi16((a).v1, \
+		_mm256_castsi128_si256(_mm256_extracti128_si256((a).v1, 1))); \
 	_vmax = _mm256_max_epi16(_vmax, \
 		_mm256_srli_si256(_vmax, 8)); \
 	_vmax = _mm256_max_epi16(_vmax, \
@@ -147,6 +149,13 @@ typedef struct v16i16_s {
 		_mm256_srli_si256(_vmax, 2)); \
 	(int16_t)_mm256_extract_epi16(_vmax, 0); \
 })
+
+/* convert */
+#define _cvt_v16i8_v16i16(a) ( \
+	(v16i16_t) { \
+		_mm256_cvtepi8_epi16((a).v1) \
+	} \
+)
 
 /* debug print */
 #ifdef _LOG_H_INCLUDED
