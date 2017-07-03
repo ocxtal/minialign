@@ -54,23 +54,23 @@ struct gaba_api_s {
 
 	/* fill-in */
 	gaba_fill_t *(*dp_fill_root)(
-		gaba_dp_t *this,
+		gaba_dp_t *self,
 		gaba_section_t const *a,
 		uint32_t apos,
 		gaba_section_t const *b,
 		uint32_t bpos);
 	gaba_fill_t *(*dp_fill)(
-		gaba_dp_t *this,
+		gaba_dp_t *self,
 		gaba_fill_t const *prev_sec,
 		gaba_section_t const *a,
 		gaba_section_t const *b);
 	gaba_pos_pair_t (*dp_search_max)(
-		gaba_dp_t *this,
+		gaba_dp_t *self,
 		gaba_fill_t const *sec);
 
 	/* trace */
 	gaba_alignment_t *(*dp_trace)(
-		gaba_dp_t *this,
+		gaba_dp_t *self,
 		gaba_fill_t const *fw_tail,
 		gaba_fill_t const *rv_tail,
 		gaba_trace_params_t const *params);
@@ -89,41 +89,41 @@ struct gaba_dp_context_s *_import(gaba_dp_init_linear)(
 	uint8_t const *alim,
 	uint8_t const *blim);
 void _import(gaba_dp_flush_linear)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	uint8_t const *alim,
 	uint8_t const *blim);
 gaba_stack_t const *_import(gaba_dp_save_stack_linear)(
-	gaba_dp_t *this);
+	gaba_dp_t *self);
 void _import(gaba_dp_flush_stack_linear)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_stack_t const *stack);
 void _import(gaba_dp_clean_linear)(
-	gaba_dp_t *this);
+	gaba_dp_t *self);
 gaba_fill_t *_import(gaba_dp_fill_root_linear)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_section_t const *a,
 	uint32_t apos,
 	gaba_section_t const *b,
 	uint32_t bpos);
 gaba_fill_t *_import(gaba_dp_fill_linear)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *prev_sec,
 	gaba_section_t const *a,
 	gaba_section_t const *b);
 gaba_fill_t *_import(gaba_dp_merge_linear)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *sec_list,
 	uint64_t sec_list_len);
 gaba_pos_pair_t _import(gaba_dp_search_max_linear)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *sec);
 gaba_alignment_t *_import(gaba_dp_trace_linear)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *fw_tail,
 	gaba_fill_t const *rv_tail,
 	gaba_trace_params_t const *params);
 gaba_alignment_t *_import(gaba_dp_recombine_linear)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_alignment_t *x,
 	uint32_t xsid,
 	gaba_alignment_t *y,
@@ -165,41 +165,41 @@ struct gaba_dp_context_s *_import(gaba_dp_init_affine)(
 	uint8_t const *alim,
 	uint8_t const *blim);
 void _import(gaba_dp_flush_affine)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	uint8_t const *alim,
 	uint8_t const *blim);
 gaba_stack_t const *_import(gaba_dp_save_stack_affine)(
-	gaba_dp_t *this);
+	gaba_dp_t *self);
 void _import(gaba_dp_flush_stack_affine)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_stack_t const *stack);
 void _import(gaba_dp_clean_affine)(
-	gaba_dp_t *this);
+	gaba_dp_t *self);
 gaba_fill_t *_import(gaba_dp_fill_root_affine)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_section_t const *a,
 	uint32_t apos,
 	gaba_section_t const *b,
 	uint32_t bpos);
 gaba_fill_t *_import(gaba_dp_fill_affine)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *prev_sec,
 	gaba_section_t const *a,
 	gaba_section_t const *b);
 gaba_fill_t *_import(gaba_dp_merge_affine)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *sec_list,
 	uint64_t sec_list_len);
 gaba_pos_pair_t _import(gaba_dp_search_max_affine)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *sec);
 gaba_alignment_t *_import(gaba_dp_trace_affine)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *fw_tail,
 	gaba_fill_t const *rv_tail,
 	gaba_trace_params_t const *params);
 gaba_alignment_t *_import(gaba_dp_recombine_affine)(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_alignment_t *x,
 	uint32_t xsid,
 	gaba_alignment_t *y,
@@ -330,11 +330,11 @@ struct gaba_dp_context_s *gaba_dp_init(
  */
 static inline
 void gaba_dp_flush(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	uint8_t const *alim,
 	uint8_t const *blim)
 {
-	_import(gaba_dp_flush_linear)(this, alim, blim);
+	_import(gaba_dp_flush_linear)(self, alim, blim);
 	return;
 }
 
@@ -343,9 +343,9 @@ void gaba_dp_flush(
  */
 static inline
 gaba_stack_t const *gaba_dp_save_stack(
-	gaba_dp_t *this)
+	gaba_dp_t *self)
 {
-	return(_import(gaba_dp_save_stack_linear)(this));
+	return(_import(gaba_dp_save_stack_linear)(self));
 }
 
 /**
@@ -353,10 +353,10 @@ gaba_stack_t const *gaba_dp_save_stack(
  */
 static inline
 void gaba_dp_flush_stack(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_stack_t const *stack)
 {
-	_import(gaba_dp_flush_stack_linear)(this, stack);
+	_import(gaba_dp_flush_stack_linear)(self, stack);
 	return;
 }
 
@@ -365,9 +365,9 @@ void gaba_dp_flush_stack(
  */
 static inline
 void gaba_dp_clean(
-	gaba_dp_t *this)
+	gaba_dp_t *self)
 {
-	_import(gaba_dp_clean_linear)(this);
+	_import(gaba_dp_clean_linear)(self);
 	return;
 }
 
@@ -376,13 +376,13 @@ void gaba_dp_clean(
  */
 static inline
 gaba_fill_t *gaba_dp_fill_root(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_section_t const *a,
 	uint32_t apos,
 	gaba_section_t const *b,
 	uint32_t bpos)
 {
-	return(_api(this)->dp_fill_root(this, a, apos, b, bpos));
+	return(_api(self)->dp_fill_root(self, a, apos, b, bpos));
 }
 
 /**
@@ -391,12 +391,12 @@ gaba_fill_t *gaba_dp_fill_root(
  */
 static inline
 gaba_fill_t *gaba_dp_fill(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *prev_sec,
 	gaba_section_t const *a,
 	gaba_section_t const *b)
 {
-	return(_api(this)->dp_fill(this, prev_sec, a, b));
+	return(_api(self)->dp_fill(self, prev_sec, a, b));
 }
 
 /**
@@ -404,11 +404,11 @@ gaba_fill_t *gaba_dp_fill(
  */
 static inline
 gaba_fill_t *gaba_dp_merge(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *sec_list,
 	uint64_t sec_list_len)
 {
-	// return(_api(this)->dp_merge(this, sec_list, sec_list_len));
+	// return(_api(self)->dp_merge(self, sec_list, sec_list_len));
 	return(NULL);		/* not implemented yet */
 }
 
@@ -417,10 +417,10 @@ gaba_fill_t *gaba_dp_merge(
  */
 static inline
 gaba_pos_pair_t gaba_dp_search_max(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *sec)
 {
-	return(_api(this)->dp_search_max(this, sec));
+	return(_api(self)->dp_search_max(self, sec));
 }
 
 /**
@@ -428,12 +428,12 @@ gaba_pos_pair_t gaba_dp_search_max(
  */
 static inline
 gaba_alignment_t *gaba_dp_trace(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_fill_t const *fw_tail,
 	gaba_fill_t const *rv_tail,
 	gaba_trace_params_t const *params)
 {
-	return(_api(this)->dp_trace(this, fw_tail, rv_tail, params));
+	return(_api(self)->dp_trace(self, fw_tail, rv_tail, params));
 }
 
 /**
@@ -441,13 +441,13 @@ gaba_alignment_t *gaba_dp_trace(
  */
 static inline
 gaba_alignment_t *gaba_dp_recombine(
-	gaba_dp_t *this,
+	gaba_dp_t *self,
 	gaba_alignment_t *x,
 	uint32_t xsid,
 	gaba_alignment_t *y,
 	uint32_t ysid)
 {
-	return(_import(gaba_dp_recombine_linear)(this, x, xsid, y, ysid));
+	return(_import(gaba_dp_recombine_linear)(self, x, xsid, y, ysid));
 }
 
 /**
