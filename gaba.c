@@ -47,8 +47,19 @@
 #include "arch/arch.h"
 
 /* aliasing vector macros */
-#define _NVEC_ALIAS_PREFIX		v16i8
-#define _WVEC_ALIAS_PREFIX		v16i16
+#ifndef BW
+#  define BW					32
+#endif
+
+#if BW == 16
+#  define _NVEC_ALIAS_PREFIX		v16i8
+#  define _WVEC_ALIAS_PREFIX		v16i16
+#elif BW == 32
+#  define _NVEC_ALIAS_PREFIX		v32i8
+#  define _WVEC_ALIAS_PREFIX		v32i16
+#else
+#  error "BW must be either 16 or 32."
+#endif
 #include "arch/vector_alias.h"
 
 
@@ -73,12 +84,8 @@
 #endif
 
 /* constants */
-#define BW_BASE						( 4 )
-#define BW 							( 0x01<<BW_BASE )
 #define BLK_BASE					( 5 )
 #define BLK 						( 0x01<<BLK_BASE )
-#define mask_t						uint32_t
-
 
 #define MIN_BULK_BLOCKS				( 32 )
 #define MEM_ALIGN_SIZE				( 32 )		/* 32byte aligned for AVX2 environments */
@@ -215,6 +222,7 @@ struct gaba_block_s {
 	int32_t aridx, bridx;				/** (8) reverse index in the current section */
 	struct gaba_middle_delta_s const *md;/** (8) pointer to the middle delta vectors */
 	struct gaba_char_vec_s ch;			/** (32) char vector */
+	uint8_t _pad[32 - BW];
 };
 struct gaba_phantom_block_s {
 	struct gaba_diff_vec_s diff; 		/** (64) */
@@ -224,6 +232,7 @@ struct gaba_phantom_block_s {
 	int32_t aridx, bridx;				/** (8) reverse index in the current section */
 	struct gaba_middle_delta_s const *md;/** (8) pointer to the middle delta vectors */
 	struct gaba_char_vec_s ch;			/** (32) char vector */
+	uint8_t _pad[32 - BW];
 };
 #if MODEL == LINEAR
 _static_assert(sizeof(struct gaba_block_s) == 448);
@@ -752,8 +761,8 @@ void fill_load_seq_a(
 	if(pos < self->w.r.alim) {
 		debug("reverse fetch a: pos(%p), len(%llu)", pos, len);
 		/* reverse fetch: 2 * alen - (2 * alen - pos) + (len - 32) */
-		nvec_t a = _loadu_n(pos + (len - BW));
-		_storeu_n(_rd_bufa(self, BW, len), _swap_n(a));
+		v32i8_t a = _loadu_v32i8(pos + (len - BLK));
+		_storeu_v32i8(_rd_bufa(self, BW, len), _swap_v32i8(a));
 	} else {
 		debug("forward fetch a: pos(%p), len(%llu)", pos, len);
 		/* take complement */
@@ -761,11 +770,11 @@ void fill_load_seq_a(
 			0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
 			0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
 		};
-		nvec_t const cv = _from_v16i8_n(_load_v16i8(comp));
+		v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(comp));
 
 		/* forward fetch: 2 * alen - pos */
-		nvec_t a = _loadu_n(_rev(pos, self->w.r.alim) - (len - 1));
-		_storeu_n(_rd_bufa(self, BW, len), _shuf_n(cv, a));
+		v32i8_t a = _loadu_v32i8(_rev(pos, self->w.r.alim) - (len - 1));
+		_storeu_v32i8(_rd_bufa(self, BW, len), _shuf_v32i8(cv, a));
 	}
 	return;
 }
@@ -782,8 +791,8 @@ void fill_load_seq_b(
 	if(pos < self->w.r.blim) {
 		debug("forward fetch b: pos(%p), len(%llu)", pos, len);
 		/* forward fetch: pos */
-		nvec_t b = _loadu_n(pos);
-		_storeu_n(_rd_bufb(self, BW, len), b);
+		v32i8_t b = _loadu_v32i8(pos);
+		_storeu_v32i8(_rd_bufb(self, BW, len), b);
 	} else {
 		debug("reverse fetch b: pos(%p), len(%llu)", pos, len);
 		/* take complement */
@@ -791,11 +800,11 @@ void fill_load_seq_b(
 			0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
 			0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
 		};
-		nvec_t const cv = _from_v16i8_n(_load_v16i8(comp));
+		v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(comp));
 
 		/* reverse fetch: 2 * blen - pos + (len - 32) */
-		nvec_t b = _loadu_n(_rev(pos, self->w.r.blim) - (BW - 1));
-		_storeu_n(_rd_bufb(self, BW, len), _shuf_n(cv, _swap_n(b)));
+		v32i8_t b = _loadu_v32i8(_rev(pos, self->w.r.blim) - (BLK - 1));
+		_storeu_v32i8(_rd_bufb(self, BW, len), _shuf_v32i8(cv, _swap_v32i8(b)));
 	}
 	return;
 }
@@ -830,6 +839,9 @@ void fill_bulk_fetch(
 	/* fetch seq b */
 	_store_n(_rd_bufb(self, 0, BW), b);
 	fill_load_seq_b(self, self->w.r.btail - (blk - 1)->bridx, BLK);
+
+	debug("%s", dump(self->w.r.bufa, 64));
+	debug("%s", dump(self->w.r.bufb, 64));
 	return;
 }
 
@@ -886,9 +898,10 @@ struct gaba_joint_block_s fill_init_fetch(
 {
 	/* restore (brem, arem) */
 	int64_t prem = -prev_tail->psum;
-	int64_t arem = (prem + 1) / 2;
-	int64_t brem = prem / 2;
-	v2i32_t rem = _seta_v2i32(brem, arem);
+	// int64_t arem = (prem + 1) / 2;
+	// int64_t brem = prem / 2;
+	// v2i32_t rem = _seta_v2i32(brem, arem);
+	v2i32_t rem = _sar_v2i32(_seta_v2i32(prem, prem + 1), 1);
 
 	/* calc the next rem */
 	v2i32_t const z = _zero_v2i32();
@@ -1098,7 +1111,7 @@ struct gaba_joint_block_s fill_create_phantom_block(
 	if(prev_tail->psum >= 0) {
 		/* store index on the current section */
 		_store_v2i32(&blk->aridx, ridx);
-		
+
 		/* copy char vectors from prev_tail */
 		_store_n(&blk->ch, _load_n(&pblk->ch));
 
@@ -1575,11 +1588,11 @@ struct gaba_joint_block_s fill_bulk_seq_bounded(
 		  | fill_bulk_test_seq_bound(self, blk - 1)) < 0) {
 			break;
 		}
-		
+
 		/* bulk fill */
 		debug("blk(%p)", blk);
 		fill_bulk_block(self, blk++);
-		
+
 		/* update p-coordinate */
 		p += BLK;
 	}
@@ -1624,7 +1637,7 @@ struct gaba_joint_block_s fill_cap_seq_bounded(
 				if(_dir_is_right(dir)) {
 					/* update sequence coordinate and then check term */
 					_fill_right_update_ptr();
-					
+
 					if(_fill_cap_test_seq_bound() < 0) {
 						_fill_right_windback_ptr();
 						_dir_windback(dir);
@@ -1636,7 +1649,7 @@ struct gaba_joint_block_s fill_cap_seq_bounded(
 				} else {
 					/* update sequence coordinate and then check term */
 					_fill_down_update_ptr();
-					
+
 					if(_fill_cap_test_seq_bound() < 0) {
 						_fill_down_windback_ptr();
 						_dir_windback(dir);
@@ -1652,7 +1665,7 @@ struct gaba_joint_block_s fill_cap_seq_bounded(
 
 			/* update seq offset */
 			_fill_update_offset();
-			
+
 			/* store mask and vectors */
 			v2i32_t cnt = _fill_store_vectors(blk);
 
@@ -2092,11 +2105,11 @@ void leaf_save_coordinates(
 	int32_t acnt = filled_count - bcnt;
 	v2i32_t ridx = _add_v2i32(
 		_load_v2i32(&(blk - 1)->aridx),
-		_seta_v2i32((BLK - 1 - q) - bcnt, q - acnt));
+		_seta_v2i32((BW - 1 - q) - bcnt, q - acnt));
 	_store_v2i32(&leaf->aridx, ridx);
 	debug("idx(%lld), fcnt(%lld), p(%d), q(%d), cnt(%d, %d), ridx(%u, %u)",
 		mask_idx, filled_count, p, q, bcnt, acnt, _hi32(ridx), _lo32(ridx));
-	
+
 	/* store p and q */
 	leaf->p = p;
 	leaf->q = q;
@@ -2168,16 +2181,15 @@ struct gaba_pos_pair_s _export(gaba_dp_search_max)(
 	leaf_search(self, _tail(tail), &leaf);
 
 	struct gaba_joint_tail_s const *atail = _tail(tail), *btail = _tail(tail);
-	int32_t alen = atail->alen, blen = btail->blen;
-	int32_t aidx = alen - leaf.aridx, bidx = blen - leaf.bridx;
+	int32_t aidx = atail->alen - leaf.aridx, bidx = btail->blen - leaf.bridx;
 
 	while(aidx <= 0) {
 		for(atail = atail->tail; (atail->stat & GABA_STATUS_UPDATE_A) == 0; atail = atail->tail) {}
-		aidx += (alen = atail->alen);
+		aidx += atail->alen;
 	}
 	while(bidx <= 0) {
 		for(btail = btail->tail; (btail->stat & GABA_STATUS_UPDATE_B) == 0; btail = btail->tail) {}
-		bidx += (blen = btail->blen);
+		bidx += btail->blen;
 	}
 	return((struct gaba_pos_pair_s){
 		.apos = aidx - 1,
@@ -3808,7 +3820,7 @@ struct gaba_score_vec_s gaba_init_create_score_vector(
 {
 	int8_t m = params->m, x = -params->x, ge = -params->ge, gi = -params->gi;
 	int8_t sb[16] __attribute__(( aligned(16) ));
-	struct gaba_score_vec_s sc __attribute__(( aligned(BW) ));
+	struct gaba_score_vec_s sc __attribute__(( aligned(32) ));
 
 	sb[0] = x - 2 * (ge + gi);
 	for(int i = 1; i < 16; i++) {
@@ -3963,7 +3975,7 @@ struct gaba_diff_vec_s gaba_init_create_diff_vectors(
 	int8_t ofs_dv = -(ge + gi);
 	int8_t ofs_de = -gi;
 	int8_t ofs_df = -gi;
-	
+
 	int8_t drop_dh = ge + ofs_dh;
 	int8_t raise_dh = m - ge + ofs_dh;
 	int8_t drop_dv = ge + ofs_dv;
@@ -4102,7 +4114,7 @@ gaba_t *_export(gaba_init)(
 			.blk = (struct gaba_phantom_block_s) {
 				/* direction array */
 				.dir = gaba_init_create_dir_dynamic(&params_intl),
-				
+
 				/* offset, diffs and deltas */
 				.offset = 0,
 				.diff = gaba_init_create_diff_vectors(&params_intl),
@@ -4474,7 +4486,7 @@ void *unittest_build_seqs(void *params)
 		.blim = blim,
 		.alen = atot,
 		.blen = btot,
-		
+
 		/* forward */
 		.afsec = gaba_build_section(0, ca, alen),
 		.aftail = gaba_build_section(2, ca + alen, 20),
@@ -5373,7 +5385,7 @@ unittest(with_seq_pair("GAAAAAAAA", "AAAAAAAA"))
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
-	/* fw */	
+	/* fw */
 	struct gaba_alignment_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
 	assert(check_result(r, 22, 2, 32, 3, 0, 0, 0, 0), print_result(r));
 	assert(check_path(r, "DRDRDRDRDRDRDRDRDRDRDRDRDRDRDRDR"), print_path(r));
@@ -6209,7 +6221,7 @@ unittest()
 		struct gaba_section_s const *bs = &sec->bfsec;
 		struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, as, 0, bs, 0);
 		struct gaba_fill_s *m = f;
-		
+
 		/* fill tail (1) */
 		as = (f->status & GABA_STATUS_UPDATE_A) ? &sec->aftail : as;
 		bs = (f->status & GABA_STATUS_UPDATE_B) ? &sec->bftail : bs;
@@ -6310,7 +6322,7 @@ unittest(with_seq_pair(
 	struct gaba_section_s const *as = &s->afsec;
 	struct gaba_section_s const *bs = &s->bfsec;
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, as, 0, bs, 0);
-	
+
 	/* fill tail (1) */
 	as = (f->status & GABA_STATUS_UPDATE_A) ? &s->aftail : as;
 	bs = (f->status & GABA_STATUS_UPDATE_B) ? &s->bftail : bs;

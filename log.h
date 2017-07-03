@@ -116,7 +116,7 @@
 
 #ifdef DEBUG
 	/* compatible with dump in unittest.h */
-	#define ut_dump(ptr, len) ({ \
+	#define dump(ptr, len) ({ \
 		uint64_t size = (((len) + 15) / 16 + 1) * \
 			(strlen("0x0123456789abcdef:") + 16 * strlen(" 00a") + strlen("  \n+ margin")) \
 			+ strlen(#ptr) + strlen("\n`' len: 100000000"); \

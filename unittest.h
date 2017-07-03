@@ -569,7 +569,7 @@ struct ut_printer_s ut_json_printer = {
 	(char const *)_str; \
 })
 #ifndef dump
-#define dump 			ut_dump
+// #define dump 			ut_dump
 #endif
 
 /**

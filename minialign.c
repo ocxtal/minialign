@@ -250,6 +250,7 @@ uint64_t mm_rand64(void)
 #include "unittest.h"
 
 #include "lmm.h"
+#include "log.h"
 #include "gaba_wrap.h"
 #include "arch/arch.h"
 #include "kvec.h"
@@ -3700,6 +3701,7 @@ gaba_alignment_t const *mm_extend(
 		}
 
 		/* upward extension */
+		debug("upward extension: pos(%u, %u)", qs, rs);
 		gaba_fill_t const *ff = mm_extend_core(
 			dp,
 			&rr, rr.len - rs - 1,
@@ -3717,12 +3719,14 @@ gaba_alignment_t const *mm_extend(
 
 		/* downward extension from max */
 		gaba_dp_flush_stack(dp, stack);
+		debug("downward extension: pos(%u, %u)", qr->len - p.bpos - 1, rf.len - p.apos - 1);
 		gaba_fill_t const *fr = mm_extend_core(
 			dp,
 			&rf, rf.len - p.apos - 1,
 			qf, qf->len - p.bpos - 1,
 			t, t
 		);
+		debug("score(%ld)", fr->max);
 
 		if(fr->max < min) { continue; }
 		/* convert alignment to cigar */
