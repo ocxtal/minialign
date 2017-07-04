@@ -10,7 +10,7 @@ all: native
 
 native:
 	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)'
-	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba_linear.o gaba_affine.o $(LDFLAGS)
+	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba_linear_16.o gaba_affine_16.o gaba_linear_32.o gaba_affine_32.o $(LDFLAGS)
 
 sse41 avx2:
 	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) -DUNITTEST=0 -DNAMESPACE=$@' NAMESPACE=$@

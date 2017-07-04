@@ -3,6 +3,8 @@
  * @file gaba_wrap.c
  *
  * @brief wrapper API implementation of the GABA library
+ * gaba.c must be compiled with the following combinations:
+ * {-DBW=16, -DBW=32} x {-DMODEL=LINEAR, -DMODEL=AFFINE}.
  *
  * @author Hajime Suzuki
  * @date 2016/6/1
@@ -78,179 +80,58 @@ struct gaba_api_s {
 _static_assert(sizeof(struct gaba_api_s) == 6 * sizeof(void *));
 #define _api(_ctx)				( (struct gaba_api_s const *)(_ctx) )
 
+/* forward declarations */
+#define _decl_cat3_2(a, b, c)	a##_##b##_##c
+#define _decl_cat3(a, b, c)		_decl_cat3_2(a, b, c)
+#define _decl(ret_t, _base, ...) \
+	ret_t _import(_decl_cat3(_base, linear, 16))(__VA_ARGS__); \
+	ret_t _import(_decl_cat3(_base, affine, 16))(__VA_ARGS__); \
+	ret_t _import(_decl_cat3(_base, linear, 32))(__VA_ARGS__); \
+	ret_t _import(_decl_cat3(_base, affine, 32))(__VA_ARGS__);
 
-/* forward declarations, linear */
-gaba_t *_import(gaba_init_linear)(
-	gaba_params_t const *params);
-void _import(gaba_clean_linear)(
-	gaba_t *ctx);
-struct gaba_dp_context_s *_import(gaba_dp_init_linear)(
-	gaba_t const *ctx,
-	uint8_t const *alim,
-	uint8_t const *blim);
-void _import(gaba_dp_flush_linear)(
-	gaba_dp_t *self,
-	uint8_t const *alim,
-	uint8_t const *blim);
-gaba_stack_t const *_import(gaba_dp_save_stack_linear)(
-	gaba_dp_t *self);
-void _import(gaba_dp_flush_stack_linear)(
-	gaba_dp_t *self,
-	gaba_stack_t const *stack);
-void _import(gaba_dp_clean_linear)(
-	gaba_dp_t *self);
-gaba_fill_t *_import(gaba_dp_fill_root_linear)(
-	gaba_dp_t *self,
-	gaba_section_t const *a,
-	uint32_t apos,
-	gaba_section_t const *b,
-	uint32_t bpos);
-gaba_fill_t *_import(gaba_dp_fill_linear)(
-	gaba_dp_t *self,
-	gaba_fill_t const *prev_sec,
-	gaba_section_t const *a,
-	gaba_section_t const *b);
-gaba_fill_t *_import(gaba_dp_merge_linear)(
-	gaba_dp_t *self,
-	gaba_fill_t const *sec_list,
-	uint64_t sec_list_len);
-gaba_pos_pair_t _import(gaba_dp_search_max_linear)(
-	gaba_dp_t *self,
-	gaba_fill_t const *sec);
-gaba_alignment_t *_import(gaba_dp_trace_linear)(
-	gaba_dp_t *self,
-	gaba_fill_t const *fw_tail,
-	gaba_fill_t const *rv_tail,
-	gaba_trace_params_t const *params);
-gaba_alignment_t *_import(gaba_dp_recombine_linear)(
-	gaba_dp_t *self,
-	gaba_alignment_t *x,
-	uint32_t xsid,
-	gaba_alignment_t *y,
-	uint32_t ysid);
-void _import(gaba_dp_res_free_linear)(
-	gaba_alignment_t *res);
-int64_t _import(gaba_dp_print_cigar_forward_linear)(
-	gaba_dp_printer_t printer,
-	void *fp,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len);
-int64_t _import(gaba_dp_print_cigar_reverse_linear)(
-	gaba_dp_printer_t printer,
-	void *fp,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len);
-int64_t _import(gaba_dp_dump_cigar_forward_linear)(
-	char *buf,
-	uint64_t buf_size,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len);
-int64_t _import(gaba_dp_dump_cigar_reverse_linear)(
-	char *buf,
-	uint64_t buf_size,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len);
+_decl(gaba_t *, gaba_init, gaba_params_t const *params);
+_decl(void, gaba_clean, gaba_t *ctx);
+_decl(struct gaba_dp_context_s *, gaba_dp_init, gaba_t const *ctx, uint8_t const *alim, uint8_t const *blim);
+_decl(void, gaba_dp_flush, gaba_dp_t *self, uint8_t const *alim, uint8_t const *blim);
+_decl(gaba_stack_t const *, gaba_dp_save_stack, gaba_dp_t *self);
+_decl(void, gaba_dp_flush_stack, gaba_dp_t *self, gaba_stack_t const *stack);
+_decl(void, gaba_dp_clean, gaba_dp_t *self);
+_decl(gaba_fill_t *, gaba_dp_fill_root, gaba_dp_t *self, gaba_section_t const *a, uint32_t apos, gaba_section_t const *b, uint32_t bpos);
+_decl(gaba_fill_t *, gaba_dp_fill, gaba_dp_t *self, gaba_fill_t const *prev_sec, gaba_section_t const *a, gaba_section_t const *b);
+_decl(gaba_fill_t *, gaba_dp_merge, gaba_dp_t *self, gaba_fill_t const *sec_list, uint64_t sec_list_len);
+_decl(gaba_pos_pair_t, gaba_dp_search_max, gaba_dp_t *self, gaba_fill_t const *sec);
+_decl(gaba_alignment_t *, gaba_dp_trace, gaba_dp_t *self, gaba_fill_t const *fw_tail, gaba_fill_t const *rv_tail, gaba_trace_params_t const *params);
+_decl(gaba_alignment_t *, gaba_dp_recombine, gaba_dp_t *self, gaba_alignment_t *x, uint32_t xsid, gaba_alignment_t *y, uint32_t ysid);
+_decl(void, gaba_dp_res_free, gaba_alignment_t *res);
+_decl(int64_t, gaba_dp_print_cigar_forward, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
+_decl(int64_t, gaba_dp_print_cigar_reverse, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
+_decl(int64_t, gaba_dp_dump_cigar_forward, char *buf, uint64_t buf_size, uint32_t const *path, uint32_t offset, uint32_t len);
+_decl(int64_t, gaba_dp_dump_cigar_reverse, char *buf, uint64_t buf_size, uint32_t const *path, uint32_t offset, uint32_t len);
 
-/* affine */
-gaba_t *_import(gaba_init_affine)(
-	gaba_params_t const *params);
-void _import(gaba_clean_affine)(
-	gaba_t *ctx);
-struct gaba_dp_context_s *_import(gaba_dp_init_affine)(
-	gaba_t const *ctx,
-	uint8_t const *alim,
-	uint8_t const *blim);
-void _import(gaba_dp_flush_affine)(
-	gaba_dp_t *self,
-	uint8_t const *alim,
-	uint8_t const *blim);
-gaba_stack_t const *_import(gaba_dp_save_stack_affine)(
-	gaba_dp_t *self);
-void _import(gaba_dp_flush_stack_affine)(
-	gaba_dp_t *self,
-	gaba_stack_t const *stack);
-void _import(gaba_dp_clean_affine)(
-	gaba_dp_t *self);
-gaba_fill_t *_import(gaba_dp_fill_root_affine)(
-	gaba_dp_t *self,
-	gaba_section_t const *a,
-	uint32_t apos,
-	gaba_section_t const *b,
-	uint32_t bpos);
-gaba_fill_t *_import(gaba_dp_fill_affine)(
-	gaba_dp_t *self,
-	gaba_fill_t const *prev_sec,
-	gaba_section_t const *a,
-	gaba_section_t const *b);
-gaba_fill_t *_import(gaba_dp_merge_affine)(
-	gaba_dp_t *self,
-	gaba_fill_t const *sec_list,
-	uint64_t sec_list_len);
-gaba_pos_pair_t _import(gaba_dp_search_max_affine)(
-	gaba_dp_t *self,
-	gaba_fill_t const *sec);
-gaba_alignment_t *_import(gaba_dp_trace_affine)(
-	gaba_dp_t *self,
-	gaba_fill_t const *fw_tail,
-	gaba_fill_t const *rv_tail,
-	gaba_trace_params_t const *params);
-gaba_alignment_t *_import(gaba_dp_recombine_affine)(
-	gaba_dp_t *self,
-	gaba_alignment_t *x,
-	uint32_t xsid,
-	gaba_alignment_t *y,
-	uint32_t ysid);
-void _import(gaba_dp_res_free_affine)(
-	gaba_alignment_t *res);
-int64_t _import(gaba_dp_print_cigar_forward_affine)(
-	gaba_dp_printer_t printer,
-	void *fp,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len);
-int64_t _import(gaba_dp_print_cigar_reverse_affine)(
-	gaba_dp_printer_t printer,
-	void *fp,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len);
-int64_t _import(gaba_dp_dump_cigar_forward_affine)(
-	char *buf,
-	uint64_t buf_size,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len);
-int64_t _import(gaba_dp_dump_cigar_reverse_affine)(
-	char *buf,
-	uint64_t buf_size,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len);
-
+#undef _decl
 
 /* function table */
 static
-struct gaba_api_s const api_table[] __attribute__(( aligned(16) )) = {
+struct gaba_api_s const api_table[][2] __attribute__(( aligned(16) )) = {
+	#define _table_elems(_model, _bw) { \
+		.init = _import(_decl_cat3(gaba_init, _model, _bw)), \
+		.clean = _import(_decl_cat3(gaba_clean, _model, _bw)), \
+		.dp_fill_root = _import(_decl_cat3(gaba_dp_fill_root, _model, _bw)), \
+		.dp_fill = _import(_decl_cat3(gaba_dp_fill, _model, _bw)), \
+		.dp_search_max = _import(_decl_cat3(gaba_dp_search_max, _model, _bw)), \
+		.dp_trace = _import(_decl_cat3(gaba_dp_trace, _model, _bw)) \
+	}
+
 	[LINEAR] = {
-		.init = _import(gaba_init_linear),
-		.clean = _import(gaba_clean_linear),
-		.dp_fill_root = _import(gaba_dp_fill_root_linear),
-		.dp_fill = _import(gaba_dp_fill_linear),
-		.dp_search_max = _import(gaba_dp_search_max_linear),
-		.dp_trace = _import(gaba_dp_trace_linear)
+		[0] = _table_elems(linear, 16),
+		[1] = _table_elems(linear, 32)
 	},
 	[AFFINE] = {
-		.init = _import(gaba_init_affine),
-		.clean = _import(gaba_clean_affine),
-		.dp_fill_root = _import(gaba_dp_fill_root_affine),
-		.dp_fill = _import(gaba_dp_fill_affine),
-		.dp_search_max = _import(gaba_dp_search_max_affine),
-		.dp_trace = _import(gaba_dp_trace_affine)
+		[0] = _table_elems(affine, 16),
+		[1] = _table_elems(affine, 32)
 	}
+
+	#undef _table_elems
 };
 
 /**
@@ -295,7 +176,7 @@ gaba_t *gaba_init(
 		return(NULL);
 	}
 
-	struct gaba_api_s const *api = &api_table[gaba_init_get_index(params)];
+	struct gaba_api_s const *api = &api_table[gaba_init_get_index(params)][1];
 	if(api->init == NULL) {
 		return(NULL);
 	}
@@ -322,7 +203,7 @@ struct gaba_dp_context_s *gaba_dp_init(
 	uint8_t const *alim,
 	uint8_t const *blim)
 {
-	return((gaba_dp_t *)gaba_set_api((void *)_import(gaba_dp_init_linear)(ctx, alim, blim), _api(ctx)));
+	return((gaba_dp_t *)gaba_set_api((void *)_import(gaba_dp_init_linear_32)(ctx, alim, blim), _api(ctx)));
 }
 
 /**
@@ -334,7 +215,7 @@ void gaba_dp_flush(
 	uint8_t const *alim,
 	uint8_t const *blim)
 {
-	_import(gaba_dp_flush_linear)(self, alim, blim);
+	_import(gaba_dp_flush_linear_32)(self, alim, blim);
 	return;
 }
 
@@ -345,7 +226,7 @@ static inline
 gaba_stack_t const *gaba_dp_save_stack(
 	gaba_dp_t *self)
 {
-	return(_import(gaba_dp_save_stack_linear)(self));
+	return(_import(gaba_dp_save_stack_linear_32)(self));
 }
 
 /**
@@ -356,7 +237,7 @@ void gaba_dp_flush_stack(
 	gaba_dp_t *self,
 	gaba_stack_t const *stack)
 {
-	_import(gaba_dp_flush_stack_linear)(self, stack);
+	_import(gaba_dp_flush_stack_linear_32)(self, stack);
 	return;
 }
 
@@ -367,7 +248,7 @@ static inline
 void gaba_dp_clean(
 	gaba_dp_t *self)
 {
-	_import(gaba_dp_clean_linear)(self);
+	_import(gaba_dp_clean_linear_32)(self);
 	return;
 }
 
@@ -447,7 +328,7 @@ gaba_alignment_t *gaba_dp_recombine(
 	gaba_alignment_t *y,
 	uint32_t ysid)
 {
-	return(_import(gaba_dp_recombine_linear)(self, x, xsid, y, ysid));
+	return(_import(gaba_dp_recombine_linear_32)(self, x, xsid, y, ysid));
 }
 
 /**
@@ -457,7 +338,7 @@ static inline
 void gaba_dp_res_free(
 	gaba_alignment_t *res)
 {
-	_import(gaba_dp_res_free_linear)(res);
+	_import(gaba_dp_res_free_linear_32)(res);
 	return;
 }
 
@@ -473,7 +354,7 @@ uint64_t gaba_dp_print_cigar_forward(
 	uint32_t offset,
 	uint32_t len)
 {
-	return(_import(gaba_dp_print_cigar_forward_linear)(printer, fp, path, offset, len));
+	return(_import(gaba_dp_print_cigar_forward_linear_32)(printer, fp, path, offset, len));
 }
 
 /**
@@ -487,7 +368,7 @@ uint64_t gaba_dp_print_cigar_reverse(
 	uint32_t offset,
 	uint32_t len)
 {
-	return(_import(gaba_dp_print_cigar_reverse_linear)(printer, fp, path, offset, len));
+	return(_import(gaba_dp_print_cigar_reverse_linear_32)(printer, fp, path, offset, len));
 }
 
 /**
@@ -501,7 +382,7 @@ uint64_t gaba_dp_dump_cigar_forward(
 	uint32_t offset,
 	uint32_t len)
 {
-	return(_import(gaba_dp_dump_cigar_forward_linear)(buf, buf_size, path, offset, len));
+	return(_import(gaba_dp_dump_cigar_forward_linear_32)(buf, buf_size, path, offset, len));
 }
 
 /**
@@ -515,7 +396,7 @@ uint64_t gaba_dp_dump_cigar_reverse(
 	uint32_t offset,
 	uint32_t len)
 {
-	return(_import(gaba_dp_dump_cigar_reverse_linear)(buf, buf_size, path, offset, len));
+	return(_import(gaba_dp_dump_cigar_reverse_linear_32)(buf, buf_size, path, offset, len));
 }
 
 
