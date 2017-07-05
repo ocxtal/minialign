@@ -4404,7 +4404,7 @@ void _export(gaba_dp_flush_stack)(
 		return;
 	}
 
-	self = _export_dp_context_global(_restore_dp_context(self));
+	self = _restore_dp_context(self);
 	self->curr_mem = stack->mem;
 	self->stack_top = stack->stack_top;
 	self->stack_end = stack->stack_end;
@@ -4453,7 +4453,7 @@ void _export(gaba_dp_clean)(
 		struct gaba_mem_block_s *mnext = m->next;
 		free(m); m = mnext;
 	}
-	gaba_aligned_free(self);
+	gaba_aligned_free(_export_dp_context_global(self));
 	return;
 }
 
