@@ -21,11 +21,19 @@
 #include  "unittest.h"
 
 
-#include <stdint.h>				/* uint32_t, uint64_t, ... */
+#include <stdint.h>							/* uint32_t, uint64_t, ... */
 #include "gaba.h"
 #include "sassert.h"
 #include "arch/arch.h"
 
+
+/* bandwidth-related macros (see gaba.c) */
+#define DP_CTX_MAX					( 2 )
+#define _dp_ctx_index(_bw)			( DP_CTX_MAX - ((_bw)>>4) )
+_static_assert(_dp_ctx_index(32) == 0);		/* assume 32-cell has the smallest index */
+
+
+/* add namespace for arch wrapper (see main.c) */
 #ifndef _import
 #  ifdef NAMESPACE
 #    define _import_cat(x, y)		x##_##y
@@ -48,12 +56,6 @@
  * @brief a set of pointers to GABA API
  */
 struct gaba_api_s {
-	/* configuration init / destroy */
-	gaba_t *(*init)(
-		gaba_params_t const *params);
-	void (*clean)(
-		gaba_t *ctx);
-
 	/* fill-in */
 	gaba_fill_t *(*dp_fill_root)(
 		gaba_dp_t *self,
@@ -77,8 +79,17 @@ struct gaba_api_s {
 		gaba_fill_t const *rv_tail,
 		gaba_trace_params_t const *params);
 };
-_static_assert(sizeof(struct gaba_api_s) == 6 * sizeof(void *));
-#define _api(_ctx)				( (struct gaba_api_s const *)(_ctx) )
+_static_assert(sizeof(struct gaba_api_s) == 4 * sizeof(void *));		/* must be consistent to gaba_opaque_s */
+#define _api(_dp)				( (struct gaba_api_s const *)(_dp) )
+#define _api_array(_ctx)		( (struct gaba_api_s const (*)[DP_CTX_MAX])(_ctx) )
+
+/**
+ * @struct redefinition of gaba_dp_context_s
+ */
+struct gaba_dp_context_s {
+	struct gaba_api_s bw[2];	/** (64) [0] for 32-cell, [1] for 16-cell */
+};
+
 
 /* forward declarations */
 #define _decl_cat3_2(a, b, c)	a##_##b##_##c
@@ -112,10 +123,8 @@ _decl(int64_t, gaba_dp_dump_cigar_reverse, char *buf, uint64_t buf_size, uint32_
 
 /* function table */
 static
-struct gaba_api_s const api_table[][2] __attribute__(( aligned(16) )) = {
+struct gaba_api_s const api_table[][DP_CTX_MAX] __attribute__(( aligned(16) )) = {
 	#define _table_elems(_model, _bw) { \
-		.init = _import(_decl_cat3(gaba_init, _model, _bw)), \
-		.clean = _import(_decl_cat3(gaba_clean, _model, _bw)), \
 		.dp_fill_root = _import(_decl_cat3(gaba_dp_fill_root, _model, _bw)), \
 		.dp_fill = _import(_decl_cat3(gaba_dp_fill, _model, _bw)), \
 		.dp_search_max = _import(_decl_cat3(gaba_dp_search_max, _model, _bw)), \
@@ -123,12 +132,12 @@ struct gaba_api_s const api_table[][2] __attribute__(( aligned(16) )) = {
 	}
 
 	[LINEAR] = {
-		[0] = _table_elems(linear, 16),
-		[1] = _table_elems(linear, 32)
+		[_dp_ctx_index(16)] = _table_elems(linear, 16),
+		[_dp_ctx_index(32)] = _table_elems(linear, 32)
 	},
 	[AFFINE] = {
-		[0] = _table_elems(affine, 16),
-		[1] = _table_elems(affine, 32)
+		[_dp_ctx_index(16)] = _table_elems(affine, 16),
+		[_dp_ctx_index(32)] = _table_elems(affine, 32)
 	}
 
 	#undef _table_elems
@@ -157,11 +166,14 @@ int64_t gaba_init_get_index(
 static inline
 void *gaba_set_api(
 	void *ctx,
-	struct gaba_api_s const *api)
+	struct gaba_api_s const (*api)[DP_CTX_MAX])
 {
 	if(ctx == NULL) { return(NULL); }
 	struct gaba_api_s *dst = (struct gaba_api_s *)ctx;
-	*dst = *api;
+
+	for(uint64_t i = 0; i < DP_CTX_MAX; i++) {
+		_memcpy_blk_aa(dst, api, sizeof(struct gaba_api_s));
+	}
 	return((void *)dst);
 }
 
@@ -176,11 +188,18 @@ gaba_t *gaba_init(
 		return(NULL);
 	}
 
-	struct gaba_api_s const *api = &api_table[gaba_init_get_index(params)][1];
-	if(api->init == NULL) {
-		return(NULL);
-	}
-	return((gaba_t *)gaba_set_api((void *)api->init(params), api));
+	uint64_t idx = gaba_init_get_index(params);
+	struct gaba_api_s const (*api)[DP_CTX_MAX] = &api_table[idx];
+
+	/* create context */
+	gaba_params_t p = *params;
+	gaba_t *ctx = NULL;
+	ctx = ((idx == LINEAR) ? gaba_init_linear_16 : gaba_init_affine_16)(&p);
+
+	/* init 32-cell wide root block */
+	p.reserved = (void *)ctx;
+	ctx = ((idx == LINEAR) ? gaba_init_linear_32 : gaba_init_affine_32)(&p);
+	return((gaba_t *)gaba_set_api((void *)ctx, api));
 }
 
 /**
@@ -190,7 +209,8 @@ static inline
 void gaba_clean(
 	gaba_t *ctx)
 {
-	_api(ctx)->clean(ctx);
+	// _api(ctx)->clean(ctx);
+	gaba_clean_linear_32(ctx);
 	return;
 }
 
@@ -203,7 +223,7 @@ struct gaba_dp_context_s *gaba_dp_init(
 	uint8_t const *alim,
 	uint8_t const *blim)
 {
-	return((gaba_dp_t *)gaba_set_api((void *)_import(gaba_dp_init_linear_32)(ctx, alim, blim), _api(ctx)));
+	return((gaba_dp_t *)gaba_set_api((void *)_import(gaba_dp_init_linear_32)(ctx, alim, blim), _api_array(ctx)));
 }
 
 /**

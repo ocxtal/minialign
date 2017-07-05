@@ -9,7 +9,19 @@
  * @license Apache v2
  */
 
-/* gap penalty model (linear or affine) */
+/* import general headers */
+#include <stdio.h>				/* sprintf in dump_path */
+#include <stdint.h>				/* uint32_t, uint64_t, ... */
+#include <stddef.h>				/* offsetof */
+#include <string.h>				/* memset, memcpy */
+#include "gaba.h"
+#include "log.h"
+#include "lmm.h"
+#include "sassert.h"
+#include "arch/arch.h"			/* architecture dependents */
+
+
+/* gap penalty model (linear or affine) related configurations */
 #define LINEAR 						1
 #define AFFINE						2
 
@@ -19,7 +31,56 @@
 #  endif
 #else
 #  define MODEL 					AFFINE
-// #  define MODEL 					LINEAR
+#endif
+
+#if MODEL == LINEAR
+#  define MODEL_LABEL				linear
+#else
+#  define MODEL_LABEL				affine
+#endif
+
+
+/* bandwidth-specific configurations aliasing vector macros */
+#define BW_MAX						32
+#ifndef BW
+#  define BW						32
+#endif
+
+#if BW == 16
+#  define _NVEC_ALIAS_PREFIX		v16i8
+#  define _WVEC_ALIAS_PREFIX		v16i16
+#  define DP_CTX_INDEX				1
+#elif BW == 32
+#  define _NVEC_ALIAS_PREFIX		v32i8
+#  define _WVEC_ALIAS_PREFIX		v32i16
+#  define DP_CTX_INDEX				0
+#else
+#  error "BW must be either 16 or 32."
+#endif
+#include "arch/vector_alias.h"
+
+#define DP_CTX_MAX					( 2 )
+#define _dp_ctx_index(_bw)			( DP_CTX_MAX - ((_bw)>>4) )
+_static_assert(_dp_ctx_index(BW) == DP_CTX_INDEX);
+
+
+/* add suffix for gap-model- and bandwidth-wrapper (see gaba_wrap.h) */
+#ifdef SUFFIX
+#  define _suffix_cat3_2(a, b, c)	a##_##b##_##c
+#  define _suffix_cat3(a, b, c)		_suffix_cat3_2(a, b, c)
+#  define _suffix(_base)			_suffix_cat3(_base, MODEL_LABEL, BW)
+#else
+#  define _suffix(_base)			_base
+#endif
+
+
+/* add namespace for arch wrapper (see main.c) */
+#ifdef NAMESPACE
+#  define _export_cat(x, y)			x##_##y
+#  define _export_cat2(x, y)		_export_cat(x, y)
+#  define _export(_base)			_export_cat2(NAMESPACE, _suffix(_base))
+#else
+#  define _export(_base)			_suffix(_base)
 #endif
 
 
@@ -42,61 +103,7 @@
 #include  "unittest.h"
 
 
-#include <stdio.h>				/* sprintf in dump_path */
-#include <stdint.h>				/* uint32_t, uint64_t, ... */
-#include <stddef.h>				/* offsetof */
-#include <string.h>				/* memset, memcpy */
-#include "gaba.h"
-#include "log.h"
-#include "lmm.h"
-#include "sassert.h"
-
-/* architecture dependent */
-#include "arch/arch.h"
-
-/* aliasing vector macros */
-#ifndef BW
-#  define BW					32
-#endif
-
-#if BW == 16
-#  define _NVEC_ALIAS_PREFIX		v16i8
-#  define _WVEC_ALIAS_PREFIX		v16i16
-#elif BW == 32
-#  define _NVEC_ALIAS_PREFIX		v32i8
-#  define _WVEC_ALIAS_PREFIX		v32i16
-#else
-#  error "BW must be either 16 or 32."
-#endif
-#include "arch/vector_alias.h"
-
-
-/* add suffix */
-#if MODEL == LINEAR
-#  define MODEL_LABEL				linear
-#else
-#  define MODEL_LABEL				affine
-#endif
-
-
-#ifdef SUFFIX
-#  define _suffix_cat3_2(a, b, c)	a##_##b##_##c
-#  define _suffix_cat3(a, b, c)		_suffix_cat3_2(a, b, c)
-#  define _suffix(_base)			_suffix_cat3(_base, MODEL_LABEL, BW)
-#else
-#  define _suffix(_base)			_base
-#endif
-
-/* add namespace */
-#ifdef NAMESPACE
-#  define _export_cat(x, y)			x##_##y
-#  define _export_cat2(x, y)		_export_cat(x, y)
-#  define _export(_base)			_export_cat2(NAMESPACE, _suffix(_base))
-#else
-#  define _export(_base)			_suffix(_base)
-#endif
-
-/* constants */
+/* internal constants */
 #define BLK_BASE					( 5 )
 #define BLK 						( 0x01<<BLK_BASE )
 
@@ -106,6 +113,7 @@
 #define MEM_MARGIN_SIZE				( 2048 )
 #define PSUM_BASE					( 1 )
 
+/* test consistency of exported macros */
 _static_assert(V2I32_MASK_01 == GABA_STATUS_UPDATE_A);
 _static_assert(V2I32_MASK_10 == GABA_STATUS_UPDATE_B);
 
@@ -464,10 +472,14 @@ _static_assert(sizeof(struct gaba_stack_s) == 32);
  * @brief (internal) container for dp implementations
  */
 struct gaba_dp_context_s {
-	/** API function pointers */
-	void *api[6];						/** (48) */
+	/** reserved for API function pointer */
+	void *fp;							/** (8) */
+
+	/* memory management */
 	uint8_t *stack_top;					/** (8) dynamic programming matrix */
 	uint8_t *stack_end;					/** (8) the end of dp matrix */
+	struct gaba_mem_block_s *curr_mem;	/** (8) */
+	struct gaba_mem_block_s mem;		/** (32) */
 	/** 64, 64 */
 
 	/** individually stored on init */
@@ -484,7 +496,6 @@ struct gaba_dp_context_s {
 	struct gaba_score_vec_s scv;		/** (80) substitution matrix and gaps */
 	/** 80, 336 */
 
-	/** 64byte aligned */
 	int8_t m;							/** (1) match award */
 	int8_t x;							/** (1) mismatch penalty (neg.int) */
 	int8_t gi;							/** (1) gap open penalty */
@@ -495,10 +506,7 @@ struct gaba_dp_context_s {
 	/** output options */
 	uint8_t head_margin;				/** (1) margin at the head of gaba_res_t */
 	uint8_t tail_margin;				/** (1) margin at the tail of gaba_res_t */
-
-	/* memory management */
-	struct gaba_mem_block_s *curr_mem;	/** (8) */
-	struct gaba_mem_block_s mem;		/** (32) */
+	uint64_t _pad[5];
 	/** 48, 384 */
 
 	/** phantom vectors */
@@ -512,8 +520,27 @@ _static_assert(sizeof(struct gaba_dp_context_s) % 64 == 0);
 #define GABA_DP_CONTEXT_LOAD_SIZE	( sizeof(struct gaba_dp_context_s) - GABA_DP_CONTEXT_LOAD_OFFSET )
 _static_assert(GABA_DP_CONTEXT_LOAD_OFFSET == 256);
 // _static_assert(GABA_DP_CONTEXT_LOAD_SIZE == 384);
-#define _proot(_t)					( &(_t)->ph[(BW>>4) - 1] )
+#define _proot(_t)					( &(_t)->ph[_dp_ctx_index(BW)] )
 #define _ptail(_t)					( &_proot(_t)->tail )
+
+/**
+ * @struct gaba_opaque_s
+ */
+struct gaba_opaque_s {
+	void *api[4];
+};
+#define _export_dp_context(_t) ( \
+	(struct gaba_dp_context_s *)(((struct gaba_opaque_s *)(_t)) - DP_CTX_MAX + _dp_ctx_index(BW)) \
+)
+#define _restore_dp_context(_t) ( \
+	(struct gaba_dp_context_s *)(((struct gaba_opaque_s *)(_t)) - _dp_ctx_index(BW) + DP_CTX_MAX) \
+)
+#define _export_dp_context_global(_t) ( \
+	(struct gaba_dp_context_s *)(((struct gaba_opaque_s *)(_t)) - DP_CTX_MAX + _dp_ctx_index(BW)) \
+)
+#define _restore_dp_context_global(_t) ( \
+	(struct gaba_dp_context_s *)(((struct gaba_opaque_s *)(_t)) - _dp_ctx_index(BW) + DP_CTX_MAX) \
+)
 
 /**
  * @struct gaba_context_s
@@ -523,16 +550,19 @@ _static_assert(GABA_DP_CONTEXT_LOAD_OFFSET == 256);
  * @sa gaba_init, gaba_close
  */
 struct gaba_context_s {
+	/** opaque pointers for function dispatch */
+	struct gaba_opaque_s api[2];		/** (64) */
+
 	/** templates */
 	/** 64byte aligned */
 	struct gaba_dp_context_s k;			/** (896) */
 	/** 896, 896 */
 
 	/** 64byte aligned */
-	struct gaba_middle_delta_box_s md[2];/** (128) */
+	struct gaba_middle_delta_box_s md[2];/** (64) */
 	/** 128, 1024 */
 };
-#define _pmd(_c)					( &(_c)->md[(BW>>4) - 1] )
+#define _pmd(_c)					( &(_c)->md[_dp_ctx_index(BW)] )
 
 /**
  * @enum _STATE
@@ -1918,6 +1948,9 @@ struct gaba_fill_s *_export(gaba_dp_fill_root)(
 	struct gaba_section_s const *b,
 	uint32_t bpos)
 {
+	/* restore dp context pointer by adding offset */
+	self = _restore_dp_context(self);
+
 	/* store section info */
 	_ptail(self)->apos = apos;
 	_ptail(self)->bpos = bpos;
@@ -1935,6 +1968,7 @@ struct gaba_fill_s *_export(gaba_dp_fill)(
 	struct gaba_section_s const *a,
 	struct gaba_section_s const *b)
 {
+	self = _restore_dp_context(self);
 	struct gaba_joint_tail_s const *tail = _tail(prev_sec);
 	return(_fill(fill_section_seq_bounded(self, tail, a, b)));
 }
@@ -2214,6 +2248,8 @@ struct gaba_pos_pair_s _export(gaba_dp_search_max)(
 	struct gaba_dp_context_s *self,
 	struct gaba_fill_s const *tail)
 {
+	self = _restore_dp_context(self);
+
 	struct gaba_leaf_s leaf;
 	leaf_search(self, _tail(tail), &leaf);
 
@@ -3423,6 +3459,9 @@ struct gaba_alignment_s *_export(gaba_dp_trace)(
 	struct gaba_fill_s const *rv_tail,
 	struct gaba_trace_params_s const *params)
 {
+	/* restore dp context pointer by adding offset */
+	self = _restore_dp_context(self);
+
 	/* substitute tail if NULL */
 	fw_tail = (fw_tail == NULL) ? _fill(_ptail(self)) : fw_tail;
 	rv_tail = (rv_tail == NULL) ? _fill(_ptail(self)) : rv_tail;
@@ -3483,6 +3522,9 @@ struct gaba_alignment_s *_export(gaba_dp_recombine)(
 	struct gaba_alignment_s *y,
 	uint32_t ysid)
 {
+	/* restore dp context pointer by adding offset */
+	// self = _restore_dp_context(self);
+
 	debug("recombine called, x(%p, %lld), a(%u, %u), b(%u, %u), y(%p, %lld), a(%u, %u), b(%u, %u)",
 		x, x->score, x->sec[0].apos, x->sec[0].alen, x->sec[0].bpos, x->sec[0].blen,
 		y, y->score, y->sec[0].apos, y->sec[0].alen, y->sec[0].bpos, y->sec[0].blen);
@@ -4249,9 +4291,20 @@ struct gaba_dp_context_s *_export(gaba_dp_init)(
 		return(NULL);
 	}
 
+	/* add offset */
+	self = _restore_dp_context_global(self);
+
 	/* init stack pointers */
 	self->stack_top = (uint8_t *)(self + 1);
 	self->stack_end = (uint8_t *)self + MEM_INIT_SIZE - MEM_MARGIN_SIZE;
+
+	/* init mem object */
+	self->curr_mem = &self->mem;
+	self->mem = (struct gaba_mem_block_s){
+		.next = NULL,
+		.prev = NULL,
+		.size = MEM_INIT_SIZE
+	};
 
 	/* init seq lims */
 	self->w.r.alim = alim;
@@ -4263,14 +4316,8 @@ struct gaba_dp_context_s *_export(gaba_dp_init)(
 		(uint8_t *)&ctx->k + GABA_DP_CONTEXT_LOAD_OFFSET,
 		GABA_DP_CONTEXT_LOAD_SIZE);
 
-	/* init mem object */
-	self->curr_mem = &self->mem;
-	self->mem = (struct gaba_mem_block_s){
-		.next = NULL,
-		.prev = NULL,
-		.size = MEM_INIT_SIZE
-	};
-	return(self);
+	/* return offsetted pointer */
+	return(_export_dp_context(self));
 }
 
 /**
@@ -4311,6 +4358,9 @@ void _export(gaba_dp_flush)(
 	uint8_t const *alim,
 	uint8_t const *blim)
 {
+	/* restore dp context pointer by adding offset */
+	self = _restore_dp_context(self);
+
 	/* init seq lims */
 	self->w.r.alim = alim;
 	self->w.r.blim = blim;
@@ -4327,6 +4377,8 @@ void _export(gaba_dp_flush)(
 struct gaba_stack_s const *_export(gaba_dp_save_stack)(
 	struct gaba_dp_context_s *self)
 {
+	self = _restore_dp_context(self);
+
 	struct gaba_mem_block_s *mem = self->curr_mem;
 	uint8_t *stack_top = self->stack_top;
 	uint8_t *stack_end = self->stack_end;
@@ -4352,6 +4404,7 @@ void _export(gaba_dp_flush_stack)(
 		return;
 	}
 
+	self = _export_dp_context_global(_restore_dp_context(self));
 	self->curr_mem = stack->mem;
 	self->stack_top = stack->stack_top;
 	self->stack_end = stack->stack_end;
@@ -4391,6 +4444,9 @@ void _export(gaba_dp_clean)(
 	if(self == NULL) {
 		return;
 	}
+
+	/* restore dp context pointer by adding offset */
+	self = _restore_dp_context(self);
 
 	struct gaba_mem_block_s *m = self->mem.next;
 	while(m != NULL) {
