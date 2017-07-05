@@ -254,6 +254,7 @@ struct ut_s {
  *
  * @brief instanciate a unittest object
  */
+#if UNITTEST != 0
 #define unittest(...) \
 	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)( \
 		void *ctx, \
@@ -281,11 +282,26 @@ struct ut_s {
 		struct ut_group_config_s const *ut_config, \
 		struct ut_result_s *ut_result)
 
+#else	/* UNITTEST != 0 */
+
+#define unittest(...) \
+	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)( \
+		void *ctx, \
+		void *gctx, \
+		struct ut_global_config_s const *ut_gconf, \
+		struct ut_s const *ut_info, \
+		struct ut_group_config_s const *ut_config, \
+		struct ut_result_s *ut_result)
+
+
+#endif	/* UNITTEST != 0 */
+
 /**
  * @macro unittest_config
  *
  * @brief scope configuration
  */
+#if UNITTEST != 0
 #define unittest_config(...) \
 	static struct ut_group_config_s const ut_build_name(ut_config_, UNITTEST_UNIQUE_ID, __LINE__) = { \
 		.file = __FILE__, \
@@ -297,6 +313,12 @@ struct ut_s {
 	{ \
 		return(ut_build_name(ut_config_, UNITTEST_UNIQUE_ID, __LINE__)); \
 	}
+
+#else	/* UNITTEST != 0 */
+
+#define unittest_config(...)
+
+#endif	/* UNITTEST != 0 */
 
 /* assertion failed message printers */
 static

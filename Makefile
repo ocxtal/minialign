@@ -1,30 +1,32 @@
 CC = gcc
 GIT = git
 VERSION = $(shell $(GIT) describe --tags || grep "define MM_VERSION" minialign.c | grep -o '".*"' | sed 's/"//g')
-CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99
+CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99 -DMM_VERSION=\"$(VERSION)\"
 LDFLAGS = -lm -lz -lpthread
 PREFIX = /usr/local
+TARGET = minialign
 
-all: minialign
+all: native
 
-minialign: minialign.c gaba_wrap.c gaba_linear.o gaba_affine.o
-	$(CC) -o $@ $(CFLAGS) -DMM_VERSION=\"$(VERSION)\" $^ $(LDFLAGS)
+native:
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)'
+	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba_linear.o gaba_affine.o $(LDFLAGS)
 
-gaba_linear.o: gaba.c
-	$(CC) -c -o $@ $(CFLAGS) -DMODEL=LINEAR -DSUFFIX $<
+sse41 avx2:
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) -DUNITTEST=0 -DNAMESPACE=$@' NAMESPACE=$@
 
-gaba_affine.o: gaba.c
-	$(CC) -c -o $@ $(CFLAGS) -DMODEL=AFFINE -DSUFFIX $<
+universal: sse41 avx2
+	$(CC) -o $(TARGET) -march=native main.c minialign.*.o gaba_linear.*.o gaba_affine.*.o $(LDFLAGS)
 
 clean:
-	rm -fr gmon.out *.o a.out minialign *~ *.a *.dSYM session*
+	rm -fr gmon.out *.o a.out $(TARGET) *~ *.a *.dSYM session*
 
 install:
 	mkdir -p $(PREFIX)/bin
-	cp minialign $(PREFIX)/bin/minialign
+	cp $(TARGET) $(PREFIX)/bin/$(TARGET)
 
 uninstall:
-	rm -f $(PREFIX)/bin/minialign
+	rm -f $(PREFIX)/bin/$(TARGET)
 
 gaba.c: gaba.h log.h lmm.h unittest.h sassert.h
 gaba_wrap.c: gaba.h log.h unittest.h sassert.h

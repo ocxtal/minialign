@@ -5,6 +5,17 @@
 #ifndef _ARCH_H_INCLUDED
 #define _ARCH_H_INCLUDED
 
+#include <stdint.h>
+
+/**
+ * define capability flags for all processors
+ */
+#define ARCH_CAP_SSE41			( 0x01 )
+#define ARCH_CAP_AVX2			( 0x04 )
+#define ARCH_CAP_NEON			( 0x10 )
+#define ARCH_CAP_ALTIVEC		( 0x20 )
+
+
 #ifdef __x86_64__
 #  if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
 /* the compiler is gcc, not clang nor icc */
@@ -23,6 +34,32 @@
 
 /* map reverse-complement sequence out of the canonical-formed address */
 #define GREF_SEQ_LIM			( (uint8_t const *)0x800000000000 )
+
+/**
+ * @macro arch_cap
+ * @brief returns architecture capability flag
+ *
+ * CPUID.(EAX=07H, ECX=0H):EBX.AVX2[bit 5]==1 &&
+ * CPUID.(EAX=07H, ECX=0H):EBX.BMI1[bit 3]==1 &&
+ * CPUID.(EAX=80000001H):ECX.LZCNT[bit 5]==1
+ */
+#define arch_cap() ({ \
+	uint32_t eax, ebx, ecx, edx; \
+	__asm__ volatile("cpuid" \
+		: "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) \
+		: "a"(0x01), "c"(0x00)); \
+	uint64_t sse4_cap = (ecx & 0x180000) != 0; \
+	__asm__ volatile("cpuid" \
+		: "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) \
+		: "a"(0x07), "c"(0x00)); \
+	uint64_t avx2_cap = (ebx & (0x01<<5)) != 0; \
+	uint64_t bmi1_cap = (ebx & (0x01<<3)) != 0; \
+	__asm__ volatile("cpuid" \
+		: "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) \
+		: "a"(0x80000001), "c"(0x00)); \
+	uint64_t lzcnt_cap = (ecx & (0x01<<5)) != 0; \
+	((sse4_cap != 0) ? ARCH_CAP_SSE41 : 0) | ((avx2_cap && bmi1_cap && lzcnt_cap) ? ARCH_CAP_AVX2 : 0); \
+})
 
 #endif
 
