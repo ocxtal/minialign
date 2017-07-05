@@ -130,7 +130,7 @@ typedef struct v2i32_s {
 
 /* shift */
 #define _sal_v2i32(a, imm) ( \
-	(v2i32_t) {_i_v2i32(slai)((a).v1, (imm))} \
+	(v2i32_t) {_i_v2i32(slli)((a).v1, (imm))} \
 )
 #define _sar_v2i32(a, imm) ( \
 	(v2i32_t) {_i_v2i32(srai)((a).v1, (imm))} \

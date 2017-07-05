@@ -110,64 +110,13 @@
 #endif
 
 /**
- * @macro logprintf
- */
-#define logprintf(fmt, ...) { \
-	fprintf(stderr, fmt, __VA_ARGS__); \
-}
-
-/**
- * @macro log
- */
-#define log(...) { \
-	log_impl(__VA_ARGS__, ""); \
-}
-#define log_impl(fmt, ...) { \
-	logprintf("[%s] " fmt "%s\n", __func__, __VA_ARGS__); \
-}
-#define log_nr(...) { \
-	log_nr_impl(__VA_ARGS__, ""); \
-}
-#define log_nr_impl(fmt, ...) { \
-	logprintf("[%s] " fmt "%s", __func__, __VA_ARGS__); \
-}
-
-/**
- * @macro log_error
- */
-#define log_error(...) { \
-	log_error_impl(__VA_ARGS__, ""); \
-}
-#define log_error_impl(fmt, ...) { \
-	logprintf("[%s]  ERROR: " fmt "%s\n", __func__, __VA_ARGS__); \
-}
-
-/**
- * @macro log_error_abort
- */
-#define log_error_abort(...) { \
-	log_error_impl(__VA_ARGS__, ""); \
-	exit(1); \
-}
-
-/**
- * @macro msg
- */
-#define msg(...) { \
-	msg_impl(__VA_ARGS__, ""); \
-}
-#define msg_impl(fmt, ...) { \
-	logprintf(fmt "%s\n", __VA_ARGS__); \
-}
-
-/**
  * @macro dump
  */
 #ifndef dump
 
 #ifdef DEBUG
 	/* compatible with dump in unittest.h */
-	#define ut_dump(ptr, len) ({ \
+	#define dump(ptr, len) ({ \
 		uint64_t size = (((len) + 15) / 16 + 1) * \
 			(strlen("0x0123456789abcdef:") + 16 * strlen(" 00a") + strlen("  \n+ margin")) \
 			+ strlen(#ptr) + strlen("\n`' len: 100000000"); \

@@ -149,7 +149,7 @@
 #define _store_sb(_scv, sv16)				{ _store_v32i8((_scv).v1, _from_v16i8_v32i8(sv16)); }
 
 /* load */
-#define _load_sb(scv)						( _from_v32i8(_load_v32i8((scv).v1)) )
+#define _load_sb(scv)						( _from_v32i8_n(_load_v32i8((scv).v1)) )
 
 /**
  * gap penalty vector abstraction macros
@@ -184,10 +184,10 @@
 	(v32i8_t){ _mm256_shuffle_epi32(_mm256_load_si256((__m256i const *)(_ptr)), (_idx)) } \
 )
 
-#define _load_adjh(_scv)					( _from_v32i8(_load_gap((_scv).v3, 0x00)) )
-#define _load_adjv(_scv)					( _from_v32i8(_load_gap((_scv).v3, 0x55)) )
-#define _load_ofsh(_scv)					( _from_v32i8(_load_gap((_scv).v3, 0xaa)) )
-#define _load_ofsv(_scv)					( _from_v32i8(_load_gap((_scv).v3, 0xff)) )
+#define _load_adjh(_scv)					( _from_v32i8_n(_load_gap((_scv).v3, 0x00)) )
+#define _load_adjv(_scv)					( _from_v32i8_n(_load_gap((_scv).v3, 0x55)) )
+#define _load_ofsh(_scv)					( _from_v32i8_n(_load_gap((_scv).v3, 0xaa)) )
+#define _load_ofsv(_scv)					( _from_v32i8_n(_load_gap((_scv).v3, 0xff)) )
 
 
 

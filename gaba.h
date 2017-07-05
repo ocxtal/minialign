@@ -83,6 +83,9 @@ struct gaba_params_s {
 	/** output options */
 	uint8_t head_margin;		/** margin at the head of gaba_res_t */
 	uint8_t tail_margin;		/** margin at the tail of gaba_res_t */
+
+	/* internal */
+	void *reserved;
 };
 typedef struct gaba_params_s gaba_params_t;
 
