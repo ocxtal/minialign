@@ -123,7 +123,7 @@ _decl(int64_t, gaba_dp_dump_cigar_reverse, char *buf, uint64_t buf_size, uint32_
 
 /* function table */
 static
-struct gaba_api_s const api_table[][DP_CTX_MAX] __attribute__(( aligned(16) )) = {
+struct gaba_api_s const api_table[][DP_CTX_MAX] __attribute__(( aligned(32) )) = {
 	#define _table_elems(_model, _bw) { \
 		.dp_fill_root = _import(_decl_cat3(gaba_dp_fill_root, _model, _bw)), \
 		.dp_fill = _import(_decl_cat3(gaba_dp_fill, _model, _bw)), \
