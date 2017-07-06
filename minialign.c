@@ -2799,11 +2799,14 @@ typedef struct { size_t n, m; mm_idx_seq_t *a; } mm_idx_seq_v;
  * @brief first-stage data container of double hash table
  */
 typedef struct {
-	kh_t *h;						/* hash table indexing _p_ and minimizers appearing once */
-	uint64_t n;						/* size of the _p_ array */
+	union {
+		kh_t h;						/* hash table indexing _p_ and minimizers appearing once */
+		mm128_v a;					/* (minimizer, position) array, for index construction */
+	} w;
+	// uint64_t n;					/* size of the _p_ array (moved to p[0]) */
 	uint64_t *p;					/* position array for minimizers appearing >1 times */
-	mm128_v a;						/* (minimizer, position) array, for index construction */
 } mm_idx_bucket_t;
+_static_assert(sizeof(mm_idx_bucket_t) == 32);
 
 /**
  * @struct mm_idx_t
@@ -2828,10 +2831,10 @@ mm_idx_t *mm_idx_init(
 	uint32_t circular)
 {
 	b = MIN2(k*2, b);				/* clip bucket size */
-	mm_idx_t *mi = (mm_idx_t*)calloc(1, sizeof(mm_idx_t));
+	mm_idx_t *mi = (mm_idx_t *)calloc(1, sizeof(mm_idx_t));
 	*mi = (mm_idx_t){
 		.mask = (1<<b) - 1,
-		.bkt = (mm_idx_bucket_t*)calloc(1<<b, sizeof(mm_idx_bucket_t)),
+		.bkt = (mm_idx_bucket_t *)calloc(1<<b, sizeof(mm_idx_bucket_t)),
 		.b = b,
 		.w = w<1? 1 : w,
 		.k = k,
@@ -2852,8 +2855,9 @@ void mm_idx_destroy(mm_idx_t *mi)
 	/* buckets */
 	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
 		free(mi->bkt[i].p);
-		free(mi->bkt[i].a.a);
-		kh_destroy((kh_t*)mi->bkt[i].h);
+		// free(mi->bkt[i].a.a);
+		free(mi->bkt[i].w.h.a);
+		// kh_destroy((kh_t *)mi->bkt[i].w.h);
 	}
 	free(mi->bkt);
 
@@ -2880,10 +2884,10 @@ v2u32_t const *mm_idx_get(
 	uint32_t *restrict n)
 {
 	mm_idx_bucket_t *b = &mi->bkt[minier & mi->mask];
-	kh_t *h = (kh_t*)b->h;
+	kh_t *h = (kh_t *)&b->w.h;
 	uint64_t const *p;
 
-	if(h == NULL || (p = kh_get_ptr(h, minier>>mi->b)) == NULL) {
+	if(h->a == NULL || (p = kh_get_ptr(h, minier>>mi->b)) == NULL) {
 		*n = 0;
 		return(NULL);
 	}
@@ -2907,24 +2911,26 @@ uint32_t *mm_idx_cal_max_occ(
 	uint64_t n_frq,
 	float const *frq)
 {
-
 	set_info(0, "[mm_idx_cal_max_occ] calculate occurrence thresholds");
+
 	/* calc size of occurrence table */
 	uint64_t n = 0;
 	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
-		if(mi->bkt[i].h) {
-			n += kh_cnt((kh_t*)mi->bkt[i].h);
+		if(mi->bkt[i].w.h.a != NULL) {
+			n += kh_cnt((kh_t *)&mi->bkt[i].w.h);
 		}
 	}
 
 	/* build occurrence table */
-	uint32_t *a = (uint32_t*)malloc(n * sizeof(uint32_t));
+	uint32_t *a = (uint32_t *)malloc(n * sizeof(uint32_t));
 	for(uint64_t i = (n = 0); i < 1ULL<<mi->b; i++) {
-		kh_t *h = (kh_t*)mi->bkt[i].h;
-		if(h == 0) { continue; }
+		kh_t *h = (kh_t *)&mi->bkt[i].w.h;
+		if(h->a == NULL) { continue; }
 		for(uint64_t k = 0; k < kh_size(h); k++) {
 			if(!kh_exist(h, k)) { continue; }
-			a[n++] = ((int64_t)kh_val(h, k))>=0? 1 : (uint32_t)kh_val(h, k);
+			a[n++] = ((int64_t)kh_val(h, k)) >= 0
+				? 1
+				: (uint32_t)kh_val(h, k);
 		}
 	}
 
@@ -3043,7 +3049,7 @@ void mm_idx_drain_intl(mm_idx_pipeline_t *q, mm_idx_step_t *s)
 {
 	uint64_t mask = q->mi->mask;
 	for(uint64_t i = 0; i < s->a.n; i++) {
-		mm128_v *p = &q->mi->bkt[s->a.a[i].u64[0]&mask].a;
+		mm128_v *p = &q->mi->bkt[s->a.a[i].u64[0] & mask].w.a;
 		kv_push(mm128_t, *p, s->a.a[i]);
 	}
 	free((void*)s->seq);
@@ -3099,42 +3105,48 @@ void *mm_idx_post(uint32_t tid, void *arg, void *item)
 
 	for(uint64_t i = q->from; i < q->to; i++) {
 		mm_idx_bucket_t *b = &mi->bkt[i];
-		if(b->a.n == 0) { continue; }
+		if(b->w.a.n == 0) {
+			_memset_blk_u(b, 0, sizeof(mm_idx_bucket_t));
+			continue;
+		}
 
 		/* sort by minimizer */
-		radix_sort_128x(b->a.a, b->a.a + b->a.n);
+		radix_sort_128x(b->w.a.a, b->w.a.a + b->w.a.n);
 
 		/* count keys and preallocate buffer */
-		uint64_t n_keys = 0; b->n = 0;
-		for(uint64_t j = 1, n = 1; j <= b->a.n; j++, n++) {
-			if(j != b->a.n && b->a.a[j].u64[0] == b->a.a[j-1].u64[0]) { continue; }
-			b->n += (n > 1)? n : 0;
+		uint64_t n_keys = 0, l_arr = 1;		/* reserve table size at p[0] */
+		for(uint64_t j = 1, n = 1; j <= b->w.a.n; j++, n++) {
+			if(j != b->w.a.n && b->w.a.a[j].u64[0] == b->w.a.a[j - 1].u64[0]) { continue; }
+			l_arr += (n > 1)? n : 0;
 			n_keys++;
 			n = 0;
 		}
 		kh_t *h = kh_init(n_keys / KH_THRESH);
-		b->p = (uint64_t*)malloc(sizeof(uint64_t) * b->n);
+		b->p = (uint64_t *)malloc(sizeof(uint64_t) * l_arr);
+		b->p[0] = l_arr;
 
 		/* create the (2nd-stage) hash table for the bucket */
-		for(uint64_t j = 1, n = 1, sp = 0; j <= b->a.n; j++, n++) {
-			if(j != b->a.n && b->a.a[j].u64[0] == b->a.a[j-1].u64[0]) { continue; }
+		for(uint64_t j = 1, n = 1, sp = 1; j <= b->w.a.n; j++, n++) {
+			if(j != b->w.a.n && b->w.a.a[j].u64[0] == b->w.a.a[j - 1].u64[0]) { continue; }
 
-			mm128_t *p = &b->a.a[j-n];
+			mm128_t *p = &b->w.a.a[j - n];
 			uint64_t key = p->u64[0]>>mi->b, val = p->u64[1];
 			if(n != 1) {
 				b->p[sp++] = val;
-				val = (sp-1)<<32 | n | 0x01ULL<<63;	/* k = 0 */
+				val = (sp - 1)<<32 | n | 0x01ULL<<63;	/* k = 0 */
 				while(n > 1) {
-					b->p[sp++] = b->a.a[j - --n].u64[1];
+					b->p[sp++] = b->w.a.a[j - --n].u64[1];
 				}
 			}
 			kh_put(h, key, val); n = 0;
 		}
-		b->h = h;
+		/* deallocate and clear b->w.a */
+		free(b->w.a.a); b->w.a.a = 0;		/* make sure not to be freed twice */
+		b->w.a.n = b->w.a.m = 0;
 
-		/* deallocate and clear b->a */
-		free(b->a.a); b->a.a = 0;
-		b->a.n = b->a.m = 0;
+		/* copy hash instance */
+		b->w.h = *h;						/* overlaps with b->a */
+		free(h);
 	}
 	return(NULL);
 }
@@ -3276,9 +3288,10 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 	/* dump buckets */
 	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
 		mm_idx_bucket_t *b = &mi->bkt[i];
-		pgwrite(pg, &b->n, sizeof(uint32_t) * 1);			/* value table size */
-		pgwrite(pg, b->p, sizeof(uint64_t) * b->n);			/* value table content */
-		kh_dump((kh_t*)b->h, pg, (khwrite_t)pgwrite);		/* 2nd-stage hash table */
+		// pgwrite(pg, &b->n, sizeof(uint32_t) * 1);			/* value table size */
+		uint64_t n = b->p[0];								/* value table size */
+		pgwrite(pg, b->p, sizeof(uint64_t) * n);			/* value table content, size in b->p[0] */
+		kh_dump((kh_t *)&b->w.h, pg, (khwrite_t)pgwrite);	/* 2nd-stage hash table */
 	}
 
 	/* dump sequence contents */
@@ -3345,18 +3358,22 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 		mm_idx_bucket_t *b = &mi->bkt[i];
 
 		/* read value table size */
-		if(pgread(pg, &b->n, sizeof(uint32_t) * 1) != sizeof(uint32_t) * 1) {
+		uint64_t n;
+		if(pgread(pg, &n, sizeof(uint64_t) * 1) != sizeof(uint64_t) * 1) {
 			goto _mm_idx_load_fail;
 		}
 
 		/* read value table content */
-		b->p = (uint64_t*)malloc(b->n * sizeof(uint64_t));
-		if(pgread(pg, b->p, sizeof(uint64_t) * b->n) != sizeof(uint64_t) * (size_t)b->n) {
+		b->p = (uint64_t *)malloc(n * sizeof(uint64_t));
+		b->p[0] = n;
+		if(pgread(pg, &b->p[1], sizeof(uint64_t) * (n - 1)) != sizeof(uint64_t) * (n - 1)) {
 			goto _mm_idx_load_fail;
 		}
 
 		/* read hash table */
-		b->h = kh_load(pg, (khread_t)pgread);
+		kh_t *h = kh_load(pg, (khread_t)pgread);
+		b->w.h = *h;
+		free(h);
 	}
 
 	/* load sequences */
