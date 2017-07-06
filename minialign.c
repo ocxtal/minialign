@@ -1956,18 +1956,23 @@ uint64_t bseq_read_fasta(
 	uint8_t *p = fp->p, *q = &mem->a[mem->n];
 	uint8_t const *t = fp->tail;
 	uint64_t m, acc, lim, ret = 1;
+
+	debug("enter, state(%u), p(%p), t(%p), eof(%u)", fp->state, p, t, fp->is_eof);
 	if(p >= t) { return(1); }		/* refill needed */
 	switch (fp->state) {
 		case 0:						/* idle */
+			debug("state(%u)", fp->state);
 			if(*p++ != fp->delim) { return(2); }/* broken */
 			kv_pushp(bseq_t, *seq, &s);			/* create new sequence */
 			fp->state = 1;						/* transition to spaces between delim and name */
 		case 1:
+			debug("state(%u)", fp->state);
 			_strip(p, t, sv);
 			if(_unlikely(p >= t)) { goto _refill; }
 			s->name = (char*)_beg(q, mem->a);
 			fp->state = 2;
 		case 2:
+			debug("state(%u)", fp->state);
 			m = _readline(p, t, q, sv, _id);
 			if(_unlikely(p >= t)) { goto _refill; }
 			p++;								/* skip '\n' or ' ' */
@@ -1976,11 +1981,13 @@ uint64_t bseq_read_fasta(
 			if((m & 0x01) == 0) { goto _seq_head; }
 			fp->state = 3;
 		case 3:
+			debug("state(%u)", fp->state);
 			_strip(p, t, sv);
 			if(_unlikely(p >= t)) { goto _refill; }
 			*q++ = 'C'; *q++ = 'O'; *q++ = 'Z';
 			fp->state = 4;
 		case 4:									/* parsing comment */
+			debug("state(%u)", fp->state);
 			_readline(p, t, q, lv, _id);
 			if(_unlikely(p >= t)) { goto _refill; }	/* refill needed, comment continues */
 			p++;								/* skip '\n' */
@@ -1991,6 +1998,7 @@ uint64_t bseq_read_fasta(
 			s->seq = _beg(q, mem->a);
 			fp->state = 5;
 		case 5:									/* parsing seq */
+			debug("state(%u)", fp->state);
 			while(1) {
 				m = _readline(p, t, q, dv, _trans);
 				if(_unlikely(p >= t)) { m |= fp->is_eof; break; }
@@ -1999,16 +2007,17 @@ uint64_t bseq_read_fasta(
 			}
 			if((m & 0x01) == 0) { goto _refill; }
 			s->l_seq = _term(q, mem->a, s->seq);
-			if(_unlikely(p >= t)) { break; }
 			s->qual = _beg(q, mem->a);
-			if(fp->delim == '>') { goto _qual_tail; }
+			if(fp->delim == '>' || _unlikely(p >= t)) { goto _qual_tail; }
 			fp->state = 6;
 		case 6:
+			debug("state(%u)", fp->state);
 			_skipline(p, t);
 			if(_unlikely(p >= t)) { goto _refill; }
 			p++;
 			fp->state = 7; fp->acc = 0;
 		case 7:									/* parsing qual */
+			debug("state(%u)", fp->state);
 			acc = fp->acc, lim = s->l_seq;
 			if(fp->keep_qual) {
 				while(1) {
@@ -2027,6 +2036,7 @@ uint64_t bseq_read_fasta(
 			}
 			fp->state = 8;
 		case 8:
+			debug("state(%u)", fp->state);
 			if(_unlikely(p >= t)) { goto _refill; }
 			_strip(p, t, lv);
 		_qual_tail:
@@ -2035,12 +2045,14 @@ uint64_t bseq_read_fasta(
 		default:								/* invalid state */
 			return(2);							/* broken */
 	}
-	ret = fp->is_eof; fp->state = 0;			/* back to idle */
+	debug("break loop, state(%u), eof(%u)", fp->state, fp->is_eof)
+	ret = p >= t; fp->state = 0;				/* back to idle */
 	if((uint32_t)s->l_seq < fp->min_len) {
 		seq->n--;
 		q = mem->a + (uint64_t)s->name;
 	}
 _refill:
+	debug("return, p(%p), t(%p)", p, t);
 	fp->p = p; mem->n = q - mem->a;
 	return(ret);
 
