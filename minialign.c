@@ -3114,16 +3114,16 @@ void *mm_idx_post(uint32_t tid, void *arg, void *item)
 		radix_sort_128x(b->w.a.a, b->w.a.a + b->w.a.n);
 
 		/* count keys and preallocate buffer */
-		uint64_t n_keys = 0, l_arr = 1;		/* reserve table size at p[0] */
+		uint64_t n_keys = 0, n_elems = 0;	/* reserve table size at p[0] */
 		for(uint64_t j = 1, n = 1; j <= b->w.a.n; j++, n++) {
 			if(j != b->w.a.n && b->w.a.a[j].u64[0] == b->w.a.a[j - 1].u64[0]) { continue; }
-			l_arr += (n > 1)? n : 0;
+			n_elems += (n > 1)? n : 0;
 			n_keys++;
 			n = 0;
 		}
 		kh_t *h = kh_init(n_keys / KH_THRESH);
-		b->p = (uint64_t *)malloc(sizeof(uint64_t) * l_arr);
-		b->p[0] = l_arr;
+		b->p = (uint64_t *)malloc(sizeof(uint64_t) * (n_elems + 1));
+		b->p[0] = n_elems;
 
 		/* create the (2nd-stage) hash table for the bucket */
 		for(uint64_t j = 1, n = 1, sp = 1; j <= b->w.a.n; j++, n++) {
@@ -3289,8 +3289,10 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
 		mm_idx_bucket_t *b = &mi->bkt[i];
 		// pgwrite(pg, &b->n, sizeof(uint32_t) * 1);			/* value table size */
-		uint64_t n = b->p[0];								/* value table size */
-		pgwrite(pg, b->p, sizeof(uint64_t) * n);			/* value table content, size in b->p[0] */
+		uint64_t n = b->p != NULL ? b->p[0] : 0;
+		pgwrite(pg, &n, sizeof(uint64_t));					/* value table size */
+		if(b->p == NULL) { continue; }
+		pgwrite(pg, &b->p[1], sizeof(uint64_t) * n);		/* value table content, size in b->p[0] */
 		kh_dump((kh_t *)&b->w.h, pg, (khwrite_t)pgwrite);	/* 2nd-stage hash table */
 	}
 
@@ -3359,14 +3361,15 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 
 		/* read value table size */
 		uint64_t n;
-		if(pgread(pg, &n, sizeof(uint64_t) * 1) != sizeof(uint64_t) * 1) {
+		if(pgread(pg, &n, sizeof(uint64_t)) != sizeof(uint64_t)) {
 			goto _mm_idx_load_fail;
 		}
+		if(n == 0) { continue; }
 
 		/* read value table content */
-		b->p = (uint64_t *)malloc(n * sizeof(uint64_t));
+		b->p = (uint64_t *)malloc((n + 1) * sizeof(uint64_t));
 		b->p[0] = n;
-		if(pgread(pg, &b->p[1], sizeof(uint64_t) * (n - 1)) != sizeof(uint64_t) * (n - 1)) {
+		if(pgread(pg, &b->p[1], sizeof(uint64_t) * n) != sizeof(uint64_t) * n) {
 			goto _mm_idx_load_fail;
 		}
 
