@@ -3293,7 +3293,7 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 		if(n > 0) {
 			pgwrite(pg, &b->p[1], sizeof(uint64_t) * n);	/* value table content, size in b->p[0] */
 		}
-		kh_dump((kh_t *)&b->w.h, pg, (khwrite_t)pgwrite);	/* 2nd-stage hash table */
+		kh_dump(b->w.h.a != NULL ? &b->w.h : NULL, pg, (khwrite_t)pgwrite);	/* 2nd-stage hash table */
 	}
 
 	/* dump sequence contents */
