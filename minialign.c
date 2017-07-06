@@ -525,28 +525,30 @@ static _force_inline
 uint64_t kh_allocate(mm128_t *a, uint64_t k, uint64_t mask)
 {
 	#define _poll_bucket(_i, _b0) ({ \
-		int64_t b0 = (_b0); \
-		uint64_t k1; \
+		int64_t _b = (_b0); \
+		uint64_t _k1; \
 		while(1) { \
-			if(b0 <= (int64_t)((k1 = a[_i].u64[0]) & mask)) { break; } \
-			b0 -= (_i + 1) & (mask + 1); \
+			/* test: is_empty(kt) || is_moved(kt) */ \
+			if(_b <= (int64_t)((_k1 = a[_i].u64[0]) & mask)) { break; } \
+			_b -= (_i + 1) & (mask + 1); \
 			_i = (_i + 1) & mask; \
 		} \
-		k1; \
+		_k1;	/* return key */ \
 	})
 
 
 	uint64_t i = k & mask, k0 = k, v0 = 0;
-	uint64_t k1 = _poll_bucket(i, i & mask);
+	uint64_t k1 = _poll_bucket(i, i & mask);		/* search first bucket */
 
 	uint64_t j = i;
-	if(k0 == k1) { return(j); }
+	if(k0 == k1) { return(j); }						/* duplicate key, replace */
 
 	while(k1 + 2 >= 2) {
-		uint64_t v1 = a[i].u64[1];
-		a[i] = (mm128_t){ .u64 = { k0, v0 } };
-		k0 = k1; v0 = v1;
-		k1 = _poll_bucket(i, k0 & mask);
+		uint64_t v1 = a[i].u64[1];					/* load for swap */
+		a[i] = (mm128_t){ .u64 = { k0, v0 } };		/* save previous */
+		k0 = k1; v0 = v1;							/* robinhood swap */
+		i = (i + 1) & mask;							/* advance index */
+		k1 = _poll_bucket(i, k0 & mask);			/* search next bucket */
 	}
 	return(j);
 
