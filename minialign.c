@@ -486,6 +486,7 @@ void kh_clear(kh_t *h)
 	return;
 }
 
+#if 0
 /**
  * @fn kh_put_intl
  * @brief insert key-val pair or replace val if key already exists, returns #bin newly used
@@ -513,6 +514,43 @@ uint64_t kh_put_intl(mm128_t *a, uint64_t k, uint64_t v, uint64_t mask)
 		pos = mask & (pos + 1);
 	}
 	return(0);
+}
+#endif
+
+/**
+ * @fn kh_allocate
+ * @brief allocate a bucket for key, returns the index of allocated bucket.
+ */
+static _force_inline
+uint64_t kh_allocate(mm128_t *a, uint64_t k, uint64_t mask)
+{
+	#define _poll_bucket(_i, _b0) ({ \
+		int64_t b0 = (_b0); \
+		uint64_t k1; \
+		while(1) { \
+			if(b0 <= (int64_t)((k1 = a[_i].u64[0]) & mask)) { break; } \
+			b0 -= (_i + 1) & (mask + 1); \
+			_i = (_i + 1) & mask; \
+		} \
+		k1; \
+	})
+
+
+	uint64_t i = k & mask, k0 = k, v0 = 0;
+	uint64_t k1 = _poll_bucket(i, i & mask);
+
+	uint64_t j = i;
+	if(k0 == k1) { return(j); }
+
+	while(k1 + 2 >= 2) {
+		uint64_t v1 = a[i].u64[1];
+		a[i] = (mm128_t){ .u64 = { k0, v0 } };
+		k0 = k1; v0 = v1;
+		k1 = _poll_bucket(i, k0 & mask);
+	}
+	return(j);
+
+	#undef _poll_bucket
 }
 
 /**
@@ -549,7 +587,10 @@ void kh_extend(kh_t *h)
 
 		uint64_t v = h->a[i].u64[1];	/* load val */
 		h->a[i].u64[0] = UINT64_MAX-1;	/* mark the current bin moved */
-		kh_put_intl(h->a, k, v, mask);	/* insert to new bin */
+		h->a[kh_allocate(h->a, k, mask)] = (mm128_t){
+			.u64 = { k, v }				/* insert to new bin */
+		};
+		// kh_put_intl(h->a, k, v, mask);
 	}
 	return;
 }
@@ -563,7 +604,12 @@ void kh_put(kh_t *h, uint64_t key, uint64_t val)
 	if(h->cnt >= h->ub) {
 		kh_extend(h);
 	}
-	h->cnt += kh_put_intl(h->a, key, val, h->mask);
+	// h->cnt += kh_put_intl(h->a, key, val, h->mask);
+	uint64_t idx = kh_allocate(h->a, key, h->mask);
+	h->cnt += h->a[idx].u64[0] != key;
+	h->a[idx] = (mm128_t){
+		.u64 = { key, val }
+	};
 	return;
 }
 
@@ -588,7 +634,7 @@ uint64_t kh_get(kh_t *h, uint64_t key)
  * @fn kh_get_ptr
  * @brief returns pointer to val or NULL if not found
  */
-static uint64_t const *kh_get_ptr(kh_t *h, uint64_t key)
+static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 {
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
