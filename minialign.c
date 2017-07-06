@@ -2855,9 +2855,7 @@ void mm_idx_destroy(mm_idx_t *mi)
 	/* buckets */
 	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
 		free(mi->bkt[i].p);
-		// free(mi->bkt[i].a.a);
 		free(mi->bkt[i].w.h.a);
-		// kh_destroy((kh_t *)mi->bkt[i].w.h);
 	}
 	free(mi->bkt);
 
@@ -3291,8 +3289,9 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 		// pgwrite(pg, &b->n, sizeof(uint32_t) * 1);			/* value table size */
 		uint64_t n = b->p != NULL ? b->p[0] : 0;
 		pgwrite(pg, &n, sizeof(uint64_t));					/* value table size */
-		if(b->p == NULL) { continue; }
-		pgwrite(pg, &b->p[1], sizeof(uint64_t) * n);		/* value table content, size in b->p[0] */
+		if(n > 0) {
+			pgwrite(pg, &b->p[1], sizeof(uint64_t) * n);	/* value table content, size in b->p[0] */
+		}
 		kh_dump((kh_t *)&b->w.h, pg, (khwrite_t)pgwrite);	/* 2nd-stage hash table */
 	}
 
@@ -3364,12 +3363,11 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 		if(pgread(pg, &n, sizeof(uint64_t)) != sizeof(uint64_t)) {
 			goto _mm_idx_load_fail;
 		}
-		if(n == 0) { continue; }
 
 		/* read value table content */
 		b->p = (uint64_t *)malloc((n + 1) * sizeof(uint64_t));
 		b->p[0] = n;
-		if(pgread(pg, &b->p[1], sizeof(uint64_t) * n) != sizeof(uint64_t) * n) {
+		if(n > 0 && pgread(pg, &b->p[1], sizeof(uint64_t) * n) != sizeof(uint64_t) * n) {
 			goto _mm_idx_load_fail;
 		}
 
