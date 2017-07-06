@@ -625,7 +625,7 @@ uint64_t kh_get(kh_t *h, uint64_t key)
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
 		if((k = h->a[pos].u64[0]) == key) {
-			return h->a[pos].u64[1];
+			return(h->a[pos].u64[1]);
 		}
 		pos = mask & (pos + 1);
 	} while(k + 1 != 0);			/* !is_empty(k) || is_moved(k) */
@@ -641,7 +641,7 @@ static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
 		if((k = h->a[pos].u64[0]) == key) {
-			return &h->a[pos].u64[1];
+			return(&h->a[pos].u64[1]);
 		}
 		pos = mask & (pos + 1);
 	} while(k + 1 != 0);			/* !is_empty(k) || is_moved(k) */
