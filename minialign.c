@@ -609,6 +609,7 @@ void kh_put(kh_t *h, uint64_t key, uint64_t val)
 	// h->cnt += kh_put_intl(h->a, key, val, h->mask);
 	uint64_t idx = kh_allocate(h->a, key, h->mask);
 	h->cnt += h->a[idx].u64[0] != key;
+	h->ub = ((idx - key) & h->mask) > 16 ? 0 : h->ub;
 	h->a[idx] = (mm128_t){
 		.u64 = { key, val }
 	};
