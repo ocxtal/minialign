@@ -3292,6 +3292,7 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 		uint64_t n = b->p != NULL ? b->p[0] : 0;
 		pgwrite(pg, &n, sizeof(uint64_t));					/* value table size */
 		if(b->p == NULL) { continue; }
+		debug("i(%lu), n(%lu)", i, n);
 		pgwrite(pg, &b->p[1], sizeof(uint64_t) * n);		/* value table content, size in b->p[0] */
 		kh_dump((kh_t *)&b->w.h, pg, (khwrite_t)pgwrite);	/* 2nd-stage hash table */
 	}
@@ -3366,6 +3367,7 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 		}
 		if(n == 0) { continue; }
 
+		debug("i(%lu), n(%lu)", i, n);
 		/* read value table content */
 		b->p = (uint64_t *)malloc((n + 1) * sizeof(uint64_t));
 		b->p[0] = n;
