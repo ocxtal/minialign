@@ -581,12 +581,12 @@ void unittest_clean_seqs(void *ctx)
 #define omajinai() \
 	struct unittest_sections_s const *s = (struct unittest_sections_s const *)ctx;
 
-
+/*
 unittest_config(
 	.name = "gaba_wrap",
 	.depends_on = { "gaba" }
 );
-
+*/
 
 unittest()
 {
