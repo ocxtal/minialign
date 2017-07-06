@@ -341,6 +341,7 @@ _static_assert(sizeof(kh_t) == 24);
 
 #define KH_SIZE			( 256 )			/* initial table size */
 #define KH_THRESH		( 0.4 )			/* max occupancy */
+#define KH_DST_MAX		( 16 )			/* max distance from base pos */
 #define kh_size(h)		( (h)->mask + 1 )
 #define kh_cnt(h)		( (h)->cnt )
 #define kh_exist(h, i)	( (h)->a[i].u64[0] + 2 >= 2 )
@@ -609,7 +610,7 @@ void kh_put(kh_t *h, uint64_t key, uint64_t val)
 	// h->cnt += kh_put_intl(h->a, key, val, h->mask);
 	uint64_t idx = kh_allocate(h->a, key, h->mask);
 	h->cnt += h->a[idx].u64[0] != key;
-	h->ub = ((idx - key) & h->mask) > 16 ? 0 : h->ub;
+	h->ub = ((idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
 	h->a[idx] = (mm128_t){
 		.u64 = { key, val }
 	};
