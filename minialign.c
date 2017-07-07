@@ -522,8 +522,9 @@ uint64_t kh_put_intl(mm128_t *a, uint64_t k, uint64_t v, uint64_t mask)
  * @fn kh_allocate
  * @brief allocate a bucket for key, returns the index of allocated bucket.
  */
+typedef struct { uint64_t idx, n; } kh_bidx_t;
 static _force_inline
-uint64_t kh_allocate(mm128_t *a, uint64_t k, uint64_t mask)
+kh_bidx_t kh_allocate(mm128_t *a, uint64_t k, uint64_t mask)
 {
 	#define _poll_bucket(_i, _b0) ({ \
 		int64_t _b = (_b0); \
@@ -542,7 +543,10 @@ uint64_t kh_allocate(mm128_t *a, uint64_t k, uint64_t mask)
 	uint64_t k1 = _poll_bucket(i, i & mask);		/* search first bucket */
 
 	uint64_t j = i;
-	if(k0 == k1) { return(j); }						/* duplicate key, replace */
+	if(k0 == k1) {									/* duplicate key */
+		a[i].u64[0] = k0;
+		return((kh_bidx_t){ i, 0 });
+	}
 
 	while(k1 + 2 >= 2) {
 		uint64_t v1 = a[i].u64[1];					/* load for swap */
@@ -551,7 +555,7 @@ uint64_t kh_allocate(mm128_t *a, uint64_t k, uint64_t mask)
 		i = (i + 1) & mask;							/* advance index */
 		k1 = _poll_bucket(i, k0 & mask);			/* search next bucket */
 	}
-	return(j);
+	return((kh_bidx_t){ j, 1 });
 
 	#undef _poll_bucket
 }
@@ -590,10 +594,10 @@ void kh_extend(kh_t *h)
 
 		uint64_t v = h->a[i].u64[1];	/* load val */
 		h->a[i].u64[0] = UINT64_MAX-1;	/* mark the current bin moved */
-		h->a[kh_allocate(h->a, k, mask)] = (mm128_t){
+		kh_bidx_t b = kh_allocate(h->a, k, mask);
+		h->a[b.idx] = (mm128_t){
 			.u64 = { k, v }				/* insert to new bin */
 		};
-		// kh_put_intl(h->a, k, v, mask);
 	}
 	return;
 }
@@ -607,14 +611,28 @@ void kh_put(kh_t *h, uint64_t key, uint64_t val)
 	if(h->cnt >= h->ub) {
 		kh_extend(h);
 	}
-	// h->cnt += kh_put_intl(h->a, key, val, h->mask);
-	uint64_t idx = kh_allocate(h->a, key, h->mask);
-	h->cnt += h->a[idx].u64[0] != key;
-	h->ub = ((idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
-	h->a[idx] = (mm128_t){
+	kh_bidx_t b = kh_allocate(h->a, key, h->mask);
+	h->cnt += b.n;
+	h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
+	h->a[b.idx] = (mm128_t){
 		.u64 = { key, val }
 	};
 	return;
+}
+
+/**
+ * @fn kh_put_ptr
+ */
+static _force_inline
+uint64_t *kh_put_ptr(kh_t *h, uint64_t key)
+{
+	if(h->cnt >= h->ub) {
+		kh_extend(h);
+	}
+	kh_bidx_t b = kh_allocate(h->a, key, h->mask);
+	h->cnt += b.n;
+	h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
+	return(&h->a[b.idx].u64[1]);
 }
 
 /**
