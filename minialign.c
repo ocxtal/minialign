@@ -3375,7 +3375,7 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 
 		/* read hash table */
 		kh_t *h = kh_load(pg, (khread_t)pgread);
-		b->w.h = *h;
+		if(h != NULL) { b->w.h = *h; }
 		free(h);
 	}
 
