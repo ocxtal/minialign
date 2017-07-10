@@ -104,9 +104,18 @@
 #endif
 
 /**
+ * @macro _swap_u64
+ */
+#ifdef __clang__
+#  define _swap_u64(x)		({ uint64_t _x = (x); __asm__( "bswapq %0" : "+r"(_x) ); _x; })
+#else
+#  define _swap_u64(x)		( (uint64_t)_bswap64(x) )
+#endif
+
+/**
  * @macro _loadu_u64, _storeu_u64
  */
-#define _loadu_u64(p)		( *((uint64_t *)(p)) )
+#define _loadu_u64(p)		( *((uint64_t const *)(p)) )
 #define _storeu_u64(p, e)	{ *((uint64_t *)(p)) = (e); }
 
 /**
