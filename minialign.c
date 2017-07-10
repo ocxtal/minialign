@@ -38,7 +38,7 @@
  * @macro MAX_THREADS
  * @brief max #threads, set larger value if needed
  */
-#define MAX_THREADS					( 64 )
+#define MAX_THREADS					( 128 )
 
 /**
  * @macro UNITTEST
