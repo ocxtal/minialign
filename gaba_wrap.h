@@ -21,6 +21,13 @@
 #include  "unittest.h"
 
 
+/**
+ * @struct redefinition of gaba_dp_context_s
+ * must be declared before gaba.h is included
+ */
+typedef struct gaba_api_s gaba_dp_t;	/** (64) [0] for 32-cell, [1] for 16-cell */
+
+
 #include <stdint.h>							/* uint32_t, uint64_t, ... */
 #include "gaba.h"
 #include "sassert.h"
@@ -83,13 +90,6 @@ _static_assert(sizeof(struct gaba_api_s) == 4 * sizeof(void *));		/* must be con
 #define _api(_dp)				( (struct gaba_api_s const *)(_dp) )
 #define _api_array(_ctx)		( (struct gaba_api_s const (*)[DP_CTX_MAX])(_ctx) )
 
-/**
- * @struct redefinition of gaba_dp_context_s
- */
-struct gaba_dp_context_s {
-	struct gaba_api_s bw[2];	/** (64) [0] for 32-cell, [1] for 16-cell */
-};
-
 
 /* forward declarations */
 #define _decl_cat3_2(a, b, c)	a##_##b##_##c
@@ -102,7 +102,7 @@ struct gaba_dp_context_s {
 
 _decl(gaba_t *, gaba_init, gaba_params_t const *params);
 _decl(void, gaba_clean, gaba_t *ctx);
-_decl(struct gaba_dp_context_s *, gaba_dp_init, gaba_t const *ctx, uint8_t const *alim, uint8_t const *blim);
+_decl(gaba_dp_t *, gaba_dp_init, gaba_t const *ctx, uint8_t const *alim, uint8_t const *blim);
 _decl(void, gaba_dp_flush, gaba_dp_t *self, uint8_t const *alim, uint8_t const *blim);
 _decl(gaba_stack_t const *, gaba_dp_save_stack, gaba_dp_t *self);
 _decl(void, gaba_dp_flush_stack, gaba_dp_t *self, gaba_stack_t const *stack);
@@ -218,7 +218,7 @@ void gaba_clean(
  * @fn gaba_dp_init
  */
 static inline
-struct gaba_dp_context_s *gaba_dp_init(
+gaba_dp_t *gaba_dp_init(
 	gaba_t const *ctx,
 	uint8_t const *alim,
 	uint8_t const *blim)
