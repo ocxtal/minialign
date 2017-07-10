@@ -3736,10 +3736,11 @@ gaba_fill_t const *mm_extend_core(
 	/* fill root */
 	gaba_fill_t const *f = gaba_dp_fill_root(dp, r, rpos, q, qpos);
 	if(_unlikely(f == NULL)) { goto _mm_extend_core_abort; }
+	debug("fill root, max(%ld), status(%x)", f->max, f->status);
 
 	gaba_fill_t const *m = f;					/* max */
 	uint32_t flag = GABA_STATUS_TERM;
-	do {
+	while((flag & f->status) == 0) {
 		/* update section if reached tail */
 		if(f->status & GABA_STATUS_UPDATE_A) { r = rt; }
 		if(f->status & GABA_STATUS_UPDATE_B) { q = qt; }
@@ -3751,8 +3752,9 @@ gaba_fill_t const *mm_extend_core(
 		if(_unlikely((f = gaba_dp_fill(dp, f, r, q)) == NULL)) {
 			goto _mm_extend_core_abort;
 		}
+		debug("fill, max(%ld, %ld), status(%x)", f->max, m->max, f->status);
 		m = (f->max > m->max)? f : m;
-	} while(!(flag & f->status));
+	}
 	return(m);									/* never be null */
 
 _mm_extend_core_abort:							/* out-of-memory in libgaba */
