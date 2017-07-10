@@ -173,8 +173,8 @@ void oom_abort(
 	getrusage(RUSAGE_SELF, &r);
 
 	fprintf(stderr,
-		"[E::%s] Out of memory. (required: %zu B, maxrss: %ld MB)\n",
-		name, req, r.ru_maxrss);
+		"[E::%s] Out of memory. (required: %zu MB, maxrss: %ld MB)\n",
+		name, req / 1024, r.ru_maxrss);
 
 	for(uint64_t i = 0; i < MAX_THREADS + 1; i++) {
 		if(info[i].enabled) {
