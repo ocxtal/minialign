@@ -51,11 +51,11 @@ enum gaba_error {
 	GABA_ERROR_INVALID_CONTEXT 	= -3,	/*!< invalid pointer to the alignment context */
 	GABA_ERROR_OUT_OF_BAND 		= -4,	/*!< traceback failure. using wider band may resolve this type of error. */
 	GABA_ERROR_OUT_OF_MEM 		= -5,	/*!< out of memory error. mostly caused by exessively long queries. */
-	GABA_ERROR_OVERFLOW 			= -6, 	/*!< cell overflow error */
-	GABA_ERROR_INVALID_ARGS 		= -7,	/*!< inproper input arguments. */
+	GABA_ERROR_OVERFLOW 		= -6, 	/*!< cell overflow error */
+	GABA_ERROR_INVALID_ARGS 	= -7,	/*!< inproper input arguments. */
 	/** errors which occur in an initialization function */
 	GABA_ERROR_UNSUPPORTED_ALG 	= -8,	/*!< unsupported combination of algorithm and processor options. use naive implementations instead. */
-	GABA_ERROR_INVALID_COST 		= -9	/*!< invalid alignment cost */
+	GABA_ERROR_INVALID_COST 	= -9	/*!< invalid alignment cost */
 };
 
 /**
@@ -140,7 +140,9 @@ typedef struct gaba_section_s gaba_section_t;
  *
  * @brief an alias to `struct gaba_dp_context_s`.
  */
+#ifndef _GABA_WRAP_H_INCLUDED
 typedef struct gaba_dp_context_s gaba_dp_t;
+#endif
 
 /**
  * @struct gaba_fill_s
