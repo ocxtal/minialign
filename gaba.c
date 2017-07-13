@@ -2148,6 +2148,7 @@ struct leaf_max_pos_s leaf_detect_max_pos(
 	for(int64_t i = 0; i < len; i++) {
 		uint32_t mask_update = mask_max_ptr[i].all & mask_max;
 		if(mask_update != 0) {
+			fprintf(stderr, "p(%lld, %llu)\n", i, tzcnt(mask_update));
 			return((struct leaf_max_pos_s){
 				.p = i,
 				.q = tzcnt(mask_update)
