@@ -129,7 +129,7 @@ typedef struct gaba_section_s gaba_section_t;
 #define gaba_build_section(_id, _base, _len) ( \
 	(struct gaba_section_s){ \
 		.id = (_id), \
-		.base = (_base), \
+		.base = (uint8_t const *)(_base), \
 		.len = (_len) \
 	} \
 )

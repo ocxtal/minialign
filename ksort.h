@@ -150,10 +150,10 @@ typedef const char *ksstr_t;
 				else if (k->e - k->b > 1) rs_insertsort_##name(k->b, k->e); \
 		} \
 	} \
-	static void radix_sort_##name(rstype_t *beg, rstype_t *end) \
+	static void radix_sort_##name(rstype_t *p, size_t l) \
 	{ \
-		if (end - beg <= RS_MIN_SIZE) rs_insertsort_##name(beg, end); \
-		else rs_sort_##name(beg, end, 8, sizeof_key * 8 - 8); \
+		if (l <= RS_MIN_SIZE) rs_insertsort_##name(p, p + l); \
+		else rs_sort_##name(p, p + l, 8, sizeof_key * 8 - 8); \
 	}
 
 #endif

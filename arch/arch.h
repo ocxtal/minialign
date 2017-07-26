@@ -86,14 +86,6 @@
 #endif
 
 
-/* elem_t and move definitions */
-#define _rd(p)				( *((elem_t *)p) )
-#define _wr(p, k)			{ *((elem_t *)p) = (k); }
-#define _ex(k, p)			( ((k)>>((p)*8)) & (WCR_OCC_SIZE-1) )
-#define _p(v)				( (elem_t)(v) )
-#define _e(v)				( (uint64_t)(v) )
-
-
 #endif /* #ifndef _ARCH_H_INCLUDED */
 /**
  * end of arch.h

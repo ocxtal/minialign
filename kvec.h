@@ -89,13 +89,13 @@ int main() {
 		(v).a[(v).n++] = (x);										\
 	} while (0)
 
-#define kv_pushp(type, v, p) do { \
+#define kv_pushp(type, v) ({ \
 		if ((v).n == (v).m) { \
 			(v).m = (v).m? (v).m<<1 : 2; \
 			(v).a = (type*)realloc((v).a, sizeof(type) * (v).m); \
 		} \
-		*(p) = &(v).a[(v).n++]; \
-	} while (0)
+		&(v).a[(v).n++]; \
+	})
 
 #define kv_pushm(type, v, arr, size) do { \
 		if(((v).m - (v).n) < (uint64_t)(size)) { \

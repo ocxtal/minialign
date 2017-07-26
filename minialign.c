@@ -7,7 +7,7 @@
  * @author Hajime Suzuki (original file by Heng Li)
  * @license MIT
  */
-
+#define DEBUG
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -735,15 +735,15 @@ unittest( .name = "kh.io" ) {
 	/* dump */
 	char const *filename = "./minialign.unittest.kh.tmp";
 	gzFile fp = gzopen(filename, "w");
-	assert((void*)fp != NULL);
-	kh_dump(h, (void*)fp, (khwrite_t)gzwrite);
+	assert((void *)fp != NULL);
+	kh_dump(h, (void *)fp, (khwrite_t)gzwrite);
 	gzclose(fp);
 	kh_destroy(h);
 
 	/* restore */
 	fp = gzopen(filename, "r");
-	assert((void*)fp != NULL);
-	h = kh_load((void*)fp, (khread_t)gzread);
+	assert((void *)fp != NULL);
+	h = kh_load((void *)fp, (khread_t)gzread);
 	assert(h != NULL);
 	gzclose(fp);
 
@@ -875,7 +875,7 @@ void *pt_dispatch(void *s)
 			nanosleep(&tv, NULL);			/* no task is available, sleep for a while */
 		}
 		if(pong != PT_EMPTY) {
-			pt_enq(c->out, c->tid, c->wfp(c->tid, (void*)c->warg, pong));
+			pt_enq(c->out, c->tid, c->wfp(c->tid, (void *)c->warg, pong));
 		}
 		if(ping == PT_EXIT) { break; }		/* terminate thread */
 
@@ -884,7 +884,7 @@ void *pt_dispatch(void *s)
 			nanosleep(&tv, NULL);			/* no task is available, sleep for a while */
 		}
 		if(ping != PT_EMPTY) {
-			pt_enq(c->out, c->tid, c->wfp(c->tid, (void*)c->warg, ping));
+			pt_enq(c->out, c->tid, c->wfp(c->tid, (void *)c->warg, ping));
 		}
 		if(pong == PT_EXIT) { break; }		/* terminate thread */
 	}
@@ -934,12 +934,12 @@ pt_t *pt_init(uint32_t nth)
 	/* init queues (note: #elems can be larger for better performance?) */
 	pt->in = (pt_q_t){
 		.lock = UINT32_MAX,
-		.elems = calloc(8 * nth, sizeof(void*)),
+		.elems = calloc(8 * nth, sizeof(void *)),
 		.size = 8 * nth
 	};
 	pt->out = (pt_q_t){
 		.lock = UINT32_MAX,
-		.elems = calloc(8 * nth, sizeof(void*)),
+		.elems = calloc(8 * nth, sizeof(void *)),
 		.size = 8 * nth
 	};
 
@@ -1098,12 +1098,12 @@ unittest( .name = "pt.single" ) {
 	assert(pt != NULL);
 
 	uint64_t icnt = 0, ocnt = 0, inc = 1, *arr[1] = { &inc };
-	pt_stream(pt, pt_unittest_source, (void *)&icnt, pt_unittest_worker, (void**)arr, pt_unittest_drain, (void*)&ocnt);
+	pt_stream(pt, pt_unittest_source, (void *)&icnt, pt_unittest_worker, (void **)arr, pt_unittest_drain, (void *)&ocnt);
 	assert(icnt == 1024, "icnt(%lu)", icnt);
 	assert(ocnt == 512*1025, "ocnt(%lu)", ocnt);
 
 	uint64_t s[4] = { 0 }, *sp[1] = { &s[0] };
-	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp);
+	pt_parallel(pt, pt_unittest_worker, (void **)arr, (void **)sp);
 	assert(s[0] == 1, "d[0](%lu)", s[0]);
 	pt_destroy(pt);
 }
@@ -1113,12 +1113,12 @@ unittest( .name = "pt.multi" ) {
 	assert(pt != NULL);
 
 	uint64_t icnt = 0, ocnt = 0, inc = 1, *arr[4] = { &inc, &inc, &inc, &inc };
-	pt_stream(pt, pt_unittest_source, (void *)&icnt, pt_unittest_worker, (void**)arr, pt_unittest_drain, (void*)&ocnt);
+	pt_stream(pt, pt_unittest_source, (void *)&icnt, pt_unittest_worker, (void **)arr, pt_unittest_drain, (void *)&ocnt);
 	assert(icnt == 1024, "icnt(%lu)", icnt);
 	assert(ocnt == 512*1025, "ocnt(%lu)", ocnt);
 
 	uint64_t s[4] = { 0,1,2,3 }, *sp[4] = { &s[0],&s[1],&s[2],&s[3] };
-	pt_parallel(pt, pt_unittest_worker, (void**)arr, (void**)sp);
+	pt_parallel(pt, pt_unittest_worker, (void **)arr, (void **)sp);
 	for(uint64_t i = 0; i < 4; i++) {
 		assert(s[i] == (i+1), "i(%lu), d[i](%lu)", i, s[i]);
 	}
@@ -1292,7 +1292,7 @@ pg_t *pg_init(FILE *fp, uint32_t nth)
 
 	/* init worker args */
 	for(uint64_t i = 0; i < nth; i++) {
-		pg->c[i] = (void*)pg;
+		pg->c[i] = (void *)pg;
 	}
 	pt_set_worker(pg->pt, pg_worker, pg->c);
 
@@ -1835,7 +1835,6 @@ uint64_t bseq_read_bam(
 	bseq_v *restrict seq,					/* sequence metadata array */
 	uint8_v *restrict mem)					/* block buffer */
 {
-	bseq_t *s;
 	uint8_t *sname, *sseq, *squal, *stag;
 	uint32_t l_tag;
 
@@ -1859,7 +1858,7 @@ uint64_t bseq_read_bam(
 			: 0) + 1
 		+ (fp->l_tags? l_tag : 0) + 1							/* tag section */
 	);
-	kv_pushp(bseq_t, *seq, &s);
+	bseq_t *s = kv_pushp(bseq_t, *seq);
 	kv_reserve(uint8_t, *mem, mem->n + req_size);
 
 	/* set lengths */
@@ -1988,7 +1987,7 @@ uint64_t bseq_read_fasta(
 		case 0:						/* idle */
 			debug("state(%u)", fp->state);
 			if(*p++ != fp->delim) { return(2); }/* broken */
-			kv_pushp(bseq_t, *seq, &s);			/* create new sequence */
+			s = kv_pushp(bseq_t, *seq);			/* create new sequence */
 			fp->state = 1;						/* transition to spaces between delim and name */
 		case 1:
 			debug("state(%u)", fp->state);
@@ -2178,7 +2177,7 @@ bseq_t *bseq_read(
 
 	fp->n_seq += seq.n;
 	*n = seq.n;
-	*base = (void*)mem.a;
+	*base = (void *)mem.a;
 	*size = mem.n;
 	return(seq.a);
 }
@@ -3070,7 +3069,7 @@ void mm_idx_drain_intl(mm_idx_pipeline_t *q, mm_idx_step_t *s)
 		mm128_v *p = &q->mi->bkt[s->a.a[i].u64[0] & mask].w.a;
 		kv_push(mm128_t, *p, s->a.a[i]);
 	}
-	free((void*)s->seq);
+	free((void *)s->seq);
 	free(s->a.a);
 	free(s);
 	return;
@@ -3132,7 +3131,7 @@ void *mm_idx_post(uint32_t tid, void *arg, void *item)
 		}
 
 		/* sort by minimizer */
-		radix_sort_128x(arr, arr + n_arr);
+		radix_sort_128x(arr, n_arr);
 
 		/* count keys and preallocate buffer */
 		uint64_t n_keys = 0, n_elems = 0;	/* reserve table size at p[0] */
@@ -3194,7 +3193,7 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 
 	/* read sequence and collect minimizers */
 	pt_t *pt = pt_init(opt->nth);
-	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void**)p, mm_idx_drain, &pl);
+	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void **)p, mm_idx_drain, &pl);
 	free(p);
 	kv_hq_destroy(pl.hq);
 	opt->log(opt, 9, __func__, "collected minimizers");
@@ -3208,7 +3207,7 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->nth;
 		qq[i] = &q[i];
 	}
-	pt_parallel(pt, mm_idx_post, NULL, (void**)qq);
+	pt_parallel(pt, mm_idx_post, NULL, (void **)qq);
 	pt_destroy(pt);
 	opt->log(opt, 9, __func__, "sorted minimizers");
 
@@ -3307,7 +3306,7 @@ void mm_idx_dump(FILE *fp, mm_idx_t const *mi, uint32_t nth)
 		mm_idx_bucket_t *b = &mi->bkt[i];
 		uint64_t n = b->p != NULL ? b->p[0] : 0;
 		pgwrite(pg, &n, sizeof(uint64_t));					/* value table size */
-		debug("i(%lu), n(%lu)", i, n);
+		debug("i(%llu), n(%llu)", i, n);
 		pgwrite(pg, &b->p[1], sizeof(uint64_t) * n);		/* value table content, size in b->p[0] */
 		kh_dump(&b->w.h, pg, (khwrite_t)pgwrite);			/* 2nd-stage hash table */
 	}
@@ -3381,7 +3380,7 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 			goto _mm_idx_load_fail;
 		}
 
-		debug("i(%lu), n(%lu)", i, n);
+		debug("i(%llu), n(%llu)", i, n);
 		/* read value table content */
 		b->p = (uint64_t *)malloc((n + 1) * sizeof(uint64_t));
 		b->p[0] = n;
@@ -3448,17 +3447,24 @@ typedef struct {
  * @brief alignment pipeline context
  */
 struct mm_align_s {
+	/* output buffer */
 	uint8_t *base, *tail, *p;
 	uint8_t conv[40];				/* binary -> string conv table */
-	mm_idx_t const *mi;
+	mm_printer_t printer;
+
+	/* input */
+	bseq_file_t *fp;
+
+	/* worker */
+	mm_idx_t const *mi;				/* immutable */
 	mm_mapopt_t const *opt;
 	uint32_t *occ;
 	uint32_t n_occ;
-	uint32_t icnt, ocnt, base_qid;
-	bseq_file_t *fp;
-	kvec_t(mm128_t) hq;
-	mm_printer_t printer;
 	gaba_t *gaba;
+
+	/* streaming */
+	uint32_t icnt, ocnt, base_qid;
+	kvec_t(mm128_t) hq;
 	void **t;						/* mm_tbuf_t* array */
 	pt_t *pt;
 };
@@ -3483,21 +3489,54 @@ typedef struct {
  * @brief per-thread buffer (working context)
  */
 typedef struct mm_tbuf_s {
-	mm_align_t const *b;			/* alignment constants */
-	gaba_section_t qf, qr, t;		/* query and tail sections */
-	mm128_v resc;					/* also used as query minimizer vector */
-	mm128_v coef;					/* Hough transform coefficient */
-	v2u32_v intv;					/* intervals on sorted coef */
-	kh_t *pos;						/* alignment dedup hash */
+	// mm_align_t const *b;			/* alignment constants */
+	mm_idx_t const *mi;
+
+	/* frequently-used constants (copied from mm_align_t and mm_mapopt_t) */
+	int32_t aadj, badj;				/* (0, qlen + mi->k) */
+	uint32_t org, thresh;			/* ava filter constants */
+	uint32_t qid;					/* raw qid (used in ava filter) */
+	uint32_t n_occ, occ[16];
+
+	int32_t wlen, glen;				/* chainable window edge length, linkable gap length */
+
+	/* query and reference sections */
+	uint8_t tail[96];				/* zeros */
+	gaba_section_t r[3];			/* [0]: rf, [1]: rr, [3]: empty */
+	gaba_section_t q[3];			/* [0]: qf, [1]: qr, [2]: qf */
+	gaba_section_t t[2];
+
+	/* working buffers */
+	mm128_v resc;					/* rescued seed array, also used as query minimizer vector */
+	mm128_t *presc;
+	mm128_v seed;					/* seed array */
+	uint32_v map;					/* seed -> chain map */
+	v2u32_v chain;					/* intervals (chains) on sorted coef */
+	kh_t pos;						/* alignment dedup hash */
 	gaba_dp_t *dp;					/* alignment work */
+	gaba_trace_params_t trace;		/* lmm contained */
+
+	/* result buffers */
+	v2u32_v reg;					/* (idx, score) */
+	mm128_v bin;
 } mm_tbuf_t;
 
 /**
  * @macro _s, _m
  * @brief extract sign, calc inv
  */
-#define _s(x)		( (x)<0?-1:1)
-#define _m(x)		( (((int32_t)(x))>>31)^(x) )
+#define _sign(x)		( (x)<0?-1:1 )
+#define _smask(x)		( ((int32_t)(x))>>31 )
+#define _umask(x)		( 0x7fffffff & (x) )
+#define _mabs(x)		( _smask(x)^(x) )
+#define _ofs(x)			( (int32_t)0x40000000 - (int32_t)(x) )
+#define _u(x, y)		( ((x) | 0x40000000) - ((y)>>1) )
+#define _v(x, y)		( ((x) | 0x40000000) - ((y)<<1) )
+#define _ud(x, y)		( (x) - ((y)>>1) )
+#define _vd(x, y)		( (x) - ((y)<<1) )
+#define _p(_ptr)		( ((int32_t const *)(_ptr))[0] + ((int32_t const *)(_ptr))[1] )
+#define _q(_ptr)		( ((int32_t const *)(_ptr))[1] - ((int32_t const *)(_ptr))[0] )
+#define _inside(_lb, _x, _ub)		( (uint32_t)((_x) - (_lb)) <= (uint32_t)((_ub) - (_lb)) )
 
 /**
  * @fn mm_expand
@@ -3505,254 +3544,279 @@ typedef struct mm_tbuf_s {
  */
 static _force_inline
 void mm_expand(
+	mm_tbuf_t *self,
 	uint32_t const n, v2u32_t const *r,			/* source array */
-	uint32_t const qid,							/* qid */
-	int32_t const qs,							/* query position */
-	uint32_t const org, uint32_t const thresh,	/* id filter base and threshold (all-versus-all) */
-	mm128_v *restrict coef)						/* dst array */
+	int32_t const qs)							/* query position */
 {
-	int32_t const ofs = 0x40000000;
 	if(n == 0) { return; }
 
 	/* expand array if needed */
-	kv_reserve(mm128_t, *coef, coef->n + n);
+	kv_reserve(mm128_t, self->seed, self->seed.n + n);
+
+	/* prep mask */
+	uint32_t const imask = _smask(qs);
+	int32_t const _qs = _mabs(qs);
 
 	/* iterate over all the collected minimizers */
 	for(uint64_t i = 0; i < n; i++) {
-		if(org + r[i].x[1] - qid < thresh) {
+		uint32_t rid = r[i].x[1];
+		if(self->org + rid - self->qid < self->thresh) {
 			continue;							/* skip if seed is in the lower triangle (all-versus-all) */
 		}
 
-		int32_t rs = (int32_t)r[i].x[0];		/* reference pos */
-		int32_t _qs = (rs>>31) ^ qs;			/* encode pos */
-		int32_t _rs = (rs>>31) ^ rs;
-		coef->a[coef->n++] = (mm128_t){
+		int32_t _rs = r[i].x[0] ^ imask;		/* load reference pos */
+		self->seed.a[self->seed.n++] = (mm128_t){
 			.u32 = {
-				[0] = ofs + _rs - (_qs>>1),		/* coef */
-				[1] = r[i].x[1],				/* rid */
-				[2] = _rs, [3] = _qs			/* encoded ref and query pos */
+				[0] = _u(_rs, _qs), [1] = rid,	/* coef, rid */
+				[2] = _rs, [3] = _qs			/* qs always positive */
 			}
 		};
+		// debug("pos(%d, %d)", _rs, _qs);
 	}
 	return;
 }
 
 /**
- * @fn mm_collect
+ * @fn mm_collect_seed
  * @brief collect minimizers for the query seq
  * (note: branch misprediction penalty and memory access pattern should be alleviated)
  */
 static _force_inline
-void mm_collect(
-	mm_idx_t const *mi,
-	uint32_t const l_seq, uint8_t const *seq,	/* query seq */
-	uint32_t const qid,
-	uint32_t const max_occ,
-	uint32_t const resc_occ,
-	uint32_t const org, uint32_t const thresh,	/* id filter base and threshold */
-	mm128_v *restrict mini,						/* dst minimizer array */
-	mm128_v *restrict coef)						/* saved minimizer array */
+void mm_collect_seed(
+	mm_tbuf_t *self)
 {
-	uint64_t n_resc = 0;
-	mini->n = coef->n = 0;
-	mm_sketch(seq, l_seq, mi->w, mi->k, 0, mini);
+	/* clear array and gather minimizers */
+	self->resc.n = self->seed.n = 0;
+	mm_sketch(self->q[0].base, self->q[0].len, self->mi->w, self->mi->k, 0, &self->resc);
 
-	for(uint64_t i = 0; i < mini->n; i++) {		
+	uint32_t const max_occ = self->occ[self->n_occ - 1];
+	uint32_t const resc_occ = self->occ[0];
+	uint64_t n_rescued = 0;
+	for(uint64_t i = 0; i < self->resc.n; i++) {
 		/* get minimizer at current pos */
 		uint32_t n;
-		v2u32_t const *r = mm_idx_get(mi, mini->a[i].u64[0], &n);
+		v2u32_t const *r = mm_idx_get(self->mi, self->resc.a[i].u64[0], &n);
 		if(n > max_occ) { continue; }			/* skip if exceeds repetitive threshold */
 
-		int32_t qs = (int32_t)mini->a[i].u32[2];
+		int32_t qs = (int32_t)self->resc.a[i].u32[2];
 		if(n > resc_occ) {						/* save if less than max but exceeds current threshold */
-			mm128_t *q = &mini->a[n_resc++];
+			mm128_t *q = &self->resc.a[n_rescued++];
 			q->u32[0] = qs;
 			q->u32[1] = n;
 			q->u64[1] = (uintptr_t)r;
 			continue;
 		}
-		mm_expand(n, r, qid, qs, org, thresh, coef);
+		mm_expand(self, n, r, qs);
 	}
-	mini->n = n_resc;							/* write back rescued array */
+	self->resc.n = n_rescued;					/* write back rescued array */
 	return;
 }
 
-#if 0
 /**
- * @fn mm_chain
- * @brief calculate chain for the collect coef
+ * @fn mm_seed
+ * @brief construct seed array
  */
 static _force_inline
-void mm_chain(
-	uint64_t const l_coef, mm128_t *restrict coef,/* input array (will be modified) */
-	uint32_t const llim, uint32_t const hlim,	/* chainable window size */
-	uint32_t const min,							/* minimum chain length */
-	v2u32_v *restrict intv)						/* dst array */
+void mm_seed(
+	mm_tbuf_t *self,
+	uint64_t cnt)								/* iteration count */
 {
-	int32_t const ofs = 0x40000000;
-	uint32_t const chained = 0x80000000;		/* root and unchained seeds are positive */
-	uint32_t const mask = 0x7fffffff;			/* ~chained */
+	if(cnt == 0) {
+		/* first collect seeds */
+		mm_collect_seed(self);
+		self->presc = self->resc.a;				/* init resc pointer */
+	} else {
+		/* sort rescued array by occurrence */
+		if(cnt == 1) { radix_sort_128x(self->resc.a, self->resc.n); }
 
-	intv->n = 0;
-	uint64_t i = 0;
-	while(i < l_coef) {
-		/* extract root id for the current chain */
-		uint32_t rid = coef[i].u32[1];
+		/* clear previous chain */
+		for(mm128_t *p = self->seed.a, *t = &p[self->seed.n]; p < t; p++) {
+			p->u32[2] = _umask(p->u32[2]);
+		}
 
-		/* extract base coords */
-		int32_t rb = coef[i].u32[2], qb = coef[i].u32[3];
-		for(uint64_t j = i + 1; j < l_coef; j++) {
-			/* terminate when boundary is detected */
-			if(rid != coef[k].u32[1]) { break; }
+		/* append seeds */
+		mm128_t *p = self->presc, *t = &self->resc.a[self->resc.n];
+		while(p < t && p->u32[1] <= self->occ[cnt]) {
+			mm_expand(self, p->u32[1], (v2u32_t const *)p->u64[1], p->u32[0]);
+			p++;
+		}
+		self->presc = p;						/* write back resc pointer */
+	}
 
-			for(uint64_t k = j; k < l_coef; k++) {
-				cn = coef[k].u32[0];
-				rn = coef[k].u32[2];
-				qn = coef[k].u32[3];
+	/* sort seed array */
+	radix_sort_128x(self->seed.a, self->seed.n);
+	return;
+}
 
-				if((qs ^ qn) & chained) { break; }
-				if(cn > rb - qb + rn + (qn>>1)) { break; }
-				if(rn + qn - rb - qb < min) {
-					min = rn + qn - rb - qb;
-					n = k;
+/**
+ * @fn mm_chain
+ * @brief collect chain in self->chain, self->seed must be sorted, self->chain and self->map are not cleared at the head.
+ */
+void mm_chain(
+	mm_tbuf_t *self)
+{
+	/* reserve space for map and chain */
+	kv_reserve(uint32_t, self->map, self->map.n + self->seed.n);
+	kv_reserve(uint32_t, self->chain, self->chain.n + self->seed.n);
+
+	/* iterate over sorted seed array */
+	mm128_t *p = self->seed.a, *t = self->seed.a + self->seed.n;
+	while(p < t) {
+		/* pick up root at p, skip chained */
+		if((int32_t)p->u32[1] < 0) { p++; continue; }
+		uint32_t rid = p->u32[1], mid = -self->map.n++;
+
+		/* q = is the current front, np holds the first unlinked seed */
+		mm128_t *q = p, *np = t;
+
+		/* loop: link seeds which belong to the same (rid, qid) pair */
+		do {
+			/* pick up the next (potential) seed at q + 1 and denote as r */
+			mm128_t *r = q + 1, *nq = t;
+
+			/* load window boundaries */
+			int32_t uub = r->u32[0] + _ud(self->wlen, 0);
+			int32_t vlb = _v(r->u32[2], r->u32[3]);
+			int32_t vub = vlb + _vd(0, self->wlen);
+			int32_t pd = _p(&r->u32[2]) + 2*self->wlen;
+
+			/* loop: pick up the nearest seed */
+			for(mm128_t *r = q; r < t && r->u32[0] < uub; r++) {
+				/* test if r is inside the window */
+				if(!_inside(vlb, _v(r->u32[2], r->u32[3]), vub)) {
+					np = MIN2(np, r); continue;
 				}
+
+				/* update min */
+				if(_p(&r->u32[2]) < pd) {
+					nq = r;
+					pd = _p(&r->u32[2]);
+				}
+
+				/* FIXME: update uub */
+				/*unimplemented*/;
 			}
 
-			coef[n].u32[2] |= chained;
-			j = n;
-		}
+			/* mark q as chained (is the root for the first itr), update q for the next itr */
+			q->u32[1] = mid;
+			if(nq == t) { break; }
+			q = nq;
+		} while(q->u32[1] == rid);
 
-		/* record chain */
-	}
+		/* allocate chain bin, first test if hit at the middle of the existing chain */
+		uint32_t cid = ((int32_t)q->u32[1] < 0) ? ({
+			uint32_t _cid = self->map[-q->u32[1]];
+			q = &self->seed.a[self->chain[_cid].x[1]];
+			_cid;
+		}) : ({
+			uint32_t _cid = self->chain.n++;
+			self->chain.a[_cid] = (v2u32_t){
+				.x = {
+					[0] = _ofs(0),
+					[1] = q - self->seed.a
+				}
+			};
+			_cid;
+		});
 
-	return;
-}
-#endif
+		/* record chain id to map */
+		self->map[-mid] = cid;
 
-/**
- * @fn mm_chain
- * @brief calculate chain for the collect coef
- */
-static _force_inline
-void mm_chain(
-	uint64_t const l_coef, mm128_t *restrict coef,/* input array (will be modified) */
-	uint32_t const llim, uint32_t const hlim,	/* chainable window size */
-	uint32_t const min,							/* minimum chain length */
-	v2u32_v *restrict intv)						/* dst array */
-{
-	int32_t const ofs = 0x40000000;
-	uint32_t const chained = 0x80000000, mask = 0x7fffffff;
-	for(uint64_t i = intv->n = 0, j, k, n; i < l_coef; i = MIN2(j, k)) {
-		uint32_t rid = coef[i].u32[1];
-		int32_t rs = coef[i].u32[2], qs = coef[i].u32[3], re = rs, qe = qs;
-		int32_t l, h, lub = coef[i].u32[0] + llim, hub = rs - (qs<<1) + ofs, hlb = hub - hlim;
-		uint32_t len = 0;
-		for(j = i+1, k = UINT64_MAX, n = i; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
-			if((int32_t)coef[j].u32[2] < 0) continue;
-			re = coef[j].u32[2], qe = coef[j].u32[3];	/* tagged seeds are skipped, no need to mask */
-			if(rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) { k = MIN2(j, k); continue; }	/* out of range, skip */
-			lub = l + llim; hub = h; hlb = h - hlim;
-			coef[j].u32[2] |= chained; n = j;
-		}
-		re = coef[n].u32[2] & mask; qe = coef[n].u32[3]; qs = _m(qs); qe = _m(qe);
-		len = re-rs+_s(qe-qs)*(qe-qs);
-		if(len < min) continue;
-		v2u32_t *p;
-		kv_pushp(v2u32_t, *intv, &p);
-		p->x[0] = (uint32_t)ofs - len; p->x[1] = i;
+		/* update plen */
+		uint32_t plen = _ofs(_p(&q->u32[2]) - _p(&p->u32[2]));
+		self->chain.a[cid].x[0] = MIN2(self->chain.a[cid].x[0], plen);
+
+		/* update p */
+		p = np;
 	}
 	return;
 }
 
 /**
- * @fn mm_short_chain
+ * @fn mm_next
+ * @brief pick up next seed in the upward region of the current chain
  */
 static _force_inline
-uint64_t mm_short_chain(
-	uint64_t const l_coef, mm128_t const *coef,
-	uint32_t const llim, uint32_t const hlim,
-	uint32_t const rid,
-	uint32_t const eidx)
+gaba_pos_pair_t mm_next(
+	mm_tbuf_t *self,
+	gaba_pos_pair_t cp,
+	mm128_t **pp)
 {
-	int32_t const ofs = 0x40000000;
-	uint32_t const chained = 0x80000000, mask = 0x7fffffff;
-	int32_t rs = coef->u32[2] & mask, qs = coef->u32[3], re = rs, qe = qs;
-	int32_t l, h, lub = coef->u32[0] + llim, hub = rs - (qs<<1) + ofs, hlb = hub - hlim;
-	uint32_t len = 0;
-	if(rid != coef->u32[1]) { return(1); }
+	/* load seed array pointers */
+	mm128_t *p = *pp, *h = self->seed.a;
+	uint32_t cid = self->map[-pp->u32[1]];
 
-	uint64_t j, k;
-	for(j = 1, k = UINT64_MAX; j < l_coef && (l = (int32_t)coef[j].u32[0]) < lub; j++) {
-		re = coef[j].u32[2] & mask, qe = coef[j].u32[3];
-		if(rid != coef[j].u32[1] || (qs^qe)&chained || (h = ofs + re - (qe<<1)) < hlb || h > hub) {
-			k = MIN2(j, k);
-			continue;
-		}
-		lub = l + llim; hub = h; hlb = h - hlim;	/* n = j; */
-		if(++len > eidx) { break; }
+	while(p >= h && self->map[-p->u32[1]] == cid) {
+		if(p->u32[0] > ub) { p--; continue; }
+
+		/* hit */
+		*pp = p;				/* write back pointer */
+		return((gaba_pos_pair_t){
+			.apos = p->u32[2],
+			.bpos = p->u32[3]
+		});
 	}
-	return MIN2(j, k);
+
+	/* not found */
+	return((gaba_pos_pair_t){
+		.apos = INT32_MIN,
+		.bpos = INT32_MIN
+	});
 }
 
 /**
- * @fn mm_rescue
+ * @macro _sec_fw, _sec_rv
+ * @brief build forward and reverse section object
  */
-static _force_inline
-uint64_t mm_rescue(
-	mm_idx_seq_t const *ref,
-	uint64_t const l_coef, mm128_t const *coef,
-	mm128_t const *r,
-	uint32_t const llim, uint32_t const hlim,
-	uint32_t const elim, uint32_t const blim,
-	uint32_t const eidx)
-{
-	int32_t const ofs = 0x40000000, mask = 0x7fffffff;
-	int32_t re = r->u32[2], qe = r->u32[3], l, h;
-	int32_t lt = ofs + re - (qe>>1), ht = ofs + re - (qe<<1), lb = lt - blim, le = lt + elim, hb = ht + blim, he = ht - elim, lub = lt + llim;
-	for(uint64_t i = 0; i < l_coef && (int32_t)coef[i].u32[0] < lb; i++) {}
-	for(uint64_t i = 0; i < l_coef && (l = (int32_t)coef[i].u32[0]) < lub; i++) {
-		uint32_t const rs = coef[i].u32[2] & mask, qs = coef[i].u32[3];
-		if((h = ofs + rs - (qs<<1)) > hb || (l < le && h > he && ((l > lt) ^ (h < ht)))) {
-			continue;
-		}
-		return(mm_short_chain(l_coef - i, coef + i, llim, hlim, ref->rid, eidx));
-	}
-	return(1);
-}
+#define _sec_fw(_id, _base, _len) ( \
+	gaba_build_section((_id)<<1, _base, _len) \
+)
+#define _sec_rv(_id, _base, _len) ( \
+	gaba_build_section( \
+		((_id)<<1) + 1, \
+		gaba_rev(&(_base)[(_len) - 1], (uint8_t const *)0x800000000000), \
+		(_len) \
+	) \
+)
 
 /**
  * @fn mm_extend_core
+ * @brief extension loop, returns fill object with max, never returns NULL.
  */
 static _force_inline
 gaba_fill_t const *mm_extend_core(
 	gaba_dp_t *restrict dp,
-	gaba_section_t const *r,
-	uint32_t const rpos,
-	gaba_section_t const *q,
-	uint32_t const qpos,
-	gaba_section_t const *rt,
-	gaba_section_t const *qt)
+	gaba_section_t const *a,
+	gaba_section_t const *at,
+	gaba_section_t const *b,
+	gaba_section_t const *bt,
+	gaba_pos_pair_t s)
 {
 	/* fill root */
-	gaba_fill_t const *f = gaba_dp_fill_root(dp, r, rpos, q, qpos);
+	/*
+	gaba_fill_t const *f = gaba_dp_fill_root(dp,
+		a, a->len - s.apos - 1,
+		b, b->len - s.bpos - 1);
+	*/
+	gaba_fill_t const *f = gaba_dp_fill_root(dp, a, s.apos, b, s.bpos);
 	if(_unlikely(f == NULL)) { goto _mm_extend_core_abort; }
-	debug("fill root, max(%ld), status(%x)", f->max, f->status);
+	debug("fill root, max(%lld), status(%x)", f->max, f->status);
 
 	gaba_fill_t const *m = f;					/* max */
 	uint32_t flag = GABA_STATUS_TERM;
 	while((flag & f->status) == 0) {
 		/* update section if reached tail */
-		if(f->status & GABA_STATUS_UPDATE_A) { r = rt; }
-		if(f->status & GABA_STATUS_UPDATE_B) { q = qt; }
+		if(f->status & GABA_STATUS_UPDATE_A) { a = at; }
+		if(f->status & GABA_STATUS_UPDATE_B) { b = bt; }
 
 		/* update flag for tail detection */
 		flag |= f->status & (GABA_STATUS_UPDATE_A | GABA_STATUS_UPDATE_B);
 
 		/* fill the next section */
-		if(_unlikely((f = gaba_dp_fill(dp, f, r, q)) == NULL)) {
+		if(_unlikely((f = gaba_dp_fill(dp, f, a, b)) == NULL)) {
 			goto _mm_extend_core_abort;
 		}
-		debug("fill, max(%ld, %ld), status(%x)", f->max, m->max, f->status);
+		debug("fill, max(%lld, %lld), status(%x)", f->max, m->max, f->status);
 		m = (f->max > m->max)? f : m;
 	}
 	return(m);									/* never be null */
@@ -3763,91 +3827,188 @@ _mm_extend_core_abort:							/* out-of-memory in libgaba */
 }
 
 /**
+ * @fn mm_extend2
+ */
+static _force_inline
+void mm_extend2(
+	mm_tbuf_t *self,
+	mm128_t *creg,
+	mm128_t *ereg)
+{
+	/* evaluate chain */
+	uint8_t const *lim = (uint8_t const *)0x800000000000;
+	gaba_dp_flush(self->dp, lim, lim);
+	for(uint64_t k = 0; k < self->chain.n; k++) {
+		/* load seed ptr and position */
+		mm128_t *p = &self->seed.a[self->chain.a[k].x[1]];		/* load tail */
+		int32_t rev = _smask(p->u32[2]);
+		gaba_pos_pair_t cp = {
+			.apos = (rev ^ p->u32[2]),
+			.bpos = (rev ^ p->u32[3]) + (rev & self->kk)
+		};
+
+		/* load ref */
+		mm_idx_seq_t const *ref = &self->mi->s.a[p->u32[1] - self->mi->base_rid];
+		self->r[0] = _sec_fw(ref->rid, ref->seq, ref->l_seq);
+		self->r[1] = _sec_rv(ref->rid, ref->seq, ref->l_seq);
+
+		/* reuse seed bin for result collection */
+		self->chain.a[k] = (v2u32_t){
+			.x = {
+				[0] = 0,				/* score */
+				[1] = self->bin.n		/* result bin id */
+			}
+		};
+
+		/* save stack */
+		gaba_stack_t const *stack = gaba_dp_save_stack(self->dp);
+
+		/* until chain length is covered by a set of alignments */
+		for(uint32_t ph = _p(&cp) - _ofs(p->u32[0]), rem = 3, narrow = 0;
+			_p(&cp) > ph && rem > 0;
+			cp = mm_next(self, cp, &p), rem--
+		) {
+			/* init tail as zero padded arrays */
+			gaba_fill_t const *t = (gaba_fill_t const *)tail, *u = t;
+
+			/* upward extension */
+			gaba_pos_pair_t tp = cp;
+			u = mm_extend_core(&self->dp[narrow], &self->r[1], self->t, &self->q[1+rev], self->t, tp);
+
+			/* search pos if extended */
+			if(u->max > 0) { tp = gaba_dp_search_max(&self->dp[narrow], u); }
+			debug("len(%u, %u), score(%lld), (%u, %u) -> (%u, %u)",
+				self->r[0].len, self->q[0].len, u->max, cp.apos, cp.bpos, tp.apos, tp.bpos);
+
+			/* skip if duplicated */
+			if(mm_test_pos(self->pos, &tp).score >= 0) { narrow = 1; continue; }
+
+			/* downward extension: position reversed here */
+			t = mm_extend_core(&self->dp[0], &self->r[0], self->t, &self->q[-rev], self->t,
+				((gaba_pos_pair_t){
+					.apos = self->r[0].len - s.apos - 1,
+					.bpos = self->q[0].len - s.bpos - 1
+				})
+			);
+			if(t->max == 0) { continue; }
+
+			/* generate alignment: positions are reversed again, gaps are left-aligned in the resulting path */
+			gaba_alignment_t const *a = gaba_dp_trace(&self->dp[0], t, NULL, &self->trace);
+			debug("len(%u, %u), score(%lld), (%u, %u) <- (%u, %u)",
+				self->r[0].len, self->q[0].len, u->max, a->sec->apos, a->sec->bpos, tp.apos, tp.bpos);
+
+			/* update current head position */
+			cp = *((gaba_pos_pair_t *)&a->sec->apos);
+
+			/* record alignment */
+			mm_tpos_t h = mm_test_pos(self->pos, &cp);
+
+			mm128_t *b = h.score < a->score ? &self->bin[h.idx] : kv_pushp(mm128_t, &self->bin);
+			b->u32[0] = 0;
+			b->u32[1] = 0;
+			b->u64[1] = (uintptr_t)a;
+			res->x[0] += a->score;					/* FIXME!! */
+
+			/* update hash */
+			mm_record_pos(self->pos, &cp, b);		/* head */
+			mm_record_pos(self->pos, &tp, b);		/* tail */
+
+			/* itr states */
+			rem = 10; narrow = 1;
+		}
+	}
+	return;
+}
+
+/**
  * @fn mm_extend
  */
 static _force_inline
-gaba_alignment_t const *mm_extend(
-	mm_idx_seq_t const *ref,					/* index */
-	uint32_t const l_coef, mm128_t const *coef,	/* chained seeds */
-	uint32_t const k,							/* seed (k-mer) length */
-	uint32_t const min,							/* minimum score threshold */
-	uint32_t const sidx, uint32_t const eidx,	/* seed indices to be evaluated */
-	gaba_dp_t *restrict dp,						/* extension dp context */
-	gaba_section_t const *qf, gaba_section_t const *qr,	/* forward and reverse sections */
-	gaba_section_t const *t,					/* tail section */
-	kh_t *restrict pos,							/* dedup hash */
-	lmm_t *restrict lmm)						/* dp memory arena */
+void mm_extend(
+	mm_tbuf_t *self,
+	mm128_t *creg,
+	mm128_t *ereg)
 {
-	uint32_t const mask = 0x7fffffff;
+	/* evaluate chain */
 	uint8_t const *lim = (uint8_t const *)0x800000000000;
+	gaba_dp_flush(self->dp, lim, lim);
+	for(uint64_t k = 0; k < self->chain.n; k++) {
+		/* reserve reg entry */
+		v2u32_t *res = kv_pushp(v2u32_t, self->reg);
+		*res = (v2u32_t){
+			.x = {
+				[0] = 0,
+				[1] = self->bin.n
+			}
+		};
 
-	/* construct reference-side sections */
-	gaba_section_t const rf = {
-		.id = ref->rid<<1,
-		.len = ref->l_seq,
-		.base = (uint8_t const *)ref->seq
-	};
-	gaba_section_t const rr = {
-		.id = (ref->rid<<1) + 1,
-		.len = ref->l_seq,
-		.base = gaba_rev((uint8_t const *)&ref->seq[ref->l_seq - 1], lim)
-	};
-	gaba_dp_flush(dp, lim, lim);
+		/* load seed ptr */
+		mm128_t *p = &self->seed.a[self->chain.a[k].x[1]];		/* load head */
 
-	uint64_t rid = (uint64_t)ref->rid<<32;
-	for(uint64_t i = sidx; i < eidx && i < l_coef; i++) {
-		if(i != 0 && (int32_t)coef[i].u32[2] >= 0) {
-			continue;	/* skip root seed of another chain */
+		/* load seed position */
+		int32_t rev = _smask(p->u32[2]);
+		gaba_pos_pair_t cp = {
+			.apos = (rev ^ p->u32[2]),
+			.bpos = (rev ^ p->u32[3]) + (rev & self->badj)
+		};
+
+		/* load ref */
+		mm_idx_seq_t const *ref = &self->mi->s.a[p->u32[1] - self->mi->base_rid];
+		self->r[0] = _sec_fw(ref->rid, ref->seq, ref->l_seq);
+		self->r[1] = _sec_rv(ref->rid, ref->seq, ref->l_seq);
+
+		/* save stack */
+		gaba_stack_t const *stack = gaba_dp_save_stack(self->dp);
+
+		/* until chain length is covered by a set of alignments */
+		for(uint64_t ptail = _p(&cp) + _ofs(p->u32[0]), rem = 3, narrow = 0;
+			_p(&cp) < ptail && rem > 0;
+			cp = mm_next(self, cp, &p), rem--
+		) {
+			/* init tail as zero padded arrays */
+			gaba_fill_t const *t = (gaba_fill_t const *)tail, *u = t;
+
+			/* upward extension */
+			gaba_pos_pair_t hp = cp;
+			u = mm_extend_core(&self->dp[narrow], &self->r[1], self->t, &self->q[1+rev], self->t, hp);
+
+			/* search pos if extended */
+			if(u->max > 0) { hp = gaba_dp_search_max(&self->dp[narrow], u); }
+			debug("len(%u, %u), score(%lld), (%u, %u) <- (%u, %u)",
+				self->r[0].len, self->q[0].len, u->max, hp.apos, hp.bpos, cp.apos, cp.bpos);
+
+			/* skip if duplicated */
+			if(mm_test_pos(self->pos, &hp).score >= 0) { narrow = 1; continue; }
+
+			/* downward extension */
+			t = mm_extend_core(&self->dp[0], &self->r[0], self->t, &self->q[-rev], self->t, hp);
+			if(t->max == 0) { continue; }
+
+			/* generate alignment */
+			gaba_alignment_t const *a = gaba_dp_trace(&self->dp[0], NULL, t, &self->trace);
+			debug("len(%u, %u), score(%lld), (%u, %u) -> (%u, %u)",
+				self->r[0].len, self->q[0].len, u->max, hp.apos, hp.bpos, cp.apos, cp.bpos);
+
+			/* record alignment */
+			mm_tpos_t h = mm_test_pos(self->pos, (gaba_pos_pair_t *)&t->apos);
+
+			mm128_t *b = h.score < a->score ? &self->bin[h.idx] : kv_pushp(mm128_t, &self->bin);
+			b->u32[0] = 0;
+			b->u32[1] = 0;
+			b->u64[1] = (uintptr_t)a;
+			res->x[0] += a->score;			/* FIXME!! */
+
+			/* update hash */
+			v2i32_t pv = _loadu_v2i32(&a->sec->apos), lv = _loadu_v2i32(&a->sec->alen);
+			_storeu_v2i32(&cp, _add_v2i32(pv, lv));
+			mm_record_pos(self->pos, &hp, b);
+			mm_record_pos(self->pos, &cp, b);
+
+			/* itr states */
+			rem = 10; narrow = 1;
 		}
-		gaba_stack_t const *stack = gaba_dp_save_stack(dp);
-		int32_t rs = coef[i].u32[2] & mask;
-		int32_t qs = coef[i].u32[3];
-		if(qs < 0) {							/* reverse */
-			gaba_section_t const *temp = qf; qf = qr; qr = temp;	/* swap */
-			qs = (int32_t)(qf->len - _m(qs) + k - 1);
-		}
-
-		/* upward extension */
-		debug("upward extension: pos(%u, %u)", qs, rs);
-		gaba_fill_t const *ff = mm_extend_core(
-			dp,
-			&rr, rr.len - rs - 1,
-			qr, qr->len - qs - 1,
-			t, t
-		);
-		gaba_pos_pair_t p = gaba_dp_search_max(dp, ff);
-
-		/* check duplication */
-		uint64_t key = rid | (uint32_t)(p.apos - (p.bpos>>1));
-		if(kh_get_ptr(pos, key) != NULL) {
-			return(NULL);						/* already evaluated */
-		}
-		kh_put(pos, key, (uintptr_t)NULL);		/* mark evaluated */
-
-		/* downward extension from max */
-		gaba_dp_flush_stack(dp, stack);
-		debug("downward extension: pos(%u, %u)", qr->len - p.bpos - 1, rf.len - p.apos - 1);
-		gaba_fill_t const *fr = mm_extend_core(
-			dp,
-			&rf, rf.len - p.apos - 1,
-			qf, qf->len - p.bpos - 1,
-			t, t
-		);
-		debug("score(%ld)", fr->max);
-
-		if(fr->max < min) { continue; }
-		/* convert alignment to cigar */
-		gaba_alignment_t const *a = gaba_dp_trace(
-			dp,
-			NULL, fr,
-			GABA_TRACE_PARAMS( .lmm = lmm )
-		);
-		if(a != NULL) {
-			kh_put(pos, key, (uintptr_t)a);		/* record head */
-		}
-		return(a);
 	}
-	return(NULL);
+	return;
 }
 
 #define MAPQ_DEC	( 4 )
@@ -3869,7 +4030,7 @@ uint64_t mm_prune_regs(
 	uint32_t min = (uint32_t)(_aln(reg[0])->score * opt->min_ratio);
 	while(_aln(reg[q-1])->score < min) { q--; }
 	for(uint64_t i = q; i < n_reg; i++) {
-		lmm_free(lmm, (void*)reg[i].u64[1]);	/* destroy gaba_alignment_t objects */
+		lmm_free(lmm, (void *)reg[i].u64[1]);	/* destroy gaba_alignment_t objects */
 	}
 	return(q);
 }
@@ -4039,108 +4200,54 @@ uint64_t mm_post_ava(
  */
 static _force_inline
 mm128_t const *mm_align_seq(
-	mm_tbuf_t *b,
-	mm_mapopt_t const *opt,
-	mm_idx_t const *mi,
-	uint32_t const l_seq, uint8_t const *seq,
-	uint32_t const qid,
-	uint32_t const n_occ, uint32_t const *occ,
-	lmm_t *restrict lmm,
-	uint64_t *restrict n_reg)
+	mm_tbuf_t *self,							/* thread-local context */
+	uint32_t const l_seq, uint8_t const *seq,	/* query sequence (read) length and pointer (must be 4-bit encoded) */
+	uint32_t const qid,							/* query sequence id (used in all-versus-all filter) */
+	lmm_t *restrict lmm,						/* memory arena for results */
+	uint64_t *restrict n_reg)					/* #alignments */
 {
-	if(l_seq == 0) { return(NULL); }
+	/* skip unmappable */
+	if(l_seq < self->mi->k || l_seq * self->opt->m < self->opt->min_score) {
+		return(NULL);
+	}
 
 	int32_t min = opt->min;
-	int32_t const ofs = 0x40000000;
-	uint32_t const mask = 0x7fffffff;
-	uint32_t const org = (opt->flag&(MM_AVA|MM_COMP))==MM_AVA? ofs : 0;
-	uint32_t const thresh = (opt->flag&MM_AVA? 1 : 0) + org;
-
-	mm128_v reg = { 0 };
+	mm128_v creg = { 0 }, ereg = { 0 };
 
 	/* prepare section info for alignment */
-	static uint8_t const tail[96] = { 0 };
-	uint8_t const *lim = (uint8_t const *)0x800000000000;
-	gaba_section_t const qf = {
-		.id = 0,
-		.len = l_seq,
-		.base = (uint8_t const *)seq
-	};
-	gaba_section_t const qr = {
-		.id = 1,
-		.len = l_seq,
-		.base = gaba_rev((uint8_t const *)&seq[l_seq - 1], lim)
-	};
-	gaba_section_t const mg = {
-		.id = 4,
-		.len = 32,
-		.base = tail + 32
-	};
+	self->qid = qid;
+	self->q[0] = _sec_fw(qid, seq, l_seq);
+	self->q[1] = _sec_rv(qid, seq, l_seq);
+	self->q[2] = _sec_fw(qid, seq, l_seq);
 
-	b->coef.n = b->resc.n = b->intv.n = 0;
-	kh_clear(b->pos);
-	for(uint64_t i = 0, j = 0; reg.n == 0 && i < n_occ; i++) {
-		if(i == 0) {
-			/* first collect seeds */
-			mm_collect(mi,
-				l_seq, seq,
-				qid,
-				occ[n_occ-1], occ[0],
-				org, thresh,
-				&b->resc,
-				&b->coef
-			);
-		} else {
-			/* sort rescued array by occurrence */
-			if(i == 1) {
-				radix_sort_128x(b->resc.a, b->resc.a + b->resc.n);
-			}
+	/* clear buffers */
+	self->resc.n = 0;
+	self->seed.n = 0;
+	self->map.n = 0;
+	self->chain.n = 0;
+	kh_clear(self->pos);
 
-			/* clear previous chain */
-			for(uint64_t k = 0; k < b->coef.n; k++) {
-				b->coef.a[k].u32[2] &= mask;
-			}
-
-			/* add seeds */
-			for(; j < b->resc.n && b->resc.a[j].u32[1] <= occ[i]; j++) {
-				mm_expand(b->resc.a[j].u32[1], (const v2u32_t*)b->resc.a[j].u64[1], qid, b->resc.a[j].u32[0], org, thresh, &b->coef);
-			}
+	debug("start: qid(%u)", qid);
+	/* seed-chain-extend loop */
+	for(uint64_t i = 0; i < self->n_occ; i++) {
+		if(mm_seed(self, i) == 0) {
+			continue;		/* seed not found */
 		}
-		radix_sort_128x(b->coef.a, b->coef.a + b->coef.n);
-
-		mm_chain(b->coef.n, b->coef.a, opt->llim, opt->hlim, min>>2, &b->intv);
-		radix_sort_64x(b->intv.a, b->intv.a + b->intv.n);
-		if(b->intv.a == 0) continue;
-		for(uint64_t k = 0; k < b->intv.n && ofs - (int32_t)b->intv.a[k].x[0] > min>>2; k++) {
-			gaba_alignment_t const *a = 0;
-			mm128_t *t = &b->coef.a[b->coef.n], r;
-			uint64_t p = b->coef.n-b->intv.a[k].x[1], q = p, l = 0, m = ofs - b->intv.a[k].x[0];
-			mm_idx_seq_t *ref = &mi->s.a[(t-p)->u32[1]-mi->base_rid];
-			do {
-				a = mm_extend(ref, q, t-q, mi->k, min, opt->sidx, opt->eidx, b->dp, &qf, &qr, &mg, b->pos, lmm);
-				if(p == q && a == 0) break;	/* skip chain if first extension did not result in meaningful alignment */
-				r.u32[2] = (t-p)->u32[2] & mask, r.u32[3] = (t-p)->u32[3];
-				if(a != 0) {
-					mm128_t *s;
-					kv_pushp(mm128_t, reg, &s);
-					s->u32[0] = (a->sec->bid&0x01? 0 : 0x10)<<16;
-					s->u32[1] = ofs - a->score;
-					s->u64[1] = (uintptr_t)a;
-					r.u32[2] = ref->l_seq-a->sec->apos; r.u32[3] = (a->sec->bid&0x01)? l_seq-a->sec->bpos : -a->sec->bpos+mi->k+1;
-					min = MAX2(min, opt->min_ratio*a->score);
-					l += a->sec->alen+a->sec->blen;
-				}
-				q = p;
-			} while(l < m && (p -= mm_rescue(ref, p, t-p, &r, opt->llim, opt->hlim, opt->elim, opt->blim, opt->eidx)) < q - 1);
+		if(mm_chain(self) == 0) {
+			continue;		/* chain not found */
+		}
+		if(mm_extend(self, &creg, &ereg) > 0) {
+			break;			/* at least one full-length alignment found */
 		}
 	}
-	*n_reg = reg.n;
+
+	*n_reg = creg.n;
 	if(reg.n == 0) {
 		return(NULL);
 	}
 
 	/* sort by score in reverse order */
-	radix_sort_128x(reg.a, reg.a + reg.n);
+	radix_sort_128x(reg.a, reg.n);
 
 	/* prune alignment whose score is less than min_score threshold */
 	*n_reg = reg.n = mm_prune_regs(opt, lmm, reg.n, reg.a);
@@ -4149,9 +4256,6 @@ mm128_t const *mm_align_seq(
 	*n_reg |= ((opt->flag & MM_AVA)? mm_post_ava : mm_post_map)(opt, reg.n, reg.a)<<32;
 	return(reg.a);
 }
-
-#undef _s
-#undef _m
 
 /**
  * @struct mm_tmpbuf_t
@@ -5412,8 +5516,7 @@ void *mm_align_worker(uint32_t tid, void *arg, void *item)
 	set_info(tid, buf);
 
 	for(uint64_t i = 0; i < s->n_seq; i++) {
-		mm128_t *r;
-		kv_pushp(mm128_t, s->reg, &r);
+		mm128_t *r = kv_pushp(mm128_t, s->reg);
 		uint32_t qid = s->base_qid + i;			/* FIXME: parse qid from name with atoi when -M is set */
 		r->u64[0] = (uintptr_t)mm_align_seq(t,
 			t->b->opt,
@@ -5449,13 +5552,13 @@ void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 		/* mapped */
 		b->printer.mapped(b, &s->seq[i], n_reg, r);
 		for(uint64_t j = 0; j < (uint32_t)n_reg; j++) {
-			lmm_free(s->lmm, (void*)r[j].u64[1]);
+			lmm_free(s->lmm, (void *)r[j].u64[1]);
 		}
 		free(r);
 	}
 	free(s->reg.a);
 	free(s->base);
-	free((void*)s->seq);
+	free((void *)s->seq);
 	lmm_clean(s->lmm);
 	free(s);
 	return;
@@ -5495,7 +5598,7 @@ void mm_tbuf_destroy(mm_tbuf_t *b)
 	if(b == NULL) { return; }
 	free(b->resc.a);
 	free(b->coef.a);
-	free(b->intv.a);
+	free(b->chain.a);
 	kh_destroy(b->pos);
 	gaba_dp_clean(b->dp);
 	free(b);
@@ -5580,7 +5683,7 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 		.p = p,
 
 		/* refs */
-		.mi = mi,
+		.mi = *mi,					/* copy, this will not break consistency because immutable */
 		.opt = opt,
 
 		/* occurrence table */
@@ -5618,7 +5721,7 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 
 	/* initialize threads */
 	for(uint64_t i = 0; i < b->opt->nth; i++) {
-		if((b->t[i] = (void*)mm_tbuf_init(b)) == 0) {
+		if((b->t[i] = (void *)mm_tbuf_init(b)) == 0) {
 			opt->log(opt, 'E', __func__, "internal error. failed to create worker thread. debuginfo: (%lu)", i);
 			goto _fail;
 		}
@@ -5653,7 +5756,7 @@ int mm_align_file(mm_align_t *b, bseq_file_t *fp)
 	b->fp = fp;
 	return(pt_stream(b->pt,
 		mm_align_source, b,
-		mm_align_worker, (void**)b->t,
+		mm_align_worker, (void **)b->t,
 		mm_align_drain, b)
 	);
 }
@@ -5954,7 +6057,7 @@ int mm_mapopt_parse(
 
 		if((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:L:H:I:J:S:E:D:Y:O:PQR:T:U:vh")) < 0) {
 			/* positional argument */
-			kv_push(void*, *v, argv[optind]);
+			kv_push(void *, *v, argv[optind]);
 			optind++;
 			continue;
 		}
@@ -6089,21 +6192,6 @@ void mm_print_help(mm_mapopt_t const *opt)
 }
 
 /**
- * @fn main_align
- */
-static _force_inline
-int main_align(
-	mm_mapopt_t *opt,
-	FILE *fpr,
-	FILE *fpw,
-	ptr_v *query)
-{
-	int ret = 1;
-
-	return(ret);
-}
-
-/**
  * @fn main
  */
 int _export(main)(int argc, char *argv[])
@@ -6155,7 +6243,7 @@ int _export(main)(int argc, char *argv[])
 	/* if not in index construction mode and query-side file is missing, pour stdin to query */
 	if(!fnw && ((fnr && query.n == 0) || (!fnr && query.n == 1 && !(opt->flag&MM_AVA)))) {
 		opt->log(opt, 1, __func__, "query-side input redirected to stdin.");
-		kv_push(void*, query, "-");
+		kv_push(void *, query, "-");
 	}
 
 	/* calculate default window size if not specified */
