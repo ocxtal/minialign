@@ -66,7 +66,7 @@
 /**
  * @macro _loadu_u64, _storeu_u64
  */
-#define _loadu_u64(p)		( *((uint64_t const *)(p)) )
+#define _loadu_u64(p)		({ uint8_t const *_p = (uint8_t const *)(p); *((uint64_t const *)_p); })
 #define _storeu_u64(p, e)	{ *((uint64_t *)(p)) = (e); }
 
 /**
