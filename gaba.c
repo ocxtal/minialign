@@ -49,6 +49,10 @@
 #endif
 
 
+/* gapless alignment filter */
+// #define ENABLE_FILTER
+
+
 /* bandwidth-specific configurations aliasing vector macros */
 #define BW_MAX						32
 #ifndef BW
@@ -649,6 +653,7 @@ void gaba_aligned_free(
  * @brief update direction determiner for the next band
  */
 #define _dir_update(_dir, _vector, _sign) { \
+	/*(_dir).dynamic.acc += (_sign) * (_ext_n(_vector, BW/8) - _ext_n(_vector, BW-1-BW/8));*/ \
 	(_dir).dynamic.acc += (_sign) * (_ext_n(_vector, 0) - _ext_n(_vector, BW-1)); \
 	/*debug("acc(%d), (%d, %d)", (_dir).dynamic.acc, _ext_n(_vector, 0), _ext_n(_vector, BW-1));*/ \
 }
@@ -1099,6 +1104,7 @@ v2i32_t fill_update_section(
 /**
  * @fn fill_gapless_filter
  */
+#if ENABLE_FILTER
 static _force_inline
 int32_t fill_gapless_filter(
 	struct gaba_dp_context_s *self,
@@ -1147,6 +1153,7 @@ int32_t fill_gapless_filter(
 
 	return((cnt > self->tf) ? CONT : TERM);
 }
+#endif
 
 /**
  * @fn fill_create_phantom_block
@@ -1202,9 +1209,11 @@ struct gaba_joint_block_s fill_create_phantom_block(
 		struct gaba_joint_block_s stat = fill_init_fetch(self, prev_tail, blk, ridx);
 
 		/* check if initial vector is filled */
-		if(prev_tail->psum + stat.p >= 0) {
-			stat.stat = fill_gapless_filter(self, stat.blk - 1, stat.stat);
-		}
+		#if ENABLE_FILTER
+			if(prev_tail->psum + stat.p >= 0) {
+				stat.stat = fill_gapless_filter(self, stat.blk - 1, stat.stat);
+			}
+		#endif
 		return(stat);
 	}
 }
@@ -2148,7 +2157,7 @@ struct leaf_max_pos_s leaf_detect_max_pos(
 	for(int64_t i = 0; i < len; i++) {
 		uint32_t mask_update = mask_max_ptr[i].all & mask_max;
 		if(mask_update != 0) {
-			fprintf(stderr, "p(%lld, %llu)\n", i, tzcnt(mask_update));
+			debug("p(%lld, %llu)", i, tzcnt(mask_update));
 			return((struct leaf_max_pos_s){
 				.p = i,
 				.q = tzcnt(mask_update)
@@ -4316,6 +4325,8 @@ struct gaba_dp_context_s *_export(gaba_dp_init)(
 		.size = MEM_INIT_SIZE
 	};
 
+	fprintf(stderr, "dp_init(%p, %p, %p)\n", &self->mem, self->stack_top, self->stack_end);
+
 	/* init seq lims */
 	self->w.r.alim = alim;
 	self->w.r.blim = blim;
@@ -4393,13 +4404,15 @@ struct gaba_stack_s const *_export(gaba_dp_save_stack)(
 	uint8_t *stack_top = self->stack_top;
 	uint8_t *stack_end = self->stack_end;
 
+	debug("save stack, self(%p), mem(%p, %p, %p)", self, self->curr_mem, self->stack_top, self->stack_end);
+
 	/* save */
 	struct gaba_stack_s *stack = (struct gaba_stack_s *)gaba_dp_malloc(
 		self, sizeof(struct gaba_stack_s));
 	stack->mem = mem;
 	stack->stack_top = stack_top;
 	stack->stack_end = stack_end;
-	debug("save stack(%p, %p, %p)", stack->mem, stack->stack_top, stack->stack_end);
+	debug("save stack(%p), (%p, %p, %p)", stack, stack->mem, stack->stack_top, stack->stack_end);
 	return(stack);
 }
 
@@ -4418,7 +4431,7 @@ void _export(gaba_dp_flush_stack)(
 	self->curr_mem = stack->mem;
 	self->stack_top = stack->stack_top;
 	self->stack_end = stack->stack_end;
-	debug("restore stack(%p, %p, %p)", stack->mem, stack->stack_top, stack->stack_end);
+	debug("restore stack, self(%p), mem(%p, %p, %p)", self, stack->mem, stack->stack_top, stack->stack_end);
 	return;
 }
 
