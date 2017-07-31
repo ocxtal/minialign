@@ -340,10 +340,10 @@ typedef struct gaba_trace_params_s gaba_trace_params_t;
 #define GABA_TRACE_NONE				( NULL )
 
 /**
- * @type gaba_alignment_writer
+ * @type gaba_alignment_writer_t
  * @brief pointer to putchar-compatible writer
  */
-typedef int (*gaba_alignment_writer)(int c);
+typedef int (*gaba_alignment_writer_t)(int c);
 
 /**
  * @fn gaba_dp_trace
