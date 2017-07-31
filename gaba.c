@@ -4325,8 +4325,6 @@ struct gaba_dp_context_s *_export(gaba_dp_init)(
 		.size = MEM_INIT_SIZE
 	};
 
-	fprintf(stderr, "dp_init(%p, %p, %p)\n", &self->mem, self->stack_top, self->stack_end);
-
 	/* init seq lims */
 	self->w.r.alim = alim;
 	self->w.r.blim = blim;

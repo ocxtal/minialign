@@ -7,7 +7,7 @@
  * @author Hajime Suzuki (original file by Heng Li)
  * @license MIT
  */
-
+// #define DEBUG
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -550,7 +550,7 @@ kh_bidx_t kh_allocate(v4u32_t *a, uint64_t k, uint64_t v, uint64_t mask)
 	uint64_t i = k & mask, k0 = k, v0 = v;
 	uint64_t k1 = _poll_bucket(i, i & mask);		/* search first bucket */
 
-	if(k0 == k1) {									/* duplicate key */
+	if(k0 == k1) {									/* duplicated key */
 		// a[i].u64[0] = k0;
 		return((kh_bidx_t){ i, 0 });
 	}
@@ -579,6 +579,8 @@ static _force_inline
 void kh_extend(kh_t *h)
 {
 	uint64_t prev_size = h->mask + 1, size = 2 * prev_size, mask = size - 1;
+
+	debug("kh_extend called, new_size(%llx), cnt(%u), ub(%u)", size, h->cnt, h->ub);
 
 	/* update size */
 	h->mask = mask;
@@ -619,6 +621,7 @@ static _force_inline
 void kh_put(kh_t *h, uint64_t key, uint64_t val)
 {
 	if(h->cnt >= h->ub) {
+		debug("trigger extend, cnt(%u), ub(%u)", h->cnt, h->ub);
 		kh_extend(h);
 	}
 	kh_bidx_t b = kh_allocate(h->a, key, val, h->mask);
@@ -637,10 +640,11 @@ static _force_inline
 uint64_t *kh_put_ptr(kh_t *h, uint64_t key)
 {
 	if(h->cnt >= h->ub) {
+		debug("trigger extend, cnt(%u), ub(%u)", h->cnt, h->ub);
 		kh_extend(h);
 	}
 	kh_bidx_t b = kh_allocate(h->a, key, KH_INIT_VAL, h->mask);
-	debug("allocated hash bin (%llu, %llu), (%llx, %llx)", b.idx, b.n, h->a[b.idx].u64[0], h->a[b.idx].u64[1]);
+	debug("allocated hash bin (%llu, %llu), (%llx, %llx), dst(%lld)", b.idx, b.n, h->a[b.idx].u64[0], h->a[b.idx].u64[1], (b.idx - key) & h->mask);
 
 	h->cnt += b.n;
 	h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
@@ -3629,14 +3633,14 @@ typedef struct mm_tbuf_s {
 
 	/* copied */
 	uint64_t flag;
-	uint32_t n_occ, occ[MAX_FRQ_NUM + 1];
+	uint32_t _pad1, n_occ, occ[MAX_FRQ_NUM + 1];
 	int32_t m, x, wlen, glen;		/* chainable window edge length, linkable gap length */
 	float min_ratio;
 	uint32_t min_score, max_cnt;
 
 	/* initialized in mm_init_query */
-	uint32_t qid;					/* raw qid (used in ava filter) */
 	uint32_t adj;					/* qlen + mi->k */
+	uint32_t rid, qid;				/* raw qid (used in ava filter) */
 
 	/* query and reference sections (initialized in mm_init_query) */
 	uint8_t tail[96];				/* zeros */
@@ -3650,7 +3654,7 @@ typedef struct mm_tbuf_s {
 	mm_seed_v seed;					/* seed array */
 	mm_map_v map;					/* (seed -> chain id, seed->rid) map */
 	mm_chain_v chain;				/* intervals (chains) on sorted coef, (sid, _ofs(plen)) */
-	uint32_t n_res, pad;			/* #alignments collected */
+	uint32_t n_res, _pad2;			/* #alignments collected */
 	ptr_v bin;						/* gaba_alignment_t* array */
 	kh_t pos;						/* alignment dedup hash */
 	gaba_dp_t *dp;					/* alignment work */
@@ -3673,6 +3677,7 @@ typedef struct mm_tbuf_s {
 #define _p(_ptr)		( ((int32_t const *)(_ptr))[0] + ((int32_t const *)(_ptr))[1] )
 #define _q(_ptr)		( ((int32_t const *)(_ptr))[1] - ((int32_t const *)(_ptr))[0] )
 #define _inside(_lb, _x, _ub)		( (uint32_t)((_x) - (_lb)) <= (uint32_t)((_ub) - (_lb)) )
+#define _key(x, y)		( (x) ^ ((x)>>32) ^ (y) )
 
 /**
  * @fn mm_expand
@@ -3806,7 +3811,7 @@ mm_seed_t *mm_chain_core(
 	mm_seed_t *p)
 {
 	/* q is the current front, np holds the first unlinked seed */
-	mm_seed_t *q = p, *t = self->seed.a + self->seed.n, *np = p + 1;
+	mm_seed_t *q = p, *t = self->seed.a + self->seed.n, *np = p + 1;	/* FIXME: update np in the loop for better performance */
 
 	/* save rid, allocate chain bin and map bin */
 	uint32_t rid = q->rid, mid = ~self->map.n++;	/* must be NOT (not NEG) to avoid collision at zero */
@@ -3923,22 +3928,27 @@ gaba_pos_pair_t mm_next(
 	/* load seed array pointers */
 	mm_seed_t *p = *pp, *h = self->seed.a;
 	uint32_t const cid = self->map.a[~p->rid].cid;
+	uint32_t const rid = self->map.a[~p->rid].rid;
 	uint32_t const ub = _u(cp.apos, cp.bpos);
 
 	/* skip covered, FIXME: use binary search for better performance */
-	while(p >= h && p->upos > ub) { p--; }
+	while(--p >= h && p->upos > ub && self->map.a[~p->rid].rid == rid) {}
+
+	debug("search start i(%ld)", p - h);
 
 	/* test uncovered */
-	while(p >= h && _p(&p->apos) > ppos) {
-		debug("test i(%ld), (%u, %u), u(%d)", p - h, p->apos, p->bpos, p->upos);
-		if(self->map.a[~(p--)->rid].cid != cid) { continue; }
+	while(p >= h && _p(&p->apos) >= ppos && self->map.a[~p->rid].rid == rid) {
+		debug("test i(%ld), cid(%u, %u), (%u, %u), u(%d)", p - h, self->map.a[~p->rid].cid, cid, p->apos, p->bpos, p->upos);
+		if(self->map.a[~p->rid].cid != cid) { p--; continue; }
 
 		/* hit */
 		debug("found next seed at i(%ld), (%u, %u), u(%d)", p - h, p->apos, p->bpos, p->upos);
 		*pp = p;				/* write back pointer */
+
+		int32_t rev = _smask(p->apos);
 		return((gaba_pos_pair_t){
-			.apos = p->apos,
-			.bpos = p->bpos
+			.apos = (rev ^ p->apos),
+			.bpos = (rev ^ p->bpos) + (rev & self->adj)
 		});
 	}
 
@@ -3961,7 +3971,8 @@ int64_t mm_test_pos(
 	mm_res_t *res,
 	gaba_pos_pair_t pos)
 {
-	v2u32_t *h = (v2u32_t *)kh_get_ptr(&self->pos, _loadu_u64(&pos));
+	uint64_t id = _swap_u64(_loadu_u64(&self->rid));
+	v2u32_t *h = (v2u32_t *)kh_get_ptr(&self->pos, _key(_loadu_u64(&pos), id));
 	if(h == NULL) { return(-1); }
 	if(h->u64[0] == KH_INIT_VAL) { return(0); }
 
@@ -3977,30 +3988,33 @@ void mm_mark_pos(
 	mm_tbuf_t *self,
 	gaba_pos_pair_t pos)
 {
-	kh_put(&self->pos, _loadu_u64(&pos), KH_INIT_VAL);
+	uint64_t id = _swap_u64(_loadu_u64(&self->rid));
+	kh_put(&self->pos, _key(_loadu_u64(&pos), id), KH_INIT_VAL);
 	return;
 }
 
 /**
  * @fn mm_record
+ * @brief record alignment, returns nonzero if new head position found, zero the alignment is duplicated
  */
 static _force_inline
-gaba_pos_pair_t mm_record(
+uint64_t mm_record(
 	mm_tbuf_t *self,
 	mm_res_t *res,
 	gaba_alignment_t const *a)
 {
 	/* put head and tail positions to hash */
-	uint64_t id = _swap_u64(_loadu_u64(&a->sec->aid));
-	uint64_t hkey = _loadu_u64(&a->sec->apos) ^ id;
-	uint64_t tkey = (_loadu_u64(&a->sec->apos) + _loadu_u64(&a->sec->alen)) ^ id;
+	uint64_t id = _swap_u64(_loadu_u64(&self->rid));
+	uint64_t hkey = _key(_loadu_u64(&a->sec->apos), id);
+	uint64_t tkey = _key(_loadu_u64(&a->sec->apos) + _loadu_u64(&a->sec->alen), id);
 	debug("hash key, h(%llx), t(%llx)", hkey, tkey);
 
 	v2u32_t *h = (v2u32_t *)kh_put_ptr(&self->pos, hkey);
 	v2u32_t *t = (v2u32_t *)kh_put_ptr(&self->pos, tkey);
+	uint64_t new = h->u64[0] == KH_INIT_VAL;
 
 	/* open new bin for aln, reuse if the head hit an existing one */
-	uint32_t bid = (h->u64[0] == KH_INIT_VAL) ? kv_push(void *, self->bin, (void *)a) : h->u32[1];
+	uint32_t bid = new ? kv_push(void *, self->bin, (void *)a) : h->u32[1];
 	gaba_alignment_t const **b = (gaba_alignment_t const **)&self->bin.a[bid];
 
 	debug("id(%u, %u)", a->sec->aid, a->sec->bid);
@@ -4034,7 +4048,7 @@ gaba_pos_pair_t mm_record(
 			}
 		};
 	}
-	return(*((gaba_pos_pair_t *)&a->sec->apos));
+	return(new);
 }
 
 /**
@@ -4107,15 +4121,20 @@ uint64_t mm_extend(
 	for(uint64_t k = 0; k < self->chain.n; k++) {
 		/* load seed ptr and position */
 		mm_seed_t *p = &self->seed.a[self->chain.a[k].sid];		/* load tail */
-		int32_t rev = _smask(p->apos), plen = _ofs(self->chain.a[k].plen);
+		int32_t plen = _ofs(self->chain.a[k].plen);
+		if(plen == 0) { continue; }
+
+		int32_t rev = _smask(p->apos);
 		gaba_pos_pair_t cp = {
 			.apos = (rev ^ p->apos),
 			.bpos = (rev ^ p->bpos) + (rev & self->adj)
 		};
-		debug("chain(%llu), rev(%d), plen(%d), (%d, %d)", k, rev, plen, cp.apos, cp.bpos);
+		debug("chain(%llu), cid(%u), rev(%d), plen(%d), (%d, %d)", k, self->map.a[~p->rid].cid, rev, plen, cp.apos, cp.bpos);
 
 		/* load ref */
-		mm_idx_seq_t const *ref = &self->mi.s.a[self->map.a[~p->rid].rid - self->mi.base_rid];
+		uint32_t rid = self->map.a[~p->rid].rid;
+		mm_idx_seq_t const *ref = &self->mi.s.a[rid - self->mi.base_rid];
+		self->rid = rid;
 		self->r[0] = _sec_fw(ref->rid, ref->seq, ref->l_seq);
 		self->r[1] = _sec_rv(ref->rid, ref->seq, ref->l_seq);
 
@@ -4131,8 +4150,8 @@ uint64_t mm_extend(
 
 		/* loop: issue extension until whole chain is covered by alignments */
 		for(uint32_t ppos = _p(&cp) - plen, rem = 3, narrow = 0;
-			_p(&cp) > ppos && rem > 0;
-			cp = mm_next(self, cp, ppos, &p), rem--
+			rem > 0 && _p(&cp) >= ppos;
+			cp = --rem > 0 ? mm_next(self, cp, ppos, &p) : cp
 		) {
 			/* reset stack */
 			gaba_dp_flush(self->dp, lim, lim);
@@ -4163,7 +4182,7 @@ uint64_t mm_extend(
 					.bpos = self->q[0].len - tp.bpos - 1
 				})
 			);
-			if(t->max == 0) {					/* max == 0 indicates alignment was not found */
+			if(t->max < self->min_score) {		/* max == 0 indicates alignment was not found */
 				mm_mark_pos(self, tp);			/* mark evaluated but not found */
 				continue;
 			}
@@ -4178,17 +4197,23 @@ uint64_t mm_extend(
 				self->r[0].len, self->q[0].len, t->max, a->sec->apos, a->sec->bpos, tp.apos, tp.bpos);
 
 			/* record alignment, update current head position */
-			cp = mm_record(self, res, a);
+			if(mm_record(self, res, a)) { rem = 10; }
+			if(_p(&a->sec->apos) < ppos) {
+				debug("full length captured, cp(%u, %u), p(%u), ppos(%u)", cp.apos, cp.bpos, _p(&a->sec->apos), ppos);
+				break;							/* full length covered, break before calling mm_next */
+			}
 
 			/* update itr states */
-			rem = 10; narrow = 1;
+			cp = *((gaba_pos_pair_t *)&a->sec->apos);
+			narrow = 1;
 			debug("split detected, try narrower(%u), cp(%u, %u), p(%u), ppos(%u), rem(%u)", narrow, cp.apos, cp.bpos, _p(&cp), ppos, rem);
 		}
 
 		/* discard if the score did not exceed the minimum threshold */
-		if(res->score > _ofs(self->min_score)) {	/* _ofs() inverts the sign */
-			self->bin.n -= MM_BIN_N;
+		if(res->score > _ofs(self->min_score)) {/* _ofs() inverts the sign */
+			self->bin.n = bid;
 			self->n_res--;
+			debug("remove bin, bid(%llu), n_res(%u)", self->bin.n, self->n_res);
 		}
 	}
 	return(self->n_res);
