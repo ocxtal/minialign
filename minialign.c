@@ -539,7 +539,8 @@ kh_bidx_t kh_allocate(v4u32_t *a, uint64_t k, uint64_t v, uint64_t mask)
 		uint64_t _k1; \
 		while(1) { \
 			/* test: is_empty(kt) || is_moved(kt) */ \
-			if(_b <= (int64_t)((_k1 = a[_i].u64[0]) & mask)) { break; } \
+			_k1 = a[_i].u64[0]; \
+			if(_b <= (int64_t)(_k1 & mask) + (_k1 + 2 < 2)) { break; } \
 			_b -= (_i + 1) & (mask + 1); \
 			_i = (_i + 1) & mask; \
 		} \
@@ -626,7 +627,7 @@ void kh_put(kh_t *h, uint64_t key, uint64_t val)
 	}
 	kh_bidx_t b = kh_allocate(h->a, key, val, h->mask);
 	h->cnt += b.n;
-	h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
+	// h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
 	h->a[b.idx] = (v4u32_t){
 		.u64 = { key, val }
 	};
@@ -647,7 +648,7 @@ uint64_t *kh_put_ptr(kh_t *h, uint64_t key)
 	debug("allocated hash bin (%llu, %llu), (%llx, %llx), dst(%lld)", b.idx, b.n, h->a[b.idx].u64[0], h->a[b.idx].u64[1], (b.idx - key) & h->mask);
 
 	h->cnt += b.n;
-	h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
+	// h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
 	return(&h->a[b.idx].u64[1]);
 }
 
@@ -1069,9 +1070,11 @@ int pt_parallel(
 	for(uint64_t i = 1; i < pt->nth; i++) {
 		pt_enq(pt->c->in, pt->c->tid, item? item[i] : NULL);
 	}
+	debug("pushed items");
 
 	/* process the first one in the master (parent) thread */
 	wfp(pt->c->tid, warg? warg[0] : NULL, item? item[0] : NULL);
+	debug("finished master");
 
 	/* wait for the children done */
 	for(uint64_t i = 1; i < pt->nth; i++) {
@@ -1080,6 +1083,7 @@ int pt_parallel(
 			nanosleep(&tv, NULL);	/* wait for a while */
 			/* sched_yield(); */
 		}
+		debug("joined i(%llu)", i);
 	}
 	return 0;
 }
@@ -3226,7 +3230,7 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 	kv_hq_init(pl.hq);
 
 	/* create thread contexts */
-	p = (mm_idx_pipeline_t**)calloc(opt->nth, sizeof(mm_idx_pipeline_t*));
+	p = (mm_idx_pipeline_t **)calloc(opt->nth, sizeof(mm_idx_pipeline_t*));
 	for(uint64_t i = 0; i < opt->nth; i++) { p[i] = &pl; }
 
 	/* read sequence and collect minimizers */
@@ -3237,12 +3241,12 @@ mm_idx_t *mm_idx_gen(mm_mapopt_t const *opt, bseq_file_t *fp)
 	opt->log(opt, 9, __func__, "collected minimizers");
 
 	/* sort minimizers */
-	mm_idx_post_t *q = (mm_idx_post_t*)calloc(opt->nth, sizeof(mm_idx_post_t));
-	mm_idx_post_t **qq = (mm_idx_post_t**)calloc(opt->nth, sizeof(mm_idx_post_t*));
+	mm_idx_post_t *q = (mm_idx_post_t *)calloc(opt->nth, sizeof(mm_idx_post_t));
+	mm_idx_post_t **qq = (mm_idx_post_t **)calloc(opt->nth, sizeof(mm_idx_post_t*));
 	for(uint64_t i = 0; i < opt->nth; i++) {
 		q[i].mi = pl.mi;
-		q[i].from = (1ULL<<pl.mi->b)*i/opt->nth;
-		q[i].to = (1ULL<<pl.mi->b)*(i+1)/opt->nth;
+		q[i].from = (1ULL<<pl.mi->b) * i / opt->nth;
+		q[i].to = (1ULL<<pl.mi->b) * (i + 1) / opt->nth;
 		qq[i] = &q[i];
 	}
 	pt_parallel(pt, mm_idx_post, NULL, (void **)qq);
