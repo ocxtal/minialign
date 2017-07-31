@@ -81,13 +81,14 @@ int main() {
 		memcpy((v1).a, (v0).a, sizeof(type) * (v0).n);		\
 	} while (0)												\
 
-#define kv_push(type, v, x) do {									\
+#define kv_push(type, v, x) ({										\
 		if ((v).n == (v).m) {										\
 			(v).m = (v).m? (v).m<<1 : 2;							\
 			(v).a = (type*)realloc((v).a, sizeof(type) * (v).m);	\
 		}															\
 		(v).a[(v).n++] = (x);										\
-	} while (0)
+		(v).n - 1;													\
+	})
 
 #define kv_pushp(type, v) ({ \
 		if ((v).n == (v).m) { \
@@ -97,7 +98,7 @@ int main() {
 		&(v).a[(v).n++]; \
 	})
 
-#define kv_pushm(type, v, arr, size) do { \
+#define kv_pushm(type, v, arr, size) ({ \
 		if(((v).m - (v).n) < (uint64_t)(size)) { \
 			(v).m = kv_max2((v).m * 2, (v).n + (size));		\
 			(v).a = (type*)realloc((v).a, sizeof(*(v).a) * (v).m);	\
@@ -106,7 +107,8 @@ int main() {
 			(v).a[(v).n + _i] = (arr)[_i]; \
 		} \
 		(v).n += (uint64_t)(size); \
-	} while(0)
+		(v).n - (uint64_t)(size); \
+	})
 
 #define kv_a(type, v, i) ((v).m <= (size_t)(i)?						\
 						  ((v).m = (v).n = (i) + 1, kv_roundup32((v).m), \
