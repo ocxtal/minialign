@@ -7,7 +7,7 @@
  * @author Hajime Suzuki (original file by Heng Li)
  * @license MIT
  */
-#define DEBUG
+
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -39,6 +39,12 @@
  * @brief max #threads, set larger value if needed
  */
 #define MAX_THREADS					( 128 )
+
+/**
+ * @macro MAX_FRQ_NUM
+ * @brief max #frq in seed filtering
+ */
+#define MAX_FRQ_NUM					( 7 )
 
 /**
  * @macro UNITTEST
@@ -321,8 +327,8 @@ typedef struct { size_t n, m; void **a; } ptr_v;
 #include "ksort.h"
 #define sort_key_128x(a)		( (a).u64[0] )
 KRADIX_SORT_INIT(128x, v4u32_t, sort_key_128x, 8) 
-#define sort_key_128z(a)		( (a).u32[0] )
-KRADIX_SORT_INIT(128z, v4u32_t, sort_key_128z, 4)
+#define sort_key_64x(a)			( (a).u32[0] )
+KRADIX_SORT_INIT(64x, v2u32_t, sort_key_64x, 4)
 KSORT_INIT_GENERIC(uint32_t)
 
 
@@ -526,7 +532,7 @@ uint64_t kh_put_intl(v4u32_t *a, uint64_t k, uint64_t v, uint64_t mask)
  */
 typedef struct { uint64_t idx, n; } kh_bidx_t;
 static _force_inline
-kh_bidx_t kh_allocate(v4u32_t *a, uint64_t k, uint64_t mask)
+kh_bidx_t kh_allocate(v4u32_t *a, uint64_t k, uint64_t v, uint64_t mask)
 {
 	#define _poll_bucket(_i, _b0) ({ \
 		int64_t _b = (_b0); \
@@ -541,22 +547,25 @@ kh_bidx_t kh_allocate(v4u32_t *a, uint64_t k, uint64_t mask)
 	})
 
 
-	uint64_t i = k & mask, k0 = k, v0 = KH_INIT_VAL;
+	uint64_t i = k & mask, k0 = k, v0 = v;
 	uint64_t k1 = _poll_bucket(i, i & mask);		/* search first bucket */
 
 	if(k0 == k1) {									/* duplicate key */
-		a[i].u64[0] = k0;
+		// a[i].u64[0] = k0;
 		return((kh_bidx_t){ i, 0 });
 	}
 
 	uint64_t j = i;
+	a[i].u64[0] = k0;								/* update key */
 	while(k1 + 2 >= 2) {
 		uint64_t v1 = a[i].u64[1];					/* load for swap */
-		a[i] = (v4u32_t){ .u64 = { k0, v0 } };		/* save previous */
+		a[i].u64[1] = v0;							/* save previous value */
 		k0 = k1; v0 = v1;							/* robinhood swap */
 		i = (i + 1) & mask;							/* advance index */
 		k1 = _poll_bucket(i, k0 & mask);			/* search next bucket */
+		a[i].u64[0] = k0;							/* update key */
 	}
+	a[i].u64[1] = v0;								/* save previous value */
 	return((kh_bidx_t){ j, 1 });
 
 	#undef _poll_bucket
@@ -598,10 +607,7 @@ void kh_extend(kh_t *h)
 		h->a[i] = (v4u32_t){			/* mark the current bin moved */
 			.u64 = { UINT64_MAX-1, KH_INIT_VAL }
 		};
-		kh_bidx_t b = kh_allocate(h->a, k, mask);
-		h->a[b.idx] = (v4u32_t){
-			.u64 = { k, v }				/* insert to new bin */
-		};
+		kh_allocate(h->a, k, v, mask);
 	}
 	return;
 }
@@ -615,7 +621,7 @@ void kh_put(kh_t *h, uint64_t key, uint64_t val)
 	if(h->cnt >= h->ub) {
 		kh_extend(h);
 	}
-	kh_bidx_t b = kh_allocate(h->a, key, h->mask);
+	kh_bidx_t b = kh_allocate(h->a, key, val, h->mask);
 	h->cnt += b.n;
 	h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
 	h->a[b.idx] = (v4u32_t){
@@ -633,7 +639,9 @@ uint64_t *kh_put_ptr(kh_t *h, uint64_t key)
 	if(h->cnt >= h->ub) {
 		kh_extend(h);
 	}
-	kh_bidx_t b = kh_allocate(h->a, key, h->mask);
+	kh_bidx_t b = kh_allocate(h->a, key, KH_INIT_VAL, h->mask);
+	debug("allocated hash bin (%llu, %llu), (%llx, %llx)", b.idx, b.n, h->a[b.idx].u64[0], h->a[b.idx].u64[1]);
+
 	h->cnt += b.n;
 	h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
 	return(&h->a[b.idx].u64[1]);
@@ -2627,7 +2635,7 @@ typedef struct mm_mapopt_s {
 	/* index params */
 	uint32_t k, w, b;
 	uint32_t n_frq;
-	float frq[16];
+	float frq[MAX_FRQ_NUM + 1];
 
 	/* chain and extension */
 	int32_t m, x, gi, ge, xdrop, wlen, glen;
@@ -2718,14 +2726,15 @@ mm_mapopt_t *mm_mapopt_init(void)
 		/* -V */ .verbose = 1,
 		/* -f, -k, -w, -b, -T */ .k = 15, .w = 16, .b = 14, .flag = 0,
 		/* -a, -b, -p, -q, -Y */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
-		/* -s, -m */ .min = 50, .min_ratio = 0.3,
+		/* -s, -m */ .min_score = 50, .min_ratio = 0.3,
 		/* -M */ .max_cnt = 0,
 		/* -f */ .n_frq = 3, .frq[0] = 0.05, .frq[1] = 0.01, .frq[2] = 0.001,
 		/* -t */ .nth = 1,
 		/* -R */ .rg_line = NULL, .rg_id = NULL,
 
-		/* -S, -E, -L, -H */.sidx = 0, .eidx = 3, .rmin = 0, .qmin = 0,
-		.hlim = 7000, .llim = 7000, .blim = 0, .elim = 200,
+		/* -L, -H */.rmin = 0, .qmin = 0,
+		/* -W, -G */.wlen = 7000, .glen = 7000,
+		// .hlim = 7000, .llim = 7000, .blim = 0, .elim = 200,
 		.batch_size = 512 * 1024,
 		.outbuf_size = 512 * 1024,
 		.base_rid = 0, .base_qid = 0,
@@ -2761,7 +2770,7 @@ int mm_mapopt_check(mm_mapopt_t *opt)
 	_opt_assert(opt->gi > 5,								'E', "Gap open penalty (-p) must be inside [0,5].");
 	_opt_assert(opt->ge < 1 || opt->ge > 5,					'E', "Gap extension penalty (-q) must be inside [1,5].");
 	_opt_assert(opt->xdrop < 10 || opt->xdrop > 100,		'E', "Xdrop cutoff must be inside [10,100].");
-	_opt_assert(opt->min > INT32_MAX, 						'E', "Minimum alignment score must be > 0.");
+	_opt_assert(opt->min_score > INT32_MAX, 				'E', "Minimum alignment score must be > 0.");
 	_opt_assert(opt->min_ratio < 0.0 || opt->min_ratio > 1.0,
 		'E',
 		"Minimum alignment score ratio must be inside [0.0,1.0]."
@@ -2783,7 +2792,7 @@ int mm_mapopt_check(mm_mapopt_t *opt)
 	);
 
 	/* occurrence filter params */
-	_opt_assert(opt->n_frq >= 16,							'E', "Frequency thresholds must be fewer than 16.");
+	_opt_assert(opt->n_frq > MAX_FRQ_NUM,					'E', "Frequency thresholds must be fewer than 16.");
 	for(uint64_t i = 0; i < opt->n_frq; i++) {
 		_opt_assert(opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i]),
 			'E',
@@ -2798,12 +2807,14 @@ int mm_mapopt_check(mm_mapopt_t *opt)
 	_opt_assert(opt->batch_size < 64 * 1024,				'E', "Batch size must be > 64k.");
 	_opt_assert(opt->outbuf_size < 64 * 1024,				'E', "Output buffer size must be > 64k.");
 
-	_opt_assert(opt->sidx >= 16,							'E', "sidx must be inside [0,16).");
-	_opt_assert(opt->eidx >= 16,							'E', "eidx must be inside [0,16).");
-	_opt_assert(opt->hlim < 100 || opt->hlim >= 100000,		'E', "hlim must be inside [100,100000).");
-	_opt_assert(opt->llim < 100 || opt->llim >= 100000,		'E', "llim must be inside [100,100000).");
-	_opt_assert(opt->blim >= 10000,							'E', "blim must be inside [0,10000).");
-	_opt_assert(opt->elim >= 10000,							'E', "elim must be inside [0,10000).");
+	_opt_assert(opt->wlen < 100 || opt->wlen >= 100000,		'E', "window edge length must be inside [100,100000).");
+	_opt_assert(opt->glen < 100 || opt->glen >= 10000,		'E', "gap chain length must be inside [100,10000).");
+	// _opt_assert(opt->sidx >= 16,							'E', "sidx must be inside [0,16).");
+	// _opt_assert(opt->eidx >= 16,							'E', "eidx must be inside [0,16).");
+	// _opt_assert(opt->hlim < 100 || opt->hlim >= 100000,		'E', "hlim must be inside [100,100000).");
+	// _opt_assert(opt->llim < 100 || opt->llim >= 100000,		'E', "llim must be inside [100,100000).");
+	// _opt_assert(opt->blim >= 10000,							'E', "blim must be inside [0,10000).");
+	// _opt_assert(opt->elim >= 10000,							'E', "elim must be inside [0,10000).");
 
 	#define _dup(x)	({ char *_p = malloc(strlen(x)+1); memcpy(_p, (x), strlen(x)); _p[strlen(x)] = '\0'; _p; })
 	if(opt->flag&(0x01ULL<<MM_RG)) {
@@ -3403,7 +3414,7 @@ mm_idx_t *mm_idx_load(FILE *fp, uint32_t nth)
 			goto _mm_idx_load_fail;
 		}
 
-		debug("i(%llu), n(%llu)", i, n);
+		// debug("i(%llu), n(%llu)", i, n);
 		/* read value table content */
 		b->p = (uint64_t *)malloc((n + 1) * sizeof(uint64_t));
 		b->p[0] = n;
@@ -3578,7 +3589,7 @@ typedef struct {
 typedef struct {
 	// uint32_t score;
 	uint32_t aid, mapq;				/* alignment id and mapq */
-	gaba_alignment_t const a;
+	gaba_alignment_t const a[];
 } mm_aln_t;
 
 /**
@@ -3618,7 +3629,7 @@ typedef struct mm_tbuf_s {
 
 	/* copied */
 	uint64_t flag;
-	uint32_t n_occ, occ[16];
+	uint32_t n_occ, occ[MAX_FRQ_NUM + 1];
 	int32_t m, x, wlen, glen;		/* chainable window edge length, linkable gap length */
 	float min_ratio;
 	uint32_t min_score, max_cnt;
@@ -3629,9 +3640,9 @@ typedef struct mm_tbuf_s {
 
 	/* query and reference sections (initialized in mm_init_query) */
 	uint8_t tail[96];				/* zeros */
-	gaba_section_t r[3];			/* [0]: rf, [1]: rr, [3]: empty */
+	gaba_section_t r[2];			/* [0]: rf, [1]: rr */
 	gaba_section_t q[3];			/* [0]: qf, [1]: qr, [2]: qf */
-	gaba_section_t t[2];
+	gaba_section_t t[1];
 
 	/* working buffers */
 	mm_resc_v resc;					/* rescued seed array, also used as query minimizer vector */
@@ -3655,9 +3666,9 @@ typedef struct mm_tbuf_s {
 #define _umask(x)		( 0x7fffffff & (x) )
 #define _mabs(x)		( _smask(x)^(x) )
 #define _ofs(x)			( (int32_t)0x40000000 - (int32_t)(x) )
-#define _u(x, y)		( ((x) | 0x40000000) - ((y)>>1) )
+#define _u(x, y)		( (((x)<<1) | 0x40000000) - (y) )
 #define _v(x, y)		( ((x) | 0x40000000) - ((y)<<1) )
-#define _ud(x, y)		( (x) - ((y)>>1) )
+#define _ud(x, y)		( ((x)<<1) - (y) )
 #define _vd(x, y)		( (x) - ((y)<<1) )
 #define _p(_ptr)		( ((int32_t const *)(_ptr))[0] + ((int32_t const *)(_ptr))[1] )
 #define _q(_ptr)		( ((int32_t const *)(_ptr))[1] - ((int32_t const *)(_ptr))[0] )
@@ -3713,6 +3724,7 @@ void mm_collect_seed(
 	/* clear array and gather minimizers */
 	self->resc.n = self->seed.n = 0;
 	mm_sketch(self->q[0].base, self->q[0].len, self->mi.w, self->mi.k, 0, (v4u32_v *)&self->resc);
+	debug("collected seeds, n(%zu)", self->resc.n);
 
 	uint32_t const max_occ = self->occ[self->n_occ - 1];
 	uint32_t const resc_occ = self->occ[0];
@@ -3753,12 +3765,14 @@ uint64_t mm_seed(
 	mm_tbuf_t *self,
 	uint64_t cnt)								/* iteration count */
 {
+	debug("seed iteration i(%llu)", cnt);
 	if(cnt == 0) {
 		/* first collect seeds */
 		mm_collect_seed(self);
 		self->presc = self->resc.a;				/* init resc pointer */
 	} else {
 		/* sort rescued array by occurrence */
+		debug("sort resc, n(%zu)", self->resc.n);
 		if(cnt == 1) { radix_sort_128x((v4u32_t *)self->resc.a, self->resc.n); }
 
 		/* clear previous chain */
@@ -3777,14 +3791,101 @@ uint64_t mm_seed(
 	if(self->seed.n == 0) { return(0); }
 
 	/* sort seed array */
+	debug("sort seed, n(%zu)", self->seed.n);
 	radix_sort_128x((v4u32_t *)self->seed.a, self->seed.n);
 	return(self->seed.n);
+}
+
+/**
+ * @fn mm_chain_core
+ * @brief starting from q, link the nearest seed iteratively, open a bin for the chain
+ */
+static _force_inline
+mm_seed_t *mm_chain_core(
+	mm_tbuf_t *self,
+	mm_seed_t *p)
+{
+	/* q is the current front, np holds the first unlinked seed */
+	mm_seed_t *q = p, *t = self->seed.a + self->seed.n, *np = p + 1;
+
+	/* save rid, allocate chain bin and map bin */
+	uint32_t rid = q->rid, mid = ~self->map.n++;	/* must be NOT (not NEG) to avoid collision at zero */
+
+	/* loop: link seeds which belong to the same (rid, qid) pair */
+	do {
+		/* load window boundaries */
+		int32_t ubase = _v(q->apos, q->bpos);
+		int32_t uub = q->upos + _ud(self->wlen, 0);
+		int32_t vub = _v(q->apos, q->bpos);
+		int32_t vlb = vub + _vd(0, self->wlen);
+		int32_t pd = _p(&q->apos) + 2*self->wlen;
+
+		debug("uub(%d), vlb(%d), vub(%d)", uub, vlb, vub);
+
+		/* loop: pick up the nearest seed */
+		mm_seed_t *nq = t;
+		for(mm_seed_t *r = q + 1; r < t && r->upos < uub; r++) {
+			debug("test seed at i(%llu), rid(%u), (%u, %u), u(%d), v(%d), uub(%d), np(%ld)", r - self->seed.a, r->rid, r->apos, r->bpos, r->upos, _v(r->apos, r->bpos), uub, np - self->seed.a);
+
+			// if((int32_t)(r->rid - rid) >= 0) { np = MIN2(np, r);}
+
+			/* terminate if rid changed */
+			if((int32_t)(r->rid - rid) > 0) { break; }
+
+			/* test if r is inside the window */
+			if(!_inside(vlb, _v(r->apos, r->bpos), vub)) {
+				/*np = MIN2(np, r);*/ continue;
+			}
+
+			/* update min */
+			if(_p(&r->apos) < pd) {
+				nq = r;
+				pd = _p(&r->apos);
+			}
+
+			/* FIXME: update uub (this seems correct but needs further verified) */
+			uub = MIN2(uub, ubase + _p(&r->apos));
+		}
+
+		/* mark q as chained (is the root for the first itr), update q for the next itr */
+		q->rid = mid;							/* store mid, distinguished by its sign */
+		if(_unlikely(nq == t)) {
+			/* linkable seed not found, open a new bin for the chain */
+			uint32_t cid = self->chain.n++;
+			self->chain.a[cid] = (mm_chain_t){
+				.plen = _ofs(_p(&q->apos) - _p(&p->apos)),
+				.sid = q - self->seed.a
+			};
+			debug("linkable seed not found, cid(%u), plen(%d), sid(%u)", cid, _ofs(self->chain.a[cid].plen), self->chain.a[cid].sid);
+
+			/* save rid and cid to map */
+			self->map.a[~mid] = (mm_map_t){
+				.rid = rid, .cid = cid
+			};
+			return(np);
+		}
+		debug("chain seed at i(%llu), rid(%u), (%u, %u), u(%d), v(%d), uub(%d)", nq - self->seed.a, nq->rid, nq->apos, nq->bpos, nq->upos, _v(nq->apos, nq->bpos), uub);
+		q = nq;
+	} while(q->rid == rid);
+
+	/* hit at the middle of the existing chain, shrink chain array by one */
+	uint32_t cid = self->map.a[~q->rid].cid;	/* load chain id */
+	self->map.a[~mid] = (mm_map_t){
+		.rid = rid, .cid = cid
+	};
+
+	/* update plen */
+	q = &self->seed.a[self->chain.a[cid].sid];	/* load tail of the joined chain */
+	uint32_t plen = _ofs(_p(&q->apos) - _p(&p->apos));
+	self->chain.a[cid].plen = MIN2(self->chain.a[cid].plen, plen);
+	return(np);
 }
 
 /**
  * @fn mm_chain
  * @brief collect chain in self->chain, self->seed must be sorted, self->chain and self->map are not cleared at the head.
  */
+static _force_inline
 uint64_t mm_chain(
 	mm_tbuf_t *self)
 {
@@ -3797,76 +3898,14 @@ uint64_t mm_chain(
 	while(p < t) {
 		/* pick up root at p, skip chained */
 		if((int32_t)p->rid < 0) { p++; continue; }
-		uint32_t rid = p->rid, mid = ~self->map.n++;	/* must be NOT (not NEG) to avoid collision at zero */
+		debug("root seed at i(%llu), rid(%u), (%u, %u), u(%d), v(%d)", p - self->seed.a, p->rid, p->apos, p->bpos, p->upos, _v(p->apos, p->bpos));
 
-		/* q = is the current front, np holds the first unlinked seed */
-		mm_seed_t *q = p, *np = t;
-
-		/* loop: link seeds which belong to the same (rid, qid) pair */
-		do {
-			/* pick up the next (potential) seed at q + 1 and denote as r */
-			mm_seed_t *r = q + 1, *nq = t;
-
-			/* load window boundaries */
-			int32_t uub = r->upos + _ud(self->wlen, 0);
-			int32_t vlb = _v(r->apos, r->bpos);
-			int32_t vub = vlb + _vd(0, self->wlen);
-			int32_t pd = _p(&r->apos) + 2*self->wlen;
-
-			/* loop: pick up the nearest seed */
-			for(mm_seed_t *r = q; r < t && r->upos < uub; r++) {
-				/* test if r is inside the window */
-				if(!_inside(vlb, _v(r->apos, r->bpos), vub)) {
-					np = MIN2(np, r); continue;
-				}
-
-				/* update min */
-				if(_p(&r->apos) < pd) {
-					nq = r;
-					pd = _p(&r->apos);
-				}
-
-				/* FIXME: update uub */
-				/*unimplemented*/;
-			}
-
-			/* mark q as chained (is the root for the first itr), update q for the next itr */
-			q->rid = mid;						/* store mid, distinguished by its sign */
-			if(nq == t) { break; }
-			q = nq;
-		} while(q->rid == rid);
-
-		/* allocate chain bin, first test if hit at the middle of the existing chain */
-		uint32_t cid = ((int32_t)q->rid < 0) ? ({
-			uint32_t _cid = self->map.a[~q->rid].cid;
-			q = &self->seed.a[self->chain.a[_cid].sid];
-			_cid;
-		}) : ({
-			uint32_t _cid = self->chain.n++;
-			self->chain.a[_cid] = (mm_chain_t){
-				.plen = _ofs(0),				/* negated and offsetted */
-				.sid = q - self->seed.a
-			};
-			_cid;
-		});
-
-		/* record chain id to map */
-		self->map.a[~mid] = (mm_map_t){
-			.cid = cid,
-			.rid = rid
-		};
-
-		/* update plen (select the longer, note that plen is negated by _ofs) */
-		uint32_t plen = _ofs(_p(&q->apos) - _p(&p->apos));
-		self->chain.a[cid].plen = MIN2(self->chain.a[cid].plen, plen);
-
-		/* update p */
-		p = np;									/* p != np? */
+		p = mm_chain_core(self, p);
 	}
 	if(self->chain.n == 0) { return(0); }
 
 	/* sort chain by length */
-	radix_sort_128z((v4u32_t *)self->chain.a, self->chain.n);
+	radix_sort_64x((v2u32_t *)self->chain.a, self->chain.n);
 	return(self->chain.n);
 }
 
@@ -3878,6 +3917,7 @@ static _force_inline
 gaba_pos_pair_t mm_next(
 	mm_tbuf_t *self,
 	gaba_pos_pair_t cp,
+	uint32_t ppos,
 	mm_seed_t **pp)
 {
 	/* load seed array pointers */
@@ -3885,10 +3925,16 @@ gaba_pos_pair_t mm_next(
 	uint32_t const cid = self->map.a[~p->rid].cid;
 	uint32_t const ub = _u(cp.apos, cp.bpos);
 
-	while(p >= h && self->map.a[~p->rid].cid == cid) {
-		if(p->upos > ub) { p--; continue; }
+	/* skip covered, FIXME: use binary search for better performance */
+	while(p >= h && p->upos > ub) { p--; }
+
+	/* test uncovered */
+	while(p >= h && _p(&p->apos) > ppos) {
+		debug("test i(%ld), (%u, %u), u(%d)", p - h, p->apos, p->bpos, p->upos);
+		if(self->map.a[~(p--)->rid].cid != cid) { continue; }
 
 		/* hit */
+		debug("found next seed at i(%ld), (%u, %u), u(%d)", p - h, p->apos, p->bpos, p->upos);
 		*pp = p;				/* write back pointer */
 		return((gaba_pos_pair_t){
 			.apos = p->apos,
@@ -3897,6 +3943,7 @@ gaba_pos_pair_t mm_next(
 	}
 
 	/* not found */
+	debug("not found");
 	return((gaba_pos_pair_t){
 		.apos = INT32_MIN,
 		.bpos = INT32_MIN
@@ -3943,33 +3990,47 @@ gaba_pos_pair_t mm_record(
 	mm_res_t *res,
 	gaba_alignment_t const *a)
 {
-	mm_bin_t *bin = (mm_bin_t *)&self->bin.a[res->bid];
+	/* put head and tail positions to hash */
+	uint64_t id = _swap_u64(_loadu_u64(&a->sec->aid));
+	uint64_t hkey = _loadu_u64(&a->sec->apos) ^ id;
+	uint64_t tkey = (_loadu_u64(&a->sec->apos) + _loadu_u64(&a->sec->alen)) ^ id;
+	debug("hash key, h(%llx), t(%llx)", hkey, tkey);
 
-	/* first update res and bin */
+	v2u32_t *h = (v2u32_t *)kh_put_ptr(&self->pos, hkey);
+	v2u32_t *t = (v2u32_t *)kh_put_ptr(&self->pos, tkey);
+
+	/* open new bin for aln, reuse if the head hit an existing one */
+	uint32_t bid = (h->u64[0] == KH_INIT_VAL) ? kv_push(void *, self->bin, (void *)a) : h->u32[1];
+	gaba_alignment_t const **b = (gaba_alignment_t const **)&self->bin.a[bid];
+
+	debug("id(%u, %u)", a->sec->aid, a->sec->bid);
+	debug("record h(%llx, %u), t(%llx, %u), bid(%u)", h[-1].u64[0], h->u32[1], t[-1].u64[0], t->u32[1], bid);
+
+	/* update res */
 	res->score -= a->score;
-	bin->n_aln++;
+
+	/* update bin */
+	mm_bin_t *bin = (mm_bin_t *)&self->bin.a[res->bid];
+	bin->n_aln += h->u64[0] == KH_INIT_VAL;
 	bin->plen += _p(&a->sec->alen);
 	bin->lb = MIN2(bin->lb, a->sec->bpos);
 	bin->ub = MAX2(bin->ub, a->sec->bpos + a->sec->blen);
+	debug("update bounds, bid(%u), lb(%u), ub(%u)", res->bid, bin->lb, bin->ub);
 
-	/* put head and tail positions to hash */
-	v2u32_t *h = (v2u32_t *)kh_put_ptr(&self->pos, _loadu_u64(&a->sec->apos));
-	v2u32_t *t = (v2u32_t *)kh_put_ptr(&self->pos, _loadu_u64(&a->sec->apos) + _loadu_u64(&a->sec->alen));
-
-	/* open new bin for aln, reuse if the head hit an existing one */
-	uint32_t bid = (h->u64[0] != KH_INIT_VAL) ? h->u32[1] : kv_push(void *, self->bin, (void *)a);
-	gaba_alignment_t const **b = &bin->aln[bid];
+	debug("record alignment, (%u, %u) -> (%u, %u), n_aln(%u)", a->sec->apos, a->sec->bpos, a->sec->apos + a->sec->alen, a->sec->bpos + a->sec->blen, bin->n_aln);
 
 	/* update hash */
 	if(b[0]->score > a->score) {
+		debug("discard, a(%lld), b(%lld)", a->score, b[0]->score);
 		*t = (v2u32_t){ .u64[0] = KH_INIT_VAL };	/* re-mark: evaluated but not found */
 	} else {
+		debug("replace, a(%lld), b(%lld)", a->score, b[0]->score);
 		/* replace if the new one is larger than the old one */
 		*b = a;
 		*h = *t = (v2u32_t){
 			.u32 = {
 				[0] = res - (mm_res_t *)self->chain.a,
-				[1] = self->bin.n
+				[1] = bid
 			}
 		};
 	}
@@ -4040,17 +4101,18 @@ static _force_inline
 uint64_t mm_extend(
 	mm_tbuf_t *self)
 {
-	/* evaluate chain */
 	uint8_t const *lim = (uint8_t const *)0x800000000000;
-	gaba_dp_flush(self->dp, lim, lim);
+
+	/* loop: evaluate chain */
 	for(uint64_t k = 0; k < self->chain.n; k++) {
 		/* load seed ptr and position */
 		mm_seed_t *p = &self->seed.a[self->chain.a[k].sid];		/* load tail */
-		int32_t rev = _smask(p->apos);
+		int32_t rev = _smask(p->apos), plen = _ofs(self->chain.a[k].plen);
 		gaba_pos_pair_t cp = {
 			.apos = (rev ^ p->apos),
 			.bpos = (rev ^ p->bpos) + (rev & self->adj)
 		};
+		debug("chain(%llu), rev(%d), plen(%d), (%d, %d)", k, rev, plen, cp.apos, cp.bpos);
 
 		/* load ref */
 		mm_idx_seq_t const *ref = &self->mi.s.a[self->map.a[~p->rid].rid - self->mi.base_rid];
@@ -4058,7 +4120,7 @@ uint64_t mm_extend(
 		self->r[1] = _sec_rv(ref->rid, ref->seq, ref->l_seq);
 
 		/* open result bin */
-		uint32_t bid = kv_pushm(void *, self->bin, (void **)&((mm_bin_t){ ref->rid, rev & 0x04 }), MM_BIN_N);
+		uint32_t bid = kv_pushm(void *, self->bin, (void **)&((mm_bin_t){ .lb = UINT32_MAX }), MM_BIN_N);
 
 		/* reuse seed bin for score accumulation */
 		mm_res_t *res = (mm_res_t *)&self->chain.a[self->n_res++];
@@ -4067,23 +4129,20 @@ uint64_t mm_extend(
 			.bid = bid							/* bin base index */
 		};
 
-		/* save stack */
-		gaba_stack_t const *stack = gaba_dp_save_stack(self->dp);
-
-		/* until chain length is covered by a set of alignments */
-		for(uint32_t ph = _p(&cp) - _ofs(self->chain.a[k].plen), rem = 3, narrow = 0;
-			_p(&cp) > ph && rem > 0;
-			cp = mm_next(self, cp, &p), rem--
+		/* loop: issue extension until whole chain is covered by alignments */
+		for(uint32_t ppos = _p(&cp) - plen, rem = 3, narrow = 0;
+			_p(&cp) > ppos && rem > 0;
+			cp = mm_next(self, cp, ppos, &p), rem--
 		) {
 			/* reset stack */
-			gaba_dp_flush_stack(self->dp, stack);
+			gaba_dp_flush(self->dp, lim, lim);
 
 			/* init tail as zero padded arrays */
 			gaba_fill_t const *t = (gaba_fill_t const *)self->tail, *u = t;
 
 			/* downward extension */
 			gaba_pos_pair_t tp = cp;
-			u = mm_extend_core(&self->dp[narrow], &self->r[1], self->t, &self->q[-rev], self->t, tp);
+			u = mm_extend_core(&self->dp[narrow], &self->r[0], self->t, &self->q[-rev], self->t, tp);
 
 			/* search pos if extended */
 			if(u->max > 0) { tp = gaba_dp_search_max(&self->dp[narrow], u); }
@@ -4092,11 +4151,13 @@ uint64_t mm_extend(
 
 			/* skip if tail is duplicated */
 			if(mm_test_pos(self, res, tp) >= 0) {
-				narrow = 1; continue;			/* try narrower band in the next itr to avoid collision */
+				narrow = 1;
+				debug("duplication detected, try narrower(%u)", narrow);
+				continue;			/* try narrower band in the next itr to avoid collision */
 			}
 
 			/* upward extension: coordinate reversed here */
-			t = mm_extend_core(&self->dp[0], &self->r[0], self->t, &self->q[1+rev], self->t,
+			t = mm_extend_core(&self->dp[0], &self->r[1], self->t, &self->q[1+rev], self->t,
 				((gaba_pos_pair_t){
 					.apos = self->r[0].len - tp.apos - 1,
 					.bpos = self->q[0].len - tp.bpos - 1
@@ -4108,15 +4169,20 @@ uint64_t mm_extend(
 			}
 
 			/* generate alignment: coordinates are reversed again, gaps are left-aligned in the resulting path */
-			gaba_alignment_t const *a = gaba_dp_trace(&self->dp[0], t, NULL, &self->trace);		/* lmm is contained in self->trace */
+			gaba_alignment_t const *a = gaba_dp_trace(&self->dp[0], NULL, t, &self->trace);		/* lmm is contained in self->trace */
+			if(a == NULL) {
+				debug("failed to generate trace: len(%u, %u), score(%lld), <- (%u, %u)", self->r[0].len, self->q[0].len, t->max, tp.apos, tp.bpos);
+				continue;						/* something is wrong... */
+			}
 			debug("len(%u, %u), score(%lld), (%u, %u) <- (%u, %u)",
-				self->r[0].len, self->q[0].len, u->max, a->sec->apos, a->sec->bpos, tp.apos, tp.bpos);
+				self->r[0].len, self->q[0].len, t->max, a->sec->apos, a->sec->bpos, tp.apos, tp.bpos);
 
 			/* record alignment, update current head position */
 			cp = mm_record(self, res, a);
 
 			/* update itr states */
 			rem = 10; narrow = 1;
+			debug("split detected, try narrower(%u), cp(%u, %u), p(%u), ppos(%u), rem(%u)", narrow, cp.apos, cp.bpos, _p(&cp), ppos, rem);
 		}
 
 		/* discard if the score did not exceed the minimum threshold */
@@ -4143,18 +4209,17 @@ uint64_t mm_prune_regs(
 {
 	mm_res_t *res = (mm_res_t *)self->chain.a;	/* alignments, must be sorted */
 
-	uint64_t q = self->max_cnt ? MIN2(self->max_cnt, self->n_res) : self->n_res;
-	uint32_t min = _ofs((uint32_t)(res[0].score * self->min_ratio));
+	uint64_t q = MIN2(self->max_cnt, self->n_res);
+	uint32_t min = _ofs((uint32_t)(_ofs(res[0].score) * self->min_ratio));
 
 	while(res[--q].score > min) {
 		/* actually nothing to do because all the alignment objects are allocated from lmm */
 		mm_bin_t *bin = (mm_bin_t *)&self->bin.a[res[q].bid];
 		for(uint64_t i = 0; i < bin->n_aln; i++) {
-			gaba_dp_res_free((gaba_alignment_t *)bin->aln[i]);	/* destroy gaba_alignment_t objects */
+			gaba_dp_res_free((gaba_alignment_t *)(bin->aln[i] + 1));	/* destroy gaba_alignment_t objects */
 		}
-		// lmm_free(self->trace.lmm, (void *)&self->bin[res[q].bid]);
 	}
-	return(q);
+	return(q + 1);
 }
 
 #if COLLECT_SUPPLEMENTARY != 0
@@ -4166,7 +4231,7 @@ static _force_inline
 uint64_t mm_collect_supp(
 	uint32_t const n_res,
 	mm_res_t *restrict res,						/* alignments, must be sorted */
-	void *bin)
+	void **bin)
 {
 	/* collect supplementaries */
 	#define _swap_128(x, y)	{ mm_res_t _tmp = res[x]; res[x] = res[y]; res[y] = _tmp; }
@@ -4178,6 +4243,8 @@ uint64_t mm_collect_supp(
 			mm_bin_t *s = (mm_bin_t *)&bin[res[i].bid];
 			int32_t lb = s->lb, ub = s->ub, span = ub - lb;
 
+			debug("bid(%u), s(%u, %u)", res[i].bid, lb, ub);
+
 			for(uint64_t j = 0; j < p; j++) {
 				mm_bin_t *t = (mm_bin_t *)&bin[res[j].bid];
 				
@@ -4187,6 +4254,7 @@ uint64_t mm_collect_supp(
 				} else {
 					ub = MIN2(ub, t->lb);
 				}
+				debug("bid(%u), t(%u, %u), s(%u, %u)", res[j].bid, t->lb, t->ub, lb, ub);
 
 				/* calculate covered length */
 				if(2*(ub - lb) < span) {		/* check if covered by j */
@@ -4418,6 +4486,7 @@ mm_reg_t const *mm_align_seq(
 
 	debug("start: qid(%u)", qid);
 	/* seed-chain-extend loop */
+	debug("n_occ(%u)", self->n_occ);
 	for(uint64_t i = 0; i < self->n_occ; i++) {
 		if(mm_seed(self, i) == 0) {
 			continue;		/* seed not found */
@@ -4435,13 +4504,49 @@ mm_reg_t const *mm_align_seq(
 	}
 
 	/* sort by score in reverse order */
-	radix_sort_128z((v4u32_t *)self->chain.a, self->n_res);
+	radix_sort_64x((v2u32_t *)self->chain.a, self->n_res);
+
+	for(uint64_t i = 0; i < self->n_res; i++) {
+		debug("bid(%u)", self->chain.a[i].sid);
+		mm_bin_t *bin = (mm_bin_t *)&self->bin.a[self->chain.a[i].sid];
+
+		debug("n_aln(%u), plen(%u), lb(%u), ub(%u)", bin->n_aln, bin->plen, bin->lb, bin->ub);
+
+		for(uint64_t j = 0; j < bin->n_aln; j++) {
+			debug("j(%llu), aln(%p)", j, bin->aln[j]);
+		}
+
+	}
 
 	/* prune alignments whose score is less than min_score threshold */
 	uint32_t n_all = mm_prune_regs(self);
 
+	for(uint64_t i = 0; i < n_all; i++) {
+		debug("bid(%u)", self->chain.a[i].sid);
+		mm_bin_t *bin = (mm_bin_t *)&self->bin.a[self->chain.a[i].sid];
+
+		debug("n_aln(%u), plen(%u), lb(%u), ub(%u)", bin->n_aln, bin->plen, bin->lb, bin->ub);
+
+		for(uint64_t j = 0; j < bin->n_aln; j++) {
+			debug("j(%llu), aln(%p)", j, bin->aln[j]);
+		}
+
+	}
+
 	/* collect supplementaries (split-read collection) */
 	uint32_t n_uniq = ((self->flag & MM_AVA)? mm_post_ava : mm_post_map)(self);
+
+	for(uint64_t i = 0; i < n_all; i++) {
+		debug("bid(%u)", self->chain.a[i].sid);
+		mm_bin_t *bin = (mm_bin_t *)&self->bin.a[self->chain.a[i].sid];
+
+		debug("n_aln(%u), plen(%u), lb(%u), ub(%u)", bin->n_aln, bin->plen, bin->lb, bin->ub);
+
+		for(uint64_t j = 0; j < bin->n_aln; j++) {
+			debug("j(%llu), aln(%p)", j, bin->aln[j]);
+		}
+
+	}
 
 	/* allocate reg array from memory arena */
 	return(mm_pack_reg(self, n_all, n_uniq));
@@ -4449,7 +4554,7 @@ mm_reg_t const *mm_align_seq(
 
 /**
  * @struct mm_tmpbuf_t
- * @brief 
+ q > 0 && * @brief 
  */
 typedef struct {
 	uint8_t *tail, *p;
@@ -4661,7 +4766,8 @@ typedef struct {
  * @macro _putd
  * @brief print direction ('+' for forward, '-' for reverse)
  */
-#define _putd(b, _id)		_put(b, ((_id)&0x01)? '+' : '-');
+#define _putds(b, _id)		_put(b, ((_id) & 0x01) ? '-' : '+');
+#define _putdn(b, _id)		_put(b, ((_id) & 0x01) ? '1' : '0');
 
 /**
  * @macro _t, _c, _sp, _cr
@@ -4873,21 +4979,22 @@ void mm_print_sam_unmapped(
 /**
  * @fn mm_print_sam_mapped_core
  */
-static void mm_print_sam_mapped_core(
+static _force_inline
+void mm_print_sam_mapped_core(
 	mm_align_t *b,
 	mm_idx_seq_t const *r,
 	bseq_t const *t,
 	mm_aln_t const *a,
 	uint16_t flag)
 {
-	const gaba_path_section_t *s = &a->a.sec[0];
-	uint32_t rs = r->l_seq-s->apos-s->alen;					/* ref start pos */
-	uint32_t hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;	/* head and tail clip lengths */
-	uint32_t qs = (flag&0x900)? hl : 0;						/* query start pos */
-	uint32_t qe = t->l_seq - ((flag&0x900)? tl : 0);		/* query end pos */
+	const gaba_path_section_t *s = &a->a->sec[0];
+	uint32_t rs = s->apos;									/* ref start pos */
+	uint32_t hl = s->bpos, tl = t->l_seq - s->bpos - s->blen;/* head and tail clip lengths */
+	uint32_t qs = (flag & 0x900) ? hl : 0;					/* query start pos */
+	uint32_t qe = t->l_seq - ((flag & 0x900) ? tl : 0);		/* query end pos */
 
 	_putsn(b, t->name, t->l_name); _t(b);					/* qname */
-	_putn(b, flag); _t(b);									/* flag */
+	_putn(b, flag | ((s->bid & 0x01)<<4)); _t(b);			/* flag */
 	_putsn(b, r->name, r->l_name); _t(b);					/* tname (ref name) */
 	_putn(b, rs + 1); _t(b);								/* mapped pos */
 	_putn(b, a->mapq>>MAPQ_DEC); _t(b);						/* mapping quality */
@@ -4898,7 +5005,7 @@ static void mm_print_sam_mapped_core(
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print head clip */
 	}
 	gaba_dp_print_cigar_reverse(mm_cigar_printer,
-		b, a->a.path->array, 0, a->a.path->len);
+		b, a->a->path->array, 0, a->a->path->len);
 	if(tl) {
 		_putn(b, tl);
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print tail clip */
@@ -4938,9 +5045,11 @@ void mm_print_sam_supp(
 	mm_aln_t const *a)
 {
 	/* rname,pos,strand,CIGAR,mapQ,NM; */
-	const gaba_path_section_t *s = &a->a.sec[0];
-	uint32_t rs = r->l_seq-s->apos-s->alen;
-	uint32_t hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;	/* head and tail clips */
+	const gaba_path_section_t *s = &a->a->sec[0];
+	// uint32_t rs = r->l_seq-s->apos-s->alen;
+	// uint32_t hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;	/* head and tail clips */
+	uint32_t rs = s->apos;
+	uint32_t hl = s->bpos, tl = s->bpos + s->blen;			/* head and tail clips */
 	
 	_putsn(b, r->name, r->l_name); _c(b);					/* rname */
 	_putn(b, rs + 1); _c(b);								/* rpos */
@@ -4949,13 +5058,13 @@ void mm_print_sam_supp(
 
 	/* print cigar */
 	if(hl != 0) { _putn(b, hl); _put(b, 'H'); }				/* always hard clipped */
-	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->a.path->array, 0, a->a.path->len);
+	gaba_dp_print_cigar_reverse(mm_cigar_printer, b, a->a->path->array, 0, a->a->path->len);
 	if(tl != 0) { _putn(b, tl); _put(b, 'H'); }
 	_c(b);
 
 	/* mapping quality and editdist */
 	_putn(b, a->mapq); _c(b);
-	_putn(b, a->a.xcnt + a->a.gecnt); _put(b, ';');
+	_putn(b, a->a->xcnt + a->a->gecnt); _put(b, ';');
 	return;
 }
 
@@ -4978,12 +5087,12 @@ void mm_print_sam_md(
 	uint64_t const f = b->opt->flag;
 	if((f & 0x01ULL<<MM_MD) == 0) { return; }				/* skip if disabled */
 
-	const gaba_path_section_t *s = &a->a.sec[0];
+	const gaba_path_section_t *s = &a->a->sec[0];
 	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
 
 	_puts(b, "\tMD:Z:");
-	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a.path->array - 1) & ~(sizeof(uint64_t) - 1));
-	int64_t pos = a->a.path->len;
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path->array - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->a->path->len;
 
 	/* uint64_t dir = (flag&0x10)? 1 : 0; */
 	uint64_t dir = (s->bid & 0x01)? 0 : 1;
@@ -5082,13 +5191,13 @@ void mm_print_sam_general_tags(
 
 	/* alignment score */
 	if(f & 0x01ULL<<MM_AS) {
-		_putsk(b, "\tAS:i:"); _putn(b, a->a.score);
+		_putsk(b, "\tAS:i:"); _putn(b, a->a->score);
 	}
 
 	/* editdist to ref */
 	if(f & 0x01ULL<<MM_NM) {
 		_putsk(b, "\tNM:i:");
-		_putn(b, a->a.xcnt + a->a.gecnt);
+		_putn(b, a->a->xcnt + a->a->gecnt);
 	}
 	return;
 }
@@ -5110,7 +5219,7 @@ uint64_t mm_print_sam_primary_tags(
 	/* second best hit score */
 	if((f & 0x01ULL<<MM_XS)) {
 		_putsk(b, "\tXS:i:");
-		_putn(b, reg->n_all > 1 ? reg->aln[1]->a.score : 0);
+		_putn(b, reg->n_all > 1 ? reg->aln[1]->a->score : 0);
 	}
 
 	/* supplementary alignment */
@@ -5120,7 +5229,7 @@ uint64_t mm_print_sam_primary_tags(
 		/* iterate over the supplementary alignments */
 		for(uint64_t i = 1; i < reg->n_uniq; i++) {
 			mm_aln_t const *a = reg->aln[i];
-			uint32_t rid = a->a.sec->aid>>1;
+			uint32_t rid = a->a->sec->aid>>1;
 			mm_idx_seq_t const *r = &mi->s.a[rid - mi->base_rid];
 
 			mm_print_sam_supp(b, r, t, a);
@@ -5152,7 +5261,7 @@ void mm_print_sam_mapped(
 		}
 
 		mm_aln_t const *a = reg->aln[i];
-		uint32_t rid = a->a.sec->aid>>1;
+		uint32_t rid = a->a->sec->aid>>1;
 		mm_idx_seq_t const *r = &mi->s.a[rid - mi->base_rid];
 
 		/* print body */
@@ -5185,8 +5294,8 @@ void mm_print_maf_mapped_ref(
 	mm_aln_t const *a,
 	uint8_t const *rp)
 {
-	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a.path->array - 1) & ~(sizeof(uint64_t) - 1));
-	int64_t pos = a->a.path->len;
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path->array - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->a->path->len;
 	while(pos > 0) {
 		uint64_t arr, cnt;
 
@@ -5221,8 +5330,8 @@ void mm_print_maf_query_forward(
 	mm_aln_t const *a,
 	uint8_t const *qp)
 {
-	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a.path->array - 1) & ~(sizeof(uint64_t) - 1));
-	int64_t pos = a->a.path->len;
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path->array - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->a->path->len;
 	while(pos > 0) {
 		uint64_t arr, cnt;
 
@@ -5258,8 +5367,8 @@ void mm_print_maf_query_reverse(
 	mm_aln_t const *a,
 	uint8_t const *qp)
 {
-	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a.path->array - 1) & ~(sizeof(uint64_t) - 1));
-	int64_t pos = a->a.path->len;
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path->array - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->a->path->len;
 	while(pos > 0) {
 		uint64_t arr, cnt;
 
@@ -5296,16 +5405,16 @@ void mm_print_maf_mapped_core(
 	bseq_t const *t,
 	mm_aln_t const *a)
 {
-	const gaba_path_section_t *s = &a->a.sec[0];
+	const gaba_path_section_t *s = &a->a->sec[0];
 
 	/* header */
-	_put(b, 'a'); _sp(b); _putsk(b, "score="); _putn(b, a->a.score); _cr(b);
+	_put(b, 'a'); _sp(b); _putsk(b, "score="); _putn(b, a->a->score); _cr(b);
 
 	mm_tmpbuf_t qb;			/* leave buffers uninitialized */
 	qb.p = qb.base; qb.tail = qb.base + 240;
 
-	uint32_t const rs = r->l_seq-s->apos-s->alen;
-	uint32_t const qs = t->l_seq-s->bpos-s->blen;
+	uint32_t const rs = s->apos;
+	uint32_t const qs = s->bpos;
 
 	/* heads of sequence record */
 	_put(b, 's'); _sp(b);
@@ -5322,7 +5431,7 @@ void mm_print_maf_mapped_core(
 
 	/* directions */
 	_put(b, '+'); _sp(b);
-	_putd(&qb, s->bid); _sp(&qb);
+	_putds(&qb, s->bid); _sp(&qb);
 
 	/* sequence lengths */
 	_putpn(b, &qb, r->l_seq, t->l_seq); _sp(b); _sp(&qb);
@@ -5333,9 +5442,9 @@ void mm_print_maf_mapped_core(
 	/* query */
 	_putsn(b, qb.base, qb.p - qb.base);
 	if(s->bid & 0x01) {
-		mm_print_maf_query_forward(b, a, &t->seq[qs]);
-	} else {
 		mm_print_maf_query_reverse(b, a, &t->seq[(uint64_t)t->l_seq - qs - 32]);
+	} else {
+		mm_print_maf_query_forward(b, a, &t->seq[qs]);
 	}
 	_cr(b);
 	_cr(b);
@@ -5355,7 +5464,7 @@ void mm_print_maf_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		uint32_t rid = a->a.sec->aid>>1;
+		uint32_t rid = a->a->sec->aid>>1;
 		mm_idx_seq_t const *r = &mi->s.a[rid - mi->base_rid];
 
 		mm_print_maf_mapped_core(b, r, t, a);
@@ -5378,14 +5487,14 @@ void mm_print_blast6_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a.sec[0];
+		const gaba_path_section_t *s = &a->a->sec[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		int32_t dcnt = (a->a.path->len - a->a.gecnt)>>1, slen = dcnt + a->a.gecnt;
-		int32_t mid = 100000.0 * (double)(dcnt - a->a.xcnt) / (double)slen;	/* percent identity */
-		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen+1 : r->l_seq-s->apos;
-		uint32_t re = s->bid&0x01? r->l_seq-s->apos : r->l_seq-s->apos-s->alen+1;
-		uint32_t qs = t->l_seq-s->bpos-s->blen+1, qe = t->l_seq-s->bpos;
+		int32_t dcnt = (a->a->path->len - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		int32_t mid = 100000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
+		uint32_t rs = s->bid&0x01? r->l_seq - s->apos : s->apos + 1;
+		uint32_t re = s->bid&0x01? s->apos + 1 : r->l_seq - s->apos;
+		uint32_t qs = s->bpos + 1, qe = s->bpos + s->blen;
 
 		/* sequence names */
 		_putsn(b, t->name, t->l_name); _t(b);
@@ -5393,8 +5502,8 @@ void mm_print_blast6_mapped(
 
 		_putfi(int32_t, b, mid, 3); _t(b);				/* sequence identity */
 		_putn(b, slen); _t(b);							/* alignment length */
-		_putn(b, a->a.xcnt); _t(b);						/* mismatch count */
-		_putn(b, a->a.gicnt); _t(b);					/* gap count */
+		_putn(b, a->a->xcnt); _t(b);						/* mismatch count */
+		_putn(b, a->a->gicnt); _t(b);					/* gap count */
 		
 		/* positions */
 		_putn(b, qs); _t(b);
@@ -5403,7 +5512,7 @@ void mm_print_blast6_mapped(
 		_putn(b, re); _t(b);
 
 		/* estimated e-value and bitscore */
-		double bit = 1.85 * (double)a->a.score - 0.02;	/* fixme, lambda and k should be calcd from the scoring params */
+		double bit = 1.85 * (double)a->a->score - 0.02;	/* fixme, lambda and k should be calcd from the scoring params */
 		int32_t e = 1000.0 * (double)r->l_seq * (double)t->l_seq * pow(2.0, -bit);	/* fixme, lengths are not corrected */
 		_putfi(int32_t, b, e, 3); _t(b);
 		_putn(b, (int32_t)bit); _cr(b);
@@ -5426,13 +5535,14 @@ void mm_print_blasr1_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a.sec[0];
+		const gaba_path_section_t *s = &a->a->sec[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		int32_t dcnt = (a->a.path->len - a->a.gecnt)>>1, slen = dcnt + a->a.gecnt;
-		int32_t mid = 1000000.0 * (double)(dcnt - a->a.xcnt) / (double)slen;	/* percent identity */
-		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
-		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
+		int32_t dcnt = (a->a->path->len - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		int32_t mid = 1000000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
+		// uint32_t rs = s->bid & 0x01 ? r->l_seq - s->apos - s->alen : s->apos, re = rs + s->alen;
+		uint32_t rs = s->apos, re = s->apos + s->alen;
+		uint32_t qs = s->bid & 0x01 ? t->l_seq - s->bpos - s->blen : s->bpos, qe = qs + s->blen;
 
 		/* sequence names */
 		_putsn(b, t->name, t->l_name); _sp(b);
@@ -5440,10 +5550,10 @@ void mm_print_blasr1_mapped(
 
 		/* directions */
 		_put(b, '0'); _sp(b);
-		_put(b, s->bid&0x01? '0' : '1'); _sp(b);
+		_putdn(b, s->bid); _sp(b);
 
 		/* score in negative, identity */
-		_put(b, '-'); _putn(b, a->a.score); _sp(b);
+		_put(b, '-'); _putn(b, a->a->score); _sp(b);
 		_putfi(int32_t, b, mid, 4); _sp(b);
 
 		/* positions and lengths */
@@ -5475,20 +5585,21 @@ void mm_print_blasr4_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a.sec[0];
+		const gaba_path_section_t *s = &a->a->sec[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		int32_t dcnt = (a->a.path->len - a->a.gecnt)>>1, slen = dcnt + a->a.gecnt;
-		int32_t mid = 1000000.0 * (double)(dcnt - a->a.xcnt) / (double)slen;	/* percent identity */
-		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
-		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
+		int32_t dcnt = (a->a->path->len - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		int32_t mid = 1000000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
+		// uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
+		uint32_t rs = s->apos, re = s->apos + s->alen;
+		uint32_t qs = s->bid & 0x01 ? t->l_seq - s->bpos - s->blen : s->bpos, qe = qs + s->blen;
 
 		/* sequence names */
 		_putsn(b, t->name, t->l_name); _sp(b);
 		_putsn(b, r->name, r->l_name); _sp(b);
 
 		/* score in negative, identity */
-		_put(b, '-'); _putn(b, a->a.score); _sp(b);
+		_put(b, '-'); _putn(b, a->a->score); _sp(b);
 		_putfi(int32_t, b, mid, 4); _sp(b);
 
 		/* query-side */
@@ -5498,7 +5609,7 @@ void mm_print_blasr4_mapped(
 		_putn(b, t->l_seq); _sp(b);
 
 		/* reference-side */
-		_put(b, s->bid&0x01? '0' : '1'); _sp(b);
+		_putdn(b, s->bid); _sp(b);
 		_putn(b, rs); _sp(b);
 		_putn(b, re); _sp(b);
 		_putn(b, r->l_seq); _sp(b);
@@ -5524,19 +5635,19 @@ void mm_print_paf_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a.sec[0];
+		const gaba_path_section_t *s = &a->a->sec[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		uint32_t dcnt = (a->a.path->len - a->a.gecnt)>>1;			/* #matches + #mismatches */
-		uint32_t rs = r->l_seq-s->apos-s->alen, re = r->l_seq-s->apos;
-		uint32_t qs = t->l_seq-s->bpos-s->blen, qe = t->l_seq-s->bpos;
+		uint32_t dcnt = (a->a->path->len - a->a->gecnt)>>1;			/* #matches + #mismatches */
+		uint32_t rs = s->apos, re = s->apos + s->alen;
+		uint32_t qs = s->bpos, qe = s->bpos + s->blen;
 
 		/* query */
 		_putsn(b, t->name, t->l_name); _t(b);
 		_putn(b, t->l_seq); _t(b);
 		_putn(b, qs); _t(b);
 		_putn(b, qe); _t(b);
-		_putd(b, s->bid); _t(b);
+		_putds(b, s->bid); _t(b);
 
 		/* reference */
 		_putsn(b, r->name, r->l_name); _t(b);
@@ -5545,14 +5656,14 @@ void mm_print_paf_mapped(
 		_putn(b, re); _t(b);
 
 		/* #matches, block length, mapping quality */
-		_putn(b, dcnt - a->a.xcnt); _t(b);
-		_putn(b, dcnt + a->a.gecnt); _t(b);
+		_putn(b, dcnt - a->a->xcnt); _t(b);
+		_putn(b, dcnt + a->a->gecnt); _t(b);
 		_putn(b, a->mapq>>MAPQ_DEC);
 
 		/* print optional tags */
 		uint64_t const f = b->opt->flag;
-		if(f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->a.score); }
-		if(f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, a->a.xcnt + a->a.gecnt); }
+		if(f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->a->score); }
+		if(f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, a->a->xcnt + a->a->gecnt); }
 		_cr(b);
 	}
 	return;
@@ -5573,18 +5684,19 @@ void mm_print_mhap_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a.sec[0];
+		const gaba_path_section_t *s = &a->a->sec[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		int32_t dcnt = (a->a.path->len - a->a.gecnt)>>1, slen = dcnt + a->a.gecnt;
-		int32_t merr = 10000.0 * (1.0 - (double)(dcnt - a->a.xcnt) / (double)slen);	/* error rate */
-		uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
-		uint32_t qs = s->bid&0x01? t->l_seq-s->bpos-s->blen : s->bpos, qe = qs+s->blen;
+		int32_t dcnt = (a->a->path->len - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		int32_t merr = 10000.0 * (1.0 - (double)(dcnt - a->a->xcnt) / (double)slen);	/* error rate */
+		// uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
+		uint32_t rs = s->apos, re = s->apos + s->alen;
+		uint32_t qs = s->bid & 0x01 ? t->l_seq - s->bpos - s->blen : s->bpos, qe = qs + s->blen;
 
 		_putsn(b, t->name, t->l_name); _sp(b);			/* qname */
 		_putsn(b, r->name, r->l_name); _sp(b);			/* rname */
 		_putfi(int32_t, b, merr, 4); _sp(b);			/* identity */
-		_putn(b, a->a.score); _sp(b);					/* score */
+		_putn(b, a->a->score); _sp(b);					/* score */
 
 		/* query-side pos and direction */
 		_put(b, '0'); _sp(b);
@@ -5593,7 +5705,7 @@ void mm_print_mhap_mapped(
 		_putn(b, t->l_seq); _sp(b);
 
 		/* reference-side pos and direction */
-		_put(b, s->bid&0x01? '0' : '1'); _sp(b);
+		_putdn(b, s->bid); _sp(b);
 		_putn(b, rs); _sp(b);
 		_putn(b, re); _sp(b);
 		_putn(b, r->l_seq); _cr(b);
@@ -5620,17 +5732,18 @@ void mm_print_falcon_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a.sec[0];
+		const gaba_path_section_t *s = &a->a->sec[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		uint32_t qs = r->l_seq-s->apos-s->alen, qe = r->l_seq-s->apos;
+		// uint32_t qs = r->l_seq-s->apos-s->alen, qe = r->l_seq-s->apos;
+		uint32_t qs = s->apos, qe = s->apos + s->alen;
 
 		/* name seq */
 		_putsn(b, r->name, r->l_name); _sp(b);
-		if(s->bid&0x01) {
-			_putsnt(b, &r->seq[qs], qe-qs, "NACMGRSVTWYHKDBN");
-		} else {
+		if(s->bid & 0x01) {
 			_putsntr(b, &r->seq[r->l_seq-qe], qe-qs, "NTGKCYSBAWRDMHVN");
+		} else {
+			_putsnt(b, &r->seq[qs], qe-qs, "NACMGRSVTWYHKDBN");
 		}
 		_cr(b);
 	}
@@ -5777,7 +5890,7 @@ void mm_tbuf_destroy(mm_tbuf_t *t)
 	free(t->map.a);
 	free(t->chain.a);
 	free(t->bin.a);
-	kh_destroy(&t->pos);
+	kh_destroy_static(&t->pos);
 	gaba_dp_clean(t->dp);
 	free(t);
 }
@@ -5794,16 +5907,19 @@ mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 		return(NULL);
 	}
 
-	/* init dp context and copy constants */
 	mm_mapopt_t const *opt = b->opt;
+	uint32_t const org = (opt->flag & (MM_AVA | MM_COMP)) == MM_AVA ? 0x40000000 : 0;
+	uint32_t const thresh = (opt->flag & MM_AVA? 1 : 0) + org;
 	uint8_t const *lim = (uint8_t const *)0x800000000000;
+
+	/* init dp context and copy constants */
 	*t = (mm_tbuf_t){
 		/* index */
 		.mi = *b->mi,
 
 		/* ava filter constants */
-		.org = ,
-		.thresh = ,
+		.org = org,
+		.thresh = thresh,
 
 		/* copied constants */
 		.flag = opt->flag,
@@ -5813,12 +5929,20 @@ mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 		.glen = opt->glen,
 		.min_ratio = opt->min_ratio,
 		.min_score = opt->min_score,
-		.max_cnt = opt->max_cnt,
+		.max_cnt = opt->max_cnt == 0 ? 0xffffffff : opt->max_cnt,
+		.n_occ = b->n_occ,
+
+		/* tail section */
+		.tail = { 0 },
+		.t[0] = _sec_fw(0xfffffffe, t->tail, 32),
 
 		/* dp context */
 		.dp = gaba_dp_init(b->gaba, lim, lim)
 	};
-	if(t->dp = NULL) { goto _fail; }
+	if(t->dp == NULL) { goto _fail; }
+
+	/* copy occ */
+	memcpy(t->occ, b->occ, (MAX_FRQ_NUM + 1) * sizeof(uint32_t));
 
 	/* init hash */
 	kh_init_static(&t->pos, 0);
@@ -5902,7 +6026,7 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 			.gi = opt->gi,
 			.ge = opt->ge,
 			.xdrop = opt->xdrop,
-			.filter_thresh = 7,		/* note: can be disabled? */
+			// .filter_thresh = 7,		/* note: can be disabled? */
 			.head_margin = sizeof(mm_aln_t)
 		})),
 		.hq = { .n = 1, .m = 1, .a = NULL },
@@ -6013,11 +6137,11 @@ static _force_inline
 int mm_mapopt_load_preset(mm_mapopt_t *o, char const *arg)
 {
 	if(strcmp(arg, "pacbio") == 0) {
-		o->k = 15; o->w = 10; o->m = 1; o->x = 2; o->gi = 2; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
+		o->k = 15; o->w = 10; o->m = 1; o->x = 2; o->gi = 2; o->ge = 1; o->xdrop = 50; o->min_score = 50; o->min_ratio = 0.3;
 	} else if(strcmp(arg, "ont") == 0) {
-		o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min = 50; o->min_ratio = 0.3;
+		o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min_score = 50; o->min_ratio = 0.3;
 	} else if(strcmp(arg, "ava") == 0) {
-		o->k = 14; o->w = 5; o->m = 1; o->x = 2; o->gi = 0; o->ge = 1; o->xdrop = 50; o->min = 30; o->min_ratio = 0.05;
+		o->k = 14; o->w = 5; o->m = 1; o->x = 2; o->gi = 0; o->ge = 1; o->xdrop = 50; o->min_score = 30; o->min_ratio = 0.05;
 		o->flag |= MM_AVA | MM_PAF;
 	} else {
 		o->log(o, 'W', __func__, "Warning: Unknown preset tag: `%s'.", arg);
@@ -6258,7 +6382,7 @@ int mm_mapopt_parse(
 	while(optind < argc) {
 		int ch;
 
-		if((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:L:H:I:J:S:E:D:Y:O:PQR:T:U:vh")) < 0) {
+		if((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:W:G:L:H:D:Y:O:PQR:T:U:vh")) < 0) {
 			/* positional argument */
 			kv_push(void *, *v, argv[optind]);
 			optind++;
@@ -6286,21 +6410,17 @@ int mm_mapopt_parse(
 			case 'N': o->base_rid = UINT32_MAX; o->base_qid = UINT32_MAX; break;
 			case 'X': o->flag |= MM_AVA; break;
 			case 'A': o->flag |= MM_COMP; break;
-			case 's': o->min = atoi(optarg); break;
+			case 's': o->min_score = atoi(optarg); break;
 			case 'm': o->min_ratio = atof(optarg); break;
 			case 'M': o->max_cnt = atoi(optarg); break;
 			case 'a': o->m = atoi(optarg); break;
 			case 'b': o->x = atoi(optarg); break;
 			case 'p': o->gi = atoi(optarg); break;
 			case 'q': o->ge = atoi(optarg); break;
-			case 'F': o->llim = atoi(optarg); break;
-			case 'G': o->hlim = atoi(optarg); break;
+			case 'W': o->wlen = atoi(optarg); break;
+			case 'G': o->glen = atoi(optarg); break;
 			case 'L': o->rmin = atoi(optarg); break;
 			case 'H': o->qmin = atoi(optarg); break;
-			case 'I': o->blim = atoi(optarg); break;
-			case 'J': o->elim = atoi(optarg); break;
-			case 'S': o->sidx = atoi(optarg); break;
-			case 'E': o->eidx = atoi(optarg); break;
 			case 'D': o->batch_size = atoi(optarg); break;
 			case 'Y': o->xdrop = atoi(optarg); break;
 			case 'O': o->flag &= ~(0xffULL<<56); o->flag |= mm_mapopt_parse_format(o, optarg); break;
@@ -6370,7 +6490,7 @@ void mm_print_help(mm_mapopt_t const *opt)
 	_msg(1, "    -p INT       gap open penalty [%d]", opt->gi);
 	_msg(1, "    -q INT       gap extension penalty [%d]", opt->ge);
 	_msg(2, "    -Y INT       X-drop threshold [%d]", opt->xdrop);
-	_msg(1, "    -s INT       minimum alignment score [%d]", opt->min);
+	_msg(1, "    -s INT       minimum alignment score [%d]", opt->min_score);
 	_msg(1, "    -m INT       minimum alignment score ratio [%1.2f]", opt->min_ratio);
 	_msg(2, "    -M INT       maximum #alignments reported [%d]", opt->max_cnt);
 	_msg(2, "    -A           calculate both topright and bottomright triangles (only effective with -X)");
