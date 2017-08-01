@@ -41,10 +41,10 @@
 #define MAX_THREADS					( 128 )
 
 /**
- * @macro MAX_FRQ_NUM
+ * @macro MAX_FRQ_CNT
  * @brief max #frq in seed filtering
  */
-#define MAX_FRQ_NUM					( 7 )
+#define MAX_FRQ_CNT					( 7 )
 
 /**
  * @macro UNITTEST
@@ -2643,7 +2643,7 @@ typedef struct mm_mapopt_s {
 	/* index params */
 	uint32_t k, w, b;
 	uint32_t n_frq;
-	float frq[MAX_FRQ_NUM + 1];
+	float frq[MAX_FRQ_CNT + 1];
 
 	/* chain and extension */
 	int32_t m, x, gi, ge, xdrop, wlen, glen;
@@ -2800,7 +2800,7 @@ int mm_mapopt_check(mm_mapopt_t *opt)
 	);
 
 	/* occurrence filter params */
-	_opt_assert(opt->n_frq > MAX_FRQ_NUM,					'E', "Frequency thresholds must be fewer than 16.");
+	_opt_assert(opt->n_frq > MAX_FRQ_CNT,					'E', "Frequency thresholds must be fewer than 16.");
 	for(uint64_t i = 0; i < opt->n_frq; i++) {
 		_opt_assert(opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i]),
 			'E',
@@ -2994,7 +2994,7 @@ uint32_t *mm_idx_cal_max_occ(
 	}
 
 	/* calc thresh */
-	uint32_t *thres = calloc(1, sizeof(uint32_t) * n_frq);
+	uint32_t *thres = calloc(1, sizeof(uint32_t) * MAX2(n_frq, MAX_FRQ_CNT));
 	for(uint64_t i = 0; i < n_frq; i++) {
 		thres[i] = frq[i] <= 0.0
 			? UINT32_MAX
@@ -3637,7 +3637,7 @@ typedef struct mm_tbuf_s {
 
 	/* copied */
 	uint64_t flag;
-	uint32_t _pad1, n_occ, occ[MAX_FRQ_NUM + 1];
+	uint32_t _pad1, n_occ, occ[MAX_FRQ_CNT + 1];
 	int32_t m, x, wlen, glen;		/* chainable window edge length, linkable gap length */
 	float min_ratio;
 	uint32_t min_score, max_cnt;
@@ -5957,7 +5957,7 @@ mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 	if(t->dp == NULL) { goto _fail; }
 
 	/* copy occ */
-	memcpy(t->occ, b->occ, (MAX_FRQ_NUM + 1) * sizeof(uint32_t));
+	memcpy(t->occ, b->occ, (MAX_FRQ_CNT + 1) * sizeof(uint32_t));
 
 	/* init hash */
 	kh_init_static(&t->pos, 0);
