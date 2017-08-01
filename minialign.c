@@ -619,9 +619,9 @@ void kh_extend(kh_t *h)
  * @fn kh_put
  */
 static _force_inline
-void kh_put(kh_t *h, uint64_t key, uint64_t val)
+void kh_put_intl(kh_t *h, uint64_t key, uint64_t val, uint64_t extend)
 {
-	if(h->cnt >= h->ub) {
+	if(extend != 0 && h->cnt >= h->ub) {
 		debug("trigger extend, cnt(%u), ub(%u)", h->cnt, h->ub);
 		kh_extend(h);
 	}
@@ -633,14 +633,16 @@ void kh_put(kh_t *h, uint64_t key, uint64_t val)
 	};
 	return;
 }
+#define kh_put(_h, _key, _val)			kh_put_intl(_h, _key, _val, 1)
+#define kh_put_nex(_h, _key, _val)		kh_put_intl(_h, _key, _val, 0)
 
 /**
  * @fn kh_put_ptr
  */
 static _force_inline
-uint64_t *kh_put_ptr(kh_t *h, uint64_t key)
+uint64_t *kh_put_ptr_intl(kh_t *h, uint64_t key, uint64_t extend)
 {
-	if(h->cnt >= h->ub) {
+	if(extend != 0 && h->cnt >= h->ub) {
 		debug("trigger extend, cnt(%u), ub(%u)", h->cnt, h->ub);
 		kh_extend(h);
 	}
@@ -651,6 +653,8 @@ uint64_t *kh_put_ptr(kh_t *h, uint64_t key)
 	// h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
 	return(&h->a[b.idx].u64[1]);
 }
+#define kh_put_ptr(_h, _key)			kh_put_ptr_intl(_h, _key, 1)
+#define kh_put_ptr_nex(_h, _key)		kh_put_ptr_intl(_h, _key, 0)
 
 /**
  * @fn kh_get
@@ -4022,7 +4026,7 @@ uint64_t mm_record(
 	debug("hash key, h(%llx), t(%llx)", hkey, tkey);
 
 	v2u32_t *h = (v2u32_t *)kh_put_ptr(&self->pos, hkey);
-	v2u32_t *t = (v2u32_t *)kh_put_ptr(&self->pos, tkey);
+	v2u32_t *t = (v2u32_t *)kh_put_ptr_nex(&self->pos, tkey);		/* noextend */
 	uint64_t new = h->u64[0] == KH_INIT_VAL;
 
 	/* open new bin for aln, reuse if the head hit an existing one */
