@@ -8,7 +8,7 @@
  * @date 2016/1/11
  * @license Apache v2
  */
-
+// #define DEBUG
 /* make sure POSIX APIs are properly activated */
 #if defined(__linux__) && !defined(_POSIX_C_SOURCE)
 #  define _POSIX_C_SOURCE		200112L
@@ -2169,7 +2169,7 @@ struct leaf_max_pos_s leaf_detect_max_pos(
 	debug("max pos NOT found.");
 	return((struct leaf_max_pos_s){
 		.p = 0,
-		.q = 0
+		.q = BW / 2
 	});
 }
 
@@ -3440,7 +3440,7 @@ struct gaba_alignment_s *trace_refine_alignment(
 
 		/* append forward section */
 		b = trace_cat_section(self, &rv, &fw);
-		trace_cat_path(self, &rv, &fw);
+		// trace_cat_path(self, &rv, &fw);
 	}
 	debug("ridx(%x), rppos(%x), rapos(%x), rbpos(%x)",
 		aln->rsidx, aln->rppos, aln->rapos, aln->rbpos);
@@ -3674,7 +3674,7 @@ uint64_t _export(gaba_dp_print_cigar_forward)(
 			ZCNT_RESULT uint64_t c = a;
 			if(c < 64) { break; }
 
-			debug("bulk match, a(%llu)", a);
+			debug("bulk match, a(%llu), pos(%llu), ridx(%llu)", a, lim - ridx, ridx);
 		}
 		uint64_t m = (rsidx - ridx)>>1;
 		if(m > 0) {
@@ -3689,7 +3689,7 @@ uint64_t _export(gaba_dp_print_cigar_forward)(
 			ridx);
 		if(g > 0) {
 			clen += printer(fp, g, 'D' + ((char)(0ULL - (arr & 0x01)) & ('I' - 'D')));
-			debug("gap g(%lld)", g);
+			debug("gap g(%lld), pos(%llu), ridx(%llu)", g, lim - ridx, ridx);
 		}
 		if((ridx -= g) <= 1) { break; }
 	}

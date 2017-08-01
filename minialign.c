@@ -7,7 +7,7 @@
  * @author Hajime Suzuki (original file by Heng Li)
  * @license MIT
  */
-
+#define DEBUG
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -4461,6 +4461,13 @@ mm_reg_t const *mm_pack_reg(
 			a->aid = i;
 			a->mapq = bin->plen;
 			*p++ = a;
+
+			fprintf(stderr, "pack_reg, i(%lu), j(%lu), p(%p), (%u, %u), pos(%u, %u), len(%u, %u), plen(%u)\n",
+				i, j, a,
+				self->r[0].len, self->q[0].len,
+				a->a->sec->apos, a->a->sec->bpos,
+				a->a->sec->alen, a->a->sec->blen,
+				a->a->path->len);
 		}
 
 		/* store #unique alignments */
@@ -5020,6 +5027,8 @@ void mm_print_sam_mapped_core(
 		_putn(b, hl);
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print head clip */
 	}
+
+	fprintf(stderr, "ppos(%u)\n", a->a->sec->ppos);
 	gaba_dp_print_cigar_forward(mm_cigar_printer, b, a->a->path->array, 0, a->a->path->len);
 	if(tl) {
 		_putn(b, tl);
