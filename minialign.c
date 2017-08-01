@@ -4134,7 +4134,7 @@ uint64_t mm_extend(
 		/* load seed ptr and position */
 		mm_seed_t *p = &self->seed.a[self->chain.a[k].sid];		/* load tail */
 		int32_t plen = _ofs(self->chain.a[k].plen);
-		if(plen == 0) { continue; }
+		if(plen * self->m < self->min_score) { continue; }
 
 		int32_t rev = _smask(p->bpos);
 		gaba_pos_pair_t cp = {
