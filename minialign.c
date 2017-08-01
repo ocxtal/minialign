@@ -5069,7 +5069,6 @@ void mm_print_sam_supp(
 	
 	_putsn(b, r->name, r->l_name); _c(b);					/* rname */
 	_putn(b, rs + 1); _c(b);								/* rpos */
-	// _put(b, (flag & 0x10)? '-' : '+'); _c(b);				/* direction */
 	_put(b, (s->bid & 0x01) ? '+' : '-'); _c(b);			/* direction */
 
 	/* print cigar */
@@ -5104,14 +5103,13 @@ void mm_print_sam_md(
 	if((f & 0x01ULL<<MM_MD) == 0) { return; }				/* skip if disabled */
 
 	const gaba_path_section_t *s = &a->a->sec[0];
-	uint32_t rs = r->l_seq-s->apos-s->alen, qs = t->l_seq-s->bpos-s->blen;
+	uint32_t rs = s->apos, qs = s->bpos;
 
 	_puts(b, "\tMD:Z:");
-	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path->array - 1) & ~(sizeof(uint64_t) - 1));
-	int64_t pos = a->a->path->len;
+	uint64_t const *p = (uint64_t const *)a->a->path->array;
+	int64_t pos = 0, lim = a->a->path->len;
 
-	/* uint64_t dir = (flag&0x10)? 1 : 0; */
-	uint64_t dir = (s->bid & 0x01)? 0 : 1;
+	uint64_t dir = (s->bid & 0x01)? 1 : 0;
 	static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
 		0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
 		0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
@@ -5120,17 +5118,17 @@ void mm_print_sam_md(
 		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
 		0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
 	};
-	v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(dir? comp : id));
-	uint8_t const *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[dir? (uint64_t)t->l_seq-qs-32 : qs];
-	while(pos > 0) {
+	v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(dir ? comp : id));
+	uint8_t const *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[dir ? (uint64_t)t->l_seq - qs - 32 : qs];
+	while(pos < lim) {
 		/* suppose each indel block is shorter than 32 bases */
 		uint64_t arr = _load_uint64(p, pos);
-		uint64_t cnt = lzcnt(~arr);						/* count #ins */
-		pos -= cnt;
-		qp += dir? -cnt : cnt;
+		uint64_t cnt = tzcnt(~arr) - (arr & 0x01);		/* count #ins */
+		pos += cnt;
+		qp += dir ? -cnt : cnt;
 
-		if(((((int64_t)arr)>>62)^0x01) > 0) {			/* is_del */
-			pos -= (cnt = lzcnt(arr) - 1);				/* count #del */
+		if((arr & 0x01) == 0) {							/* is_del */
+			pos += cnt = tzcnt(arr);					/* count #del */
 			_putn(b, (int32_t)(rp - rb));
 			_put(b, '^');
 			_putsnt32(b, rp, cnt, "NACMGRSVTWYHKDBN");
@@ -5143,7 +5141,7 @@ void mm_print_sam_md(
 		while(acnt == 32) {
 			/* count diagonal */
 			arr = _load_uint64(p, pos);
-			acnt = lzcnt(arr^0x5555555555555555)>>1;
+			acnt = MIN2(tzcnt(arr ^ 0x5555555555555555), lim - pos)>>1;
 
 			/* load sequence to detect mismatch */
 			v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _loadu_v32i8(qp);
@@ -5151,17 +5149,17 @@ void mm_print_sam_md(
 
 			/* compare and count matches */
 			uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
-			uint64_t mcnt = MIN2(pos>>1, tzcnt(~mmask));
+			uint64_t mcnt = MIN2(acnt, tzcnt(~mmask));
 
 			/* adjust pos */
-			pos -= 2*mcnt;
+			pos += 2*mcnt;
 			rp += mcnt;
-			qp += dir? -mcnt : mcnt;
+			qp += dir ? -mcnt : mcnt;
 
 			if(mcnt >= acnt) { continue; }				/* continues longer than 32bp */
 			_putn(b, (int32_t)(rp - rb));				/* print match length */
-			pos -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt));
-			qp += dir? -cnt : cnt;
+			pos += 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt));
+			qp += dir ? -cnt : cnt;
 			for(uint64_t i = 0; i < cnt - 1; i++) {
 				_put(b, "NACMGRSVTWYHKDBN"[*rp]);		/* print mismatch base */
 				_put(b, '0');							/* padding */
@@ -5172,9 +5170,7 @@ void mm_print_sam_md(
 			rb = rp;
 		}
 	}
-	if(rp - rb) {
-		_putn(b, (int32_t)(rp-rb));
-	}
+	_putn(b, (int32_t)(rp - rb));						/* always print tail even if # == 0 */
 	return;
 }
 
@@ -6255,7 +6251,6 @@ uint64_t mm_mapopt_parse_tags(
 	char const *p,
 	uint16_v *buf)
 {
-
 	uint32_t flag = 0;
 	while(*p != '\0') {
 		char const *q = p;
@@ -6282,6 +6277,7 @@ uint64_t mm_mapopt_parse_tags(
 		if(f == 0 && o->verbose >= 1) {
 			o->log(o, 'W', __func__, "Unknown tag: `%.*s'.", 2, p);
 		}
+		flag |= f;
 
 		/* test tail and advance pointer */
 		if(*q == '\0') { break; }
