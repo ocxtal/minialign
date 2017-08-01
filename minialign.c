@@ -3088,8 +3088,8 @@ void *mm_idx_source(uint32_t tid, void *arg)
 static
 void *mm_idx_worker(uint32_t tid, void *arg, void *item)
 {
-	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
-	mm_idx_step_t *s = (mm_idx_step_t*)item;
+	mm_idx_pipeline_t *q = (mm_idx_pipeline_t *)arg;
+	mm_idx_step_t *s = (mm_idx_step_t *)item;
 
 	char buf[128], *p = buf;
 	p += _pstr(p, "[mm_idx_worker] bin id "); p += _pnum(uint32_t, p, s->base_rid); p += _pstr(p, ":"); p += _pnum(uint32_t, p, s->base_rid + s->n_seq - 1); *p = '\0';
@@ -3124,15 +3124,15 @@ static
 void mm_idx_drain(uint32_t tid, void *arg, void *item)
 {
 	set_info(tid, "[mm_idx_drain] dump minimizers to pool");
-	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
-	mm_idx_step_t *s = (mm_idx_step_t*)item;
+	mm_idx_pipeline_t *q = (mm_idx_pipeline_t *)arg;
+	mm_idx_step_t *s = (mm_idx_step_t *)item;
 
 	#if STRICT_STREAM_ORDERING != 0
 		/* sorted pipeline (for debugging) */
 		kv_hq_push(v4u32_t, incq_comp, q->hq, ((v4u32_t){.u64 = {s->id, (uintptr_t)s}}));
 		while(q->hq.n > 1 && q->hq.a[1].u64[0] == q->ocnt) {
 			q->ocnt++;
-			s = (mm_idx_step_t*)kv_hq_pop(v4u32_t, incq_comp, q->hq).u64[1];
+			s = (mm_idx_step_t *)kv_hq_pop(v4u32_t, incq_comp, q->hq).u64[1];
 			mm_idx_drain_intl(q, s);
 		}
 	#else
@@ -4454,21 +4454,17 @@ mm_reg_t const *mm_pack_reg(
 	/* build reg array (copy from bin) */
 	mm_res_t *res = (mm_res_t *)self->chain.a;
 	for(uint64_t i = 0; i < n_all; i++) {
-
-		/* store #unique alignments */
-		if(i == n_uniq) {
-			reg->n_uniq = p - b;
-		}
-
 		/* copy alignment id and mapq at the head of gaba_alignment_t */
 		mm_bin_t *bin = (mm_bin_t *)&self->bin.a[res[i].bid];
 		for(uint64_t j = 0; j < bin->n_aln; j++) {
 			mm_aln_t *a = (mm_aln_t *)bin->aln[j] - 1;		/* .head_margin = sizeof(mm_aln_t) */
 			a->aid = i;
 			a->mapq = bin->plen;
-
 			*p++ = a;
 		}
+
+		/* store #unique alignments */
+		if(i == n_uniq - 1) { reg->n_uniq = p - b; }
 	}
 
 	/* store #total alignments */
@@ -5839,18 +5835,17 @@ void *mm_align_worker(uint32_t tid, void *arg, void *item)
 		uint32_t qid = s->base_qid + i;			/* FIXME: parse qid from name with atoi when -M is set */
 		seq[i].reg = (void *)mm_align_seq(t, seq[i].l_seq, seq[i].seq, qid, s->lmm);
 	}
-	return s;
+	return(s);
 }
 
 /**
- * @fn mm_align_drain_intl
+ * @fn mm_align_drainm_intl
  */
 static _force_inline
 void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 {
 	for(uint64_t i = 0; i < s->n_seq; i++) {
 		mm_reg_t *r = (mm_reg_t *)s->seq[i].reg;
-		// uint64_t n_reg = s->reg.a[i].u64[1];	/* n_reg in lower 32bit, n_uniq in higher 32bit */
 
 		/* unmapped */
 		if(r == NULL) {
