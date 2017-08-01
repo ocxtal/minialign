@@ -7,7 +7,7 @@
  * @author Hajime Suzuki (original file by Heng Li)
  * @license MIT
  */
-#define DEBUG
+
 /* configurations */
 /**
  * @macro MM_VERSION
