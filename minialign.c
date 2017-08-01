@@ -2994,7 +2994,7 @@ uint32_t *mm_idx_cal_max_occ(
 	}
 
 	/* calc thresh */
-	uint32_t *thres = calloc(1, sizeof(uint32_t) * MAX2(n_frq, MAX_FRQ_CNT));
+	uint32_t *thres = calloc(1, sizeof(uint32_t) * n_frq);
 	for(uint64_t i = 0; i < n_frq; i++) {
 		thres[i] = frq[i] <= 0.0
 			? UINT32_MAX
@@ -5957,7 +5957,8 @@ mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 	if(t->dp == NULL) { goto _fail; }
 
 	/* copy occ */
-	memcpy(t->occ, b->occ, (MAX_FRQ_CNT + 1) * sizeof(uint32_t));
+	memcpy(t->occ, b->occ, t->n_occ * sizeof(uint32_t));
+	memset(t->occ + t->n_occ, 0, (MAX_FRQ_CNT + 1 - t->n_occ) * sizeof(uint32_t));
 
 	/* init hash */
 	kh_init_static(&t->pos, 0);
