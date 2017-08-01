@@ -5020,8 +5020,7 @@ void mm_print_sam_mapped_core(
 		_putn(b, hl);
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print head clip */
 	}
-	gaba_dp_print_cigar_forward(mm_cigar_printer,
-		b, a->a->path->array, 0, a->a->path->len);
+	gaba_dp_print_cigar_forward(mm_cigar_printer, b, a->a->path->array, 0, a->a->path->len);
 	if(tl) {
 		_putn(b, tl);
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print tail clip */
@@ -5062,8 +5061,6 @@ void mm_print_sam_supp(
 {
 	/* rname,pos,strand,CIGAR,mapQ,NM; */
 	const gaba_path_section_t *s = &a->a->sec[0];
-	// uint32_t rs = r->l_seq-s->apos-s->alen;
-	// uint32_t hl = t->l_seq-s->bpos-s->blen, tl = s->bpos;	/* head and tail clips */
 	uint32_t rs = s->apos;
 	uint32_t hl = s->bpos, tl = s->bpos + s->blen;			/* head and tail clips */
 	
@@ -5106,8 +5103,12 @@ void mm_print_sam_md(
 	uint32_t rs = s->apos, qs = s->bpos;
 
 	_puts(b, "\tMD:Z:");
-	uint64_t const *p = (uint64_t const *)a->a->path->array;
-	int64_t pos = 0, lim = a->a->path->len;
+	// uint64_t const *p = (uint64_t const *)a->a->path->array;
+	// int64_t pos = 0, lim = a->a->path->len;
+
+	uint64_t const *p = (uint64_t const *)((uint64_t)a->a->path->array & ~(sizeof(uint64_t) - 1));
+	uint64_t lim = (((uint64_t)a->a->path->array & sizeof(uint32_t)) ? 32 : 0) + a->a->path->len;
+	uint64_t ridx = a->a->path->len;
 
 	uint64_t dir = (s->bid & 0x01)? 1 : 0;
 	static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
@@ -5120,15 +5121,15 @@ void mm_print_sam_md(
 	};
 	v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(dir ? comp : id));
 	uint8_t const *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[dir ? (uint64_t)t->l_seq - qs - 32 : qs];
-	while(pos < lim) {
+	while(ridx > 0) {
 		/* suppose each indel block is shorter than 32 bases */
-		uint64_t arr = _load_uint64(p, pos);
+		uint64_t arr = _load_uint64(p, lim - ridx);
 		uint64_t cnt = tzcnt(~arr) - (arr & 0x01);		/* count #ins */
-		pos += cnt;
+		ridx -= cnt;
 		qp += dir ? -cnt : cnt;
 
 		if((arr & 0x01) == 0) {							/* is_del */
-			pos += cnt = tzcnt(arr);					/* count #del */
+			ridx -= cnt = tzcnt(arr);					/* count #del */
 			_putn(b, (int32_t)(rp - rb));
 			_put(b, '^');
 			_putsnt32(b, rp, cnt, "NACMGRSVTWYHKDBN");
@@ -5140,8 +5141,8 @@ void mm_print_sam_md(
 		uint64_t acnt = 32;
 		while(acnt == 32) {
 			/* count diagonal */
-			arr = _load_uint64(p, pos);
-			acnt = MIN2(tzcnt(arr ^ 0x5555555555555555), lim - pos)>>1;
+			arr = _load_uint64(p, lim - ridx);
+			acnt = MIN2(tzcnt(arr ^ 0x5555555555555555), ridx)>>1;
 
 			/* load sequence to detect mismatch */
 			v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _loadu_v32i8(qp);
@@ -5152,13 +5153,13 @@ void mm_print_sam_md(
 			uint64_t mcnt = MIN2(acnt, tzcnt(~mmask));
 
 			/* adjust pos */
-			pos += 2*mcnt;
+			ridx -= 2*mcnt;
 			rp += mcnt;
 			qp += dir ? -mcnt : mcnt;
 
 			if(mcnt >= acnt) { continue; }				/* continues longer than 32bp */
 			_putn(b, (int32_t)(rp - rb));				/* print match length */
-			pos += 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt));
+			ridx -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt));
 			qp += dir ? -cnt : cnt;
 			for(uint64_t i = 0; i < cnt - 1; i++) {
 				_put(b, "NACMGRSVTWYHKDBN"[*rp]);		/* print mismatch base */
