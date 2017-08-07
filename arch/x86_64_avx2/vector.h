@@ -8,6 +8,26 @@
 #define _VECTOR_H_INCLUDED
 
 /**
+ * @struct v64_mask_s
+ *
+ * @brief common 32cell-wide mask type
+ */
+typedef struct v64_mask_s {
+	uint32_t m1;
+	uint32_t m2;
+} v64_mask_t;
+typedef struct v64_mask_s v64i8_mask_t;
+
+/**
+ * @union v64_mask_u
+ */
+typedef union v64_mask_u {
+	v64_mask_t mask;
+	uint64_t all;
+} v64_masku_t;
+typedef union v64_mask_u v64i8_masku_t;
+
+/**
  * @struct v32_mask_s
  *
  * @brief common 32cell-wide mask type
@@ -73,16 +93,30 @@ typedef union v16_mask_u v16i8_masku_t;
 #endif
 
 /* conversion and cast between vector types */
+#define _from_v16i8_v64i8(x)	(v32i8_t){ _mm256_broadcastsi128_si256((x).v1), _mm256_broadcastsi128_si256((x).v1) }
+#define _from_v32i8_v64i8(x)	(v32i8_t){ (x).v1, (x).v1 }
+#define _from_v64i8_v64i8(x)	(v32i8_t){ (x).v1, (x).v2 }
+
 #define _from_v16i8_v32i8(x)	(v32i8_t){ _mm256_broadcastsi128_si256((x).v1) }
 #define _from_v32i8_v32i8(x)	(v32i8_t){ (x).v1 }
+#define _from_v32i8_v32i8(x)	(v32i8_t){ (x).v1 }
+
 #define _from_v16i8_v16i8(x)	(v16i8_t){ (x).v1 }
 #define _from_v32i8_v16i8(x)	(v16i8_t){ _mm256_castsi256_si128((x).v1) }
+#define _from_v64i8_v16i8(x)	(v16i8_t){ _mm256_castsi256_si128((x).v1) }
 
 /* inversed alias */
+#define _to_v64i8_v16i8(x)		(v32i8_t){ _mm256_broadcastsi128_si256((x).v1), _mm256_broadcastsi128_si256((x).v1) }
+#define _to_v64i8_v32i8(x)		(v32i8_t){ (x).v1, (x).v1 }
+#define _to_v64i8_v64i8(x)		(v32i8_t){ (x).v1, (x).v2 }
+
 #define _to_v32i8_v16i8(x)		(v32i8_t){ _mm256_broadcastsi128_si256((x).v1) }
 #define _to_v32i8_v32i8(x)		(v32i8_t){ (x).v1 }
+#define _to_v32i8_v64i8(x)		(v32i8_t){ (x).v1 }
+
 #define _to_v16i8_v16i8(x)		(v16i8_t){ (x).v1 }
 #define _to_v16i8_v32i8(x)		(v16i8_t){ _mm256_castsi256_si128((x).v1) }
+#define _to_v16i8_v64i8(x)		(v16i8_t){ _mm256_castsi256_si128((x).v1) }
 
 #define _cast_v2i64_v2i32(x)	(v2i32_t){ (x).v1 }
 #define _cast_v2i32_v2i64(x)	(v2i64_t){ (x).v1 }

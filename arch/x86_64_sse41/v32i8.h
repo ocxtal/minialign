@@ -126,9 +126,11 @@ typedef struct v32i8_s {
 	} \
 }
 #define _ext_v32i8(a, imm) ( \
-	(int8_t)(((imm) < sizeof(__m128i)) \
-		? _i_v32i8(extract)((a).v1, (imm)) \
-		: _i_v32i8(extract)((a).v2, (imm) - sizeof(__m128i))) \
+	(int8_t)(((imm) < sizeof(__m128i)) ? ( \
+		_i_v32i8(extract)((a).v1, (imm)) \
+	) : ( \
+		_i_v32i8(extract)((a).v2, (imm) - sizeof(__m128i)) \
+	)) \
 )
 
 /* shift */

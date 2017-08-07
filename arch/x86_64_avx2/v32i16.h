@@ -10,7 +10,7 @@
 /* include header for intel / amd sse2 instruction sets */
 #include <x86intrin.h>
 
-/* 8bit 32cell */
+/* 16bit 32cell */
 typedef struct v32i16_s {
 	__m256i v1;
 	__m256i v2;
