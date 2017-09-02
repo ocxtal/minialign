@@ -120,6 +120,9 @@ typedef struct v2i32_s {
 #define _lt_v2i32(...)		_a_v2i32(cmplt, _e_vv, __VA_ARGS__)
 #define _gt_v2i32(...)		_a_v2i32(cmpgt, _e_vv, __VA_ARGS__)
 
+/* test: take mask and test if all zero */
+#define _test_v2i32(x, y)	_mm_test_all_zeros((x).v1, (y).v1)
+
 /* insert and extract */
 #define _ins_v2i32(a, val, imm) { \
 	(a).v1 = _i_v2i32((a).v1, (val), (imm)); \
@@ -144,6 +147,18 @@ typedef struct v2i32_s {
 #define V2I32_MASK_01		( 0x0f )
 #define V2I32_MASK_10		( 0xf0 )
 #define V2I32_MASK_11		( 0xff )
+
+/* convert */
+typedef struct v2i16_s {
+	__m128i v1;
+} v2i16_t;
+#define _load_v2i16(p)		_mm_loadu_si32((__m128i const *)(p))
+#define _loadu_v2i16(p)		_mm_loadu_si32((__m128i const *)(p))
+#define _cvt_v2i16_v2i32(a) ( \
+	(v2i32_t) { \
+		_mm_cvtepi16_epi32((a).v1) \
+	} \
+)
 
 /* transpose */
 #define _lo_v2i32(a, b) ( \

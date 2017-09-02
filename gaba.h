@@ -11,15 +11,6 @@
  *
  * @detail
  * a header for libgaba (libsea3): a fast banded seed-and-extend alignment library.
- * 
- * from C:
- * Include this header file as #include <gaba.h>. This will enable you to
- * use all the APIs in the gaba_init, and gaba_align form.
- *
- * from C++:
- * Include this header as #include <gaba.h>. The C APIs are wrapped with
- * namespace sea and the C++ class AlignmentContext and AlignmentResult
- * are added. See example.cpp for the detail of the usage in C++.
  */
 
 #ifndef _GABA_H_INCLUDED
@@ -38,33 +29,34 @@
 #endif
 
 /**
- * @enum gaba_error
- *
- * @brief (API) error flags. see gaba_init function and status member in the gaba_alignment structure for more details.
+ * @enum gaba_status
  */
-enum gaba_error {
-	GABA_SUCCESS 				=  0,	/*!< success!! */
-	GABA_TERMINATED				=  1,	/*!< (internal code) success */
-	GABA_ERROR 					= -1,	/*!< unknown error */
-	/** errors which occur in an alignment function */
-	GABA_ERROR_INVALID_MEM 		= -2,	/*!< invalid pointer to memory */
-	GABA_ERROR_INVALID_CONTEXT 	= -3,	/*!< invalid pointer to the alignment context */
-	GABA_ERROR_OUT_OF_BAND 		= -4,	/*!< traceback failure. using wider band may resolve this type of error. */
-	GABA_ERROR_OUT_OF_MEM 		= -5,	/*!< out of memory error. mostly caused by exessively long queries. */
-	GABA_ERROR_OVERFLOW 		= -6, 	/*!< cell overflow error */
-	GABA_ERROR_INVALID_ARGS 	= -7,	/*!< inproper input arguments. */
-	/** errors which occur in an initialization function */
-	GABA_ERROR_UNSUPPORTED_ALG 	= -8,	/*!< unsupported combination of algorithm and processor options. use naive implementations instead. */
-	GABA_ERROR_INVALID_COST 	= -9	/*!< invalid alignment cost */
+enum gaba_status {
+	GABA_STATUS_CONT 		= 0,		/* continue, call again the function with the same args (but rarely occurrs) */
+	GABA_STATUS_UPDATE		= 0x100,	/* update either or both of the section(s) */
+	GABA_STATUS_UPDATE_A 	= 0x0f,		/* update required on section a (always combined with GABA_STATUS_UPDATE) */
+	GABA_STATUS_UPDATE_B 	= 0xf0,		/* update required on section b (always combined with GABA_STATUS_UPDATE) */
+	GABA_STATUS_TERM		= 0x200,	/* extension terminated by X-drop */
+	GABA_STATUS_OOM			= 0x400		/* out of memory (indicates malloc returned NULL) */
 };
 
 /**
- * @enum gaba_clip_type
+ * @type gaba_malloc_t, gaba_free_t
+ * @brief external malloc can be passed, otherwise system malloc will be used
  */
-enum gaba_clip_type {
-	GABA_CLIP_SOFT = 'S',
-	GABA_CLIP_HARD = 'H'
+typedef void *(*gaba_malloc_t)(void *opaque, size_t size);
+typedef void *(*gaba_free_t)(void *opaque, void *free);
+
+/**
+ * @struct gaba_allocator_s
+ * @brief optional memory allocator, malloc and free pair must not be NULL.
+ */
+struct gaba_allocator_s {
+	void *opaque;					/** local memory arena */
+	gaba_malloc_t malloc;			/** malloc; dedicated for alignment path generation */
+	gaba_free_t free;
 };
+typedef struct gaba_allocator_s gaba_allocator_t;
 
 /**
  * @struct gaba_params_s
@@ -72,17 +64,21 @@ enum gaba_clip_type {
  */
 struct gaba_params_s {
 	/** scoring parameters */
-	int8_t m, x, gi, ge;		/** match, mismatch, gap open, and gap extend, all in positive integer */
+	int8_t m;					/** match award */
+	int8_t x;					/** mismatch penalty (in negative integer) */
+	int8_t gi;					/** gap open penalty (0 for the linear-gap penalty; positive integer) */
+	int8_t ge;					/** gap extension penalty (positive integer) */
+	int8_t gf;					/** linear-gap extension penalty for short indels (combined-gap penalty; gf > ge) */
 
 	/** score parameters */
-	int8_t xdrop;
+	int8_t xdrop;				/** X-drop threshold, positive, less than 128 */
 
 	/** filtering parameters */
 	uint8_t filter_thresh;		/** popcnt filter threshold, set zero if you want to disable it */
 
 	/** output options */
-	uint8_t head_margin;		/** margin at the head of gaba_res_t */
-	uint8_t tail_margin;		/** margin at the tail of gaba_res_t */
+	uint32_t head_margin;		/** margin at the head of gaba_res_t */
+	uint32_t tail_margin;		/** margin at the tail of gaba_res_t */
 
 	/* internal */
 	void *reserved;
@@ -205,16 +201,20 @@ typedef struct gaba_path_s gaba_path_t;
  * @struct gaba_alignment_s
  */
 struct gaba_alignment_s {
-	void *lmm;
-	int64_t score, xcnt;		/** (16) score, #mismatchs */
-	int64_t gicnt, gecnt;		/** (16) #gap opens, #gap bases */
-	uint32_t rapos, rbpos;
-	uint32_t rppos;				/** (4) local path index in the root section */
-	uint32_t rsidx;				/** (4) index of the root section */
-	uint32_t reserved3;
-	uint32_t slen;
+	/* reserved for internal use */
+	void *reserved[2];
+	uint32_t reserved;
+
+	uint32_t sec_len;			/* section length */
 	struct gaba_path_section_s const *sec;
-	struct gaba_path_s const *path;
+
+	uint64_t path_len;			/* path length */
+
+	int64_t score;				/** score */
+	uint32_t mcnt, xcnt;		/** #matches, #mismatches */
+	uint32_t gicnt, gecnt;		/** #gap opens, #gap bases */
+
+	uint32_t path[];
 };
 typedef struct gaba_alignment_s gaba_alignment_t;
 
@@ -227,21 +227,16 @@ gaba_t *gaba_init(gaba_params_t const *params);
 
 /**
  * @fn gaba_clean
- *
  * @brief (API) clean up the alignment context structure.
- *
- * @param[in] ctx : a pointer to the alignment structure.
- *
- * @return none.
- *
- * @sa gaba_init
  */
 GABA_EXPORT_LEVEL
-void gaba_clean(
-	gaba_t *ctx);
+void gaba_clean(gaba_t *ctx);
 
 /**
  * @fn gaba_dp_init
+ * @brief create thread-local context deriving the global context (ctx)
+ * with local memory arena and working buffers. alim and blim are respectively
+ * the tails of sequence arrays.
  */
 GABA_EXPORT_LEVEL
 gaba_dp_t *gaba_dp_init(
@@ -304,15 +299,6 @@ gaba_fill_t *gaba_dp_fill(
 	gaba_section_t const *b);
 
 /**
- * @fn gaba_dp_merge
- */
-GABA_EXPORT_LEVEL
-gaba_fill_t *gaba_dp_merge(
-	gaba_dp_t *dp,
-	gaba_fill_t const *sec_list,
-	uint64_t sec_list_len);
-
-/**
  * @fn gaba_dp_search_max
  */
 GABA_EXPORT_LEVEL
@@ -321,54 +307,14 @@ gaba_pos_pair_t gaba_dp_search_max(
 	gaba_fill_t const *sec);
 
 /**
- * @struct gaba_trace_params_s
- */
-struct gaba_trace_params_s {
-	void *lmm;
-	struct gaba_path_section_s const *sec;
-	uint16_t slen;				/* section length */
-	uint16_t k;					/* path length (k-mer length) */
-	uint16_t xcnt;				/* #mismatches */
-	uint16_t _pad;
-};
-typedef struct gaba_trace_params_s gaba_trace_params_t;
-
-/**
- * @macro GABA_TRACE_PARAMS
- */
-#define GABA_TRACE_PARAMS(...)		( &((struct gaba_trace_params_s const) { __VA_ARGS__ }) )
-#define GABA_TRACE_NONE				( NULL )
-
-/**
- * @type gaba_alignment_writer_t
- * @brief pointer to putchar-compatible writer
- */
-typedef int (*gaba_alignment_writer_t)(int c);
-
-/**
  * @fn gaba_dp_trace
- *
- * @brief generate alignment result string
+ * @brief generate alignment result string, alloc->malloc and alloc->free must not be NULL if alloc is not NULL.
  */
 GABA_EXPORT_LEVEL
 gaba_alignment_t *gaba_dp_trace(
 	gaba_dp_t *dp,
-	gaba_fill_t const *fw_tail,
-	gaba_fill_t const *rv_tail,
-	gaba_trace_params_t const *params);
-
-/**
- * @fn gaba_dp_recombine
- *
- * @brief recombine two alignments x and y at xsid and ysid.
- */
-GABA_EXPORT_LEVEL
-gaba_alignment_t *gaba_dp_recombine(
-	gaba_dp_t *dp,
-	gaba_alignment_t *x,
-	uint32_t xsid,
-	gaba_alignment_t *y,
-	uint32_t ysid);
+	gaba_fill_t const *tail,
+	gaba_allocator_t const *alloc);
 
 /**
  * @fn gaba_dp_res_free

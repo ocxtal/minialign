@@ -113,6 +113,9 @@ typedef struct v2i64_s {
 #define _lt_v2i64(...)		_a_v2i64(cmplt, _e_vv, __VA_ARGS__)
 #define _gt_v2i64(...)		_a_v2i64(cmpgt, _e_vv, __VA_ARGS__)
 
+/* test: take mask and test if all zero */
+#define _test_v2i64(x, y)	_mm_test_all_zeros((x).v1, (y).v1)
+
 /* insert and extract */
 #define _ins_v2i64(a, val, imm) { \
 	(a).v1 = _i_v2i64((a).v1, (val), (imm)); \

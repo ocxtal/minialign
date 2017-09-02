@@ -16,7 +16,7 @@
 
 /* import unittest */
 #ifndef UNITTEST_UNIQUE_ID
-#  define UNITTEST_UNIQUE_ID		33
+#  define UNITTEST_UNIQUE_ID		30
 #endif
 #include  "unittest.h"
 
@@ -35,9 +35,10 @@ typedef struct gaba_api_s gaba_dp_t;	/** (64) [0] for 32-cell, [1] for 16-cell *
 
 
 /* bandwidth-related macros (see gaba.c) */
-#define DP_CTX_MAX					( 2 )
-#define _dp_ctx_index(_bw)			( DP_CTX_MAX - ((_bw)>>4) )
-_static_assert(_dp_ctx_index(32) == 0);		/* assume 32-cell has the smallest index */
+#define DP_CTX_MAX					( 3 )
+// #define _dp_ctx_index(_bw)			( DP_CTX_MAX - ((_bw)>>4) )
+#define _dp_ctx_index(_bw)			( ((_bw) == 64) ? 0 : (((_bw) == 32) ? 1 : 2) )
+_static_assert(_dp_ctx_index(64) == 0);		/* assume 64-cell has the smallest index */
 
 
 /* add namespace for arch wrapper (see main.c) */
@@ -55,6 +56,7 @@ _static_assert(_dp_ctx_index(32) == 0);		/* assume 32-cell has the smallest inde
 /* gap penalty model (linear or affine) */
 #define LINEAR 						1
 #define AFFINE						2
+#define COMBINED					3
 
 
 /**
@@ -75,6 +77,8 @@ struct gaba_api_s {
 		gaba_fill_t const *prev_sec,
 		gaba_section_t const *a,
 		gaba_section_t const *b);
+
+	/* max score and pos search */
 	gaba_pos_pair_t (*dp_search_max)(
 		gaba_dp_t *self,
 		gaba_fill_t const *sec);
@@ -82,8 +86,7 @@ struct gaba_api_s {
 	/* trace */
 	gaba_alignment_t *(*dp_trace)(
 		gaba_dp_t *self,
-		gaba_fill_t const *fw_tail,
-		gaba_fill_t const *rv_tail,
+		gaba_fill_t const *tail,
 		gaba_trace_params_t const *params);
 };
 _static_assert(sizeof(struct gaba_api_s) == 4 * sizeof(void *));		/* must be consistent to gaba_opaque_s */
@@ -97,8 +100,13 @@ _static_assert(sizeof(struct gaba_api_s) == 4 * sizeof(void *));		/* must be con
 #define _decl(ret_t, _base, ...) \
 	ret_t _import(_decl_cat3(_base, linear, 16))(__VA_ARGS__); \
 	ret_t _import(_decl_cat3(_base, affine, 16))(__VA_ARGS__); \
+	ret_t _import(_decl_cat3(_base, combined, 16))(__VA_ARGS__); \
 	ret_t _import(_decl_cat3(_base, linear, 32))(__VA_ARGS__); \
-	ret_t _import(_decl_cat3(_base, affine, 32))(__VA_ARGS__);
+	ret_t _import(_decl_cat3(_base, affine, 32))(__VA_ARGS__); \
+	ret_t _import(_decl_cat3(_base, combined, 32))(__VA_ARGS__); \
+	ret_t _import(_decl_cat3(_base, linear, 64))(__VA_ARGS__); \
+	ret_t _import(_decl_cat3(_base, affine, 64))(__VA_ARGS__); \
+	ret_t _import(_decl_cat3(_base, combined, 64))(__VA_ARGS__);
 
 _decl(gaba_t *, gaba_init, gaba_params_t const *params);
 _decl(void, gaba_clean, gaba_t *ctx);
@@ -109,10 +117,8 @@ _decl(void, gaba_dp_flush_stack, gaba_dp_t *self, gaba_stack_t const *stack);
 _decl(void, gaba_dp_clean, gaba_dp_t *self);
 _decl(gaba_fill_t *, gaba_dp_fill_root, gaba_dp_t *self, gaba_section_t const *a, uint32_t apos, gaba_section_t const *b, uint32_t bpos);
 _decl(gaba_fill_t *, gaba_dp_fill, gaba_dp_t *self, gaba_fill_t const *prev_sec, gaba_section_t const *a, gaba_section_t const *b);
-_decl(gaba_fill_t *, gaba_dp_merge, gaba_dp_t *self, gaba_fill_t const *sec_list, uint64_t sec_list_len);
 _decl(gaba_pos_pair_t, gaba_dp_search_max, gaba_dp_t *self, gaba_fill_t const *sec);
 _decl(gaba_alignment_t *, gaba_dp_trace, gaba_dp_t *self, gaba_fill_t const *fw_tail, gaba_fill_t const *rv_tail, gaba_trace_params_t const *params);
-_decl(gaba_alignment_t *, gaba_dp_recombine, gaba_dp_t *self, gaba_alignment_t *x, uint32_t xsid, gaba_alignment_t *y, uint32_t ysid);
 _decl(void, gaba_dp_res_free, gaba_alignment_t *res);
 _decl(int64_t, gaba_dp_print_cigar_forward, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
 _decl(int64_t, gaba_dp_print_cigar_reverse, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
@@ -133,11 +139,18 @@ struct gaba_api_s const api_table[][DP_CTX_MAX] __attribute__(( aligned(32) )) =
 
 	[LINEAR] = {
 		[_dp_ctx_index(16)] = _table_elems(linear, 16),
-		[_dp_ctx_index(32)] = _table_elems(linear, 32)
+		[_dp_ctx_index(32)] = _table_elems(linear, 32),
+		[_dp_ctx_index(64)] = _table_elems(linear, 64)
 	},
 	[AFFINE] = {
 		[_dp_ctx_index(16)] = _table_elems(affine, 16),
-		[_dp_ctx_index(32)] = _table_elems(affine, 32)
+		[_dp_ctx_index(32)] = _table_elems(affine, 32),
+		[_dp_ctx_index(64)] = _table_elems(affine, 64)
+	},
+	[COMBINED] = {
+		[_dp_ctx_index(16)] = _table_elems(combined, 16),
+		[_dp_ctx_index(32)] = _table_elems(combined, 32),
+		[_dp_ctx_index(64)] = _table_elems(combined, 64)
 	}
 
 	#undef _table_elems
@@ -155,6 +168,9 @@ int64_t gaba_init_get_index(
 	}
 
 	if(params->gi != 0) {
+		if(params->gf != 0) {
+			return(COMBINED);
+		}
 		return(AFFINE);
 	}
 	return(LINEAR);
@@ -190,15 +206,33 @@ gaba_t *gaba_init(
 
 	uint64_t idx = gaba_init_get_index(params);
 	struct gaba_api_s const (*api)[DP_CTX_MAX] = &api_table[idx];
+	gaba_t *(init_table[][DP_CTX_MAX])(gaba_params_t const *params) = {
+		[LINEAR] = {
+			[_dp_ctx_index(16)] = gaba_init_linear_16,
+			[_dp_ctx_index(32)] = gaba_init_linear_32,
+			[_dp_ctx_index(64)] = gaba_init_linear_64
+		},
+		[AFFINE] = {
+			[_dp_ctx_index(16)] = gaba_init_affine_16,
+			[_dp_ctx_index(32)] = gaba_init_affine_32,
+			[_dp_ctx_index(64)] = gaba_init_affine_64
+		},
+		[COMBINED] = {
+			[_dp_ctx_index(16)] = gaba_init_combined_16,
+			[_dp_ctx_index(32)] = gaba_init_combined_32,
+			[_dp_ctx_index(64)] = gaba_init_combined_64
+		}
+	};
 
 	/* create context */
 	gaba_params_t p = *params;
 	gaba_t *ctx = NULL;
-	ctx = ((idx == LINEAR) ? gaba_init_linear_16 : gaba_init_affine_16)(&p);
+	ctx = init_table[idx][_dp_ctx_index(16)](&p);
 
-	/* init 32-cell wide root block */
+	/* init 32-cell and 64-cell wide root blocks */
 	p.reserved = (void *)ctx;
-	ctx = ((idx == LINEAR) ? gaba_init_linear_32 : gaba_init_affine_32)(&p);
+	ctx = init_table[idx][_dp_ctx_index(32)](&p);
+	ctx = init_table[idx][_dp_ctx_index(64)](&p);
 	return((gaba_t *)gaba_set_api((void *)ctx, api));
 }
 
