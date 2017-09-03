@@ -110,7 +110,7 @@ typedef struct v2i32_s {
 
 /* blend: (mask & b) | (~mask & a) */
 #define _sel_v2i32(mask, a, b) ( \
-	(v2i64_t) { \
+	(v2i32_t) { \
 		_mm_blendv_epi8((b).v1, (a).v1, (mask).v1) \
 	} \
 )
@@ -154,9 +154,16 @@ typedef struct v2i16_s {
 } v2i16_t;
 #define _load_v2i16(p)		_mm_loadu_si32((__m128i const *)(p))
 #define _loadu_v2i16(p)		_mm_loadu_si32((__m128i const *)(p))
+#define _store_v2i16(p, a)	_mm_storeu_si32((__m128i const *)(p), (a).v1)
+#define _storeu_v2i16(p, a)	_mm_storeu_si32((__m128i const *)(p), (a).v1)
 #define _cvt_v2i16_v2i32(a) ( \
 	(v2i32_t) { \
 		_mm_cvtepi16_epi32((a).v1) \
+	} \
+)
+#define _cvt_v2i32_v2i16(a) ( \
+	(v2i32_t) { \
+		_mm_packs_epi32((a).v1, (a).v1) \
 	} \
 )
 
