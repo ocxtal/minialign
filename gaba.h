@@ -144,29 +144,12 @@ typedef struct gaba_dp_context_s gaba_dp_t;
  * @struct gaba_fill_s
  */
 struct gaba_fill_s {
-	/* coordinates */
-	int64_t psum;				/** (8) global p-coordinate of the tail of the section */
-	int32_t p;					/** (4) local p-coordinate of the tail of the section */
-	uint32_t ssum;				/** (4) */
-
-	/* status and max scores */
-	int64_t max;				/** (8) max */
-	uint32_t status;			/** (4) */
-
-	uint8_t _pad[36];
+	int64_t max;				/** (8) max score in the entire band */
+	uint32_t stat;				/** (4) status (section update flags) */
+	uint32_t scnt;				/** (4) expected section count (== band-segment depth) */
+	int64_t ppos;				/** (8) #vectors from the head */
 };
 typedef struct gaba_fill_s gaba_fill_t;
-
-/**
- * @enum gaba_status
- */
-enum gaba_status {
-	GABA_STATUS_CONT 		= 0,
-	GABA_STATUS_UPDATE		= 0x100,
-	GABA_STATUS_UPDATE_A 	= 0x0f,
-	GABA_STATUS_UPDATE_B 	= 0xf0,
-	GABA_STATUS_TERM		= 0x200
-};
 
 /**
  * @struct gaba_pos_pair_s
@@ -183,27 +166,18 @@ struct gaba_path_section_s {
 	uint32_t aid, bid;			/** (8) id of the sections */
 	uint32_t apos, bpos;		/** (8) pos in the sections */
 	uint32_t alen, blen;		/** (8) lengths of the segments */
-	int64_t ppos;				/** (8) path string position (offset) */
+	uint64_t ppos;				/** (8) path string position (offset) */
 };
 typedef struct gaba_path_section_s gaba_path_section_t;
 #define gaba_plen(sec)		( (sec)->alen + (sec)->blen )
-
-/**
- * @struct gaba_path_s
- */
-struct gaba_path_s {
-	int64_t len;				/** (8) path length (= array bit length) */
-	uint32_t array[];			/** () path array */
-};
-typedef struct gaba_path_s gaba_path_t;
 
 /**
  * @struct gaba_alignment_s
  */
 struct gaba_alignment_s {
 	/* reserved for internal use */
-	void *reserved[2];
-	uint32_t reserved;
+	void *reserved1[2];
+	uint32_t reserved2180;
 
 	uint32_t sec_len;			/* section length */
 	struct gaba_path_section_s const *sec;
