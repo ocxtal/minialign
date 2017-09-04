@@ -1,6 +1,6 @@
 
 /**
- * @file main.c
+ * @file universal.c
  *
  * @brief main function dispatcher
  */
@@ -30,5 +30,5 @@ int main(int argc, char *argv[], char *envp[])
 }
 
 /**
- * end of main.c
+ * end of universal.c
  */
