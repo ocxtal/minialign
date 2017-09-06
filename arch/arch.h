@@ -28,7 +28,7 @@
 #  elif defined(__SSE4_1__)
 #    include "x86_64_sse41/arch_util.h"
 #    include "x86_64_sse41/vector.h"
-#  else
+#  elif !defined(ARCH_CAP)		/* arch.h will be included without SIMD flag to check capability */
 #    error "No SIMD instruction set enabled. Check if SSE4.1 or AVX2 instructions are available and add `-msse4.1' or `-mavx2' to CFLAGS."
 #  endif
 
@@ -77,7 +77,10 @@
 
 #endif
 
-#if !defined(_ARCH_UTIL_H_INCLUDED) || !defined(_VECTOR_H_INCLUDED)
+/*
+ * tests
+ */
+#if !defined(ARCH_CAP) && (!defined(_ARCH_UTIL_H_INCLUDED) || !defined(_VECTOR_H_INCLUDED))
 #  error "No SIMD environment detected. Check CFLAGS."
 #endif
 
