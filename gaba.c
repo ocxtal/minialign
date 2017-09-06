@@ -33,7 +33,7 @@
  * gap penalty model configuration: choose one of the following three by a define macro
  *   linear-gap penalty function: g(k) = ge * k
  *   affine-gap penalty function: g(k) = gi + ge * k
- *   combined function: g(k) = min(ge * k, gi + g2 * k)
+ *   combined function: g(k) = min(gf * k, gi + ge * k) where ge < gf
  */
 #define LINEAR 						1
 #define AFFINE						2
@@ -305,8 +305,8 @@ struct gaba_section_pair_s {
  */
 struct gaba_joint_tail_s {
 	/* char vector and delta vectors */
-	struct gaba_char_vec_s ch;	/** (16, 32, 64) char vector */
-	struct gaba_drop_s xd;		/** (16, 32, 64) */
+	struct gaba_char_vec_s ch;		/** (16, 32, 64) char vector */
+	struct gaba_drop_s xd;			/** (16, 32, 64) */
 	struct gaba_middle_delta_s md;	/** (32, 64, 128) */
 
 	uint32_t aridx, bridx;			/** (8) reverse indices for the tails */
@@ -725,47 +725,11 @@ struct gaba_dir_s {
 #define _rd_bufb_base(k)		( (k)->w.r.bufb )
 #define _rd_bufa(k, pos, len)	( _rd_bufa_base(k) - (pos) - (len) )
 #define _rd_bufb(k, pos, len)	( _rd_bufb_base(k) + (pos) )
-#define _lo64(v)		_ext_v2i64(v, 0)
-#define _hi64(v)		_ext_v2i64(v, 1)
-#define _lo32(v)		_ext_v2i32(v, 0)
-#define _hi32(v)		_ext_v2i32(v, 1)
+#define _lo64(v)				_ext_v2i64(v, 0)
+#define _hi64(v)				_ext_v2i64(v, 1)
+#define _lo32(v)				_ext_v2i32(v, 0)
+#define _hi32(v)				_ext_v2i32(v, 1)
 
-/*
- * @fn fill_load_section
- */
-static _force_inline
-void fill_load_section(
-	struct gaba_dp_context_s *self,
-	struct gaba_section_s const *a,
-	struct gaba_section_s const *b,
-	uint32_t pridx)
-{
-	/* load current section lengths */
-	v2i64_t asec = _loadu_v2i64(a);					/* tuple of (64bit ptr, 32-bit id, 32-bit len) */
-	v2i64_t bsec = _loadu_v2i64(b);
-
-	/* transpose sections */
-	v2i32_t aid_alen = _cast_v2i64_v2i32(asec);		/* extract lower 64bit */
-	v2i32_t bid_blen = _cast_v2i64_v2i32(bsec);
-
-	v2i32_t id = _lo_v2i32(aid_alen, bid_blen);
-	v2i32_t len = _hi_v2i32(aid_alen, bid_blen);
-	v2i64_t base = _hi_v2i64(asec, bsec);
-
-	/* calc tail pointer */
-	v2i64_t tail = _add_v2i64(base, _cvt_v2i32_v2i64(len));
-
-	_print_v2i32(id);
-	_print_v2i32(len);
-	_print_v2i64(tail);
-
-	/* store sections */
-	_store_v2i64(&self->w.r.s.atail, tail);
-	_store_v2i32(&self->w.r.s.alen, len);
-	_store_v2i32(&self->w.r.s.aid, id);
-	self->w.r.pridx = pridx;
-	return;
-}
 
 /**
  * @fn fill_load_seq_a
@@ -913,7 +877,7 @@ void fill_init_fetch(
 	);
 	/* fetch sequence and store at (0, 0), then save newly loaded sequence lengths */
 	fill_fetch_intl(self, (struct gaba_block_s *)(blk + 1) - 1, len);
-	_store_v2i32(&blk->acnt, _cvt_v2i32_v2i16(len));
+	_store_v2i32(&blk->acnt, _cvt_v2i32_v2i8(len));
 	return;
 }
 
@@ -956,37 +920,63 @@ void fill_restore_fetch(
 	return;
 }
 
-/**
- * @fn fill_load_tail
- * @brief load sequences and indices from the previous tail
+/*
+ * @fn fill_load_section
  */
 static _force_inline
-struct gaba_joint_block_s fill_load_tail(
+void fill_load_section(
 	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *prev_tail)
+	struct gaba_section_s const *a,
+	struct gaba_section_s const *b,
+	v2i32_t ridx,
+	uint32_t pridx)
 {
-	debug("create head prev_tail(%p), p(%d), ppos(%lld), scnt(%d)",
-		prev_tail, prev_tail->p, prev_tail->f.ppos, prev_tail->scnt);
+	/* load current section lengths */
+	v2i64_t asec = _loadu_v2i64(a);					/* tuple of (64bit ptr, 32-bit id, 32-bit len) */
+	v2i64_t bsec = _loadu_v2i64(b);
 
-	/* init working stack */
-	struct gaba_phantom_s *blk = (struct gaba_phantom_s *)self->stack.top;
-	struct gaba_block_s *pblk = _last_block(prev_tail);
-	debug("start stack_top(%p), stack_end(%p)", self->stack.top, self->stack.end);
+	/* transpose sections */
+	v2i32_t aid_alen = _cast_v2i64_v2i32(asec);		/* extract lower 64bit */
+	v2i32_t bid_blen = _cast_v2i64_v2i32(bsec);
 
-	/* head sequence buffers are already filled, continue to body fill-in (first copy phantom block) */
-	blk->root = prev_tail == _ptail(self) ? -1 : 0;		/* overlaps with acnt */
-	blk->acnt = blk->bcnt = 0;					/* clear counter (a and b sequences are aligned at the head of the buffer) */
-	blk->tail = prev_tail;
-	_memcpy_blk_aa(&blk->diff, &pblk->diff, sizeof(struct gaba_diff_vec_s));
+	v2i32_t id = _lo_v2i32(aid_alen, bid_blen);
+	v2i32_t len = _hi_v2i32(aid_alen, bid_blen);
+	v2i64_t base = _hi_v2i64(asec, bsec);
 
-	/* load sequences */
-	nvec_t const mask = _set_n(0x0f);
-	nvec_t ch = _load_n(&prev_tail->ch.w);
-	nvec_t a = _and_n(mask, ch);
-	nvec_t b = _and_n(mask, _shr_n(ch, 4));		/* bit 7 must be cleared not to affect shuffle mask */
-	_store_n(_rd_bufa(self, 0, BW), a);
-	_store_n(_rd_bufb(self, 0, BW), b);
+	/* calc tail pointer */
+	v2i64_t tail = _add_v2i64(base, _cvt_v2i32_v2i64(len));
 
+	_print_v2i32(id);
+	_print_v2i32(len);
+	_print_v2i64(tail);
+
+	/* store sections */
+	_store_v2i64(&self->w.r.s.atail, tail);
+	_store_v2i32(&self->w.r.s.alen, len);
+	_store_v2i32(&self->w.r.s.aid, id);
+
+	/* calc ridx */
+	v2i32_t const z = _zero_v2i32();
+	v2i32_t len = _load_v2i32(&self->w.r.s.alen);
+	ridx = _sel_v2i32(_eq_v2i32(ridx, z),		/* if ridx is zero (occurs when section is updated) */
+		len,									/* load the next section */
+		ridx									/* otherwise use the same section as the previous */
+	);
+	_store_v2i32(&self->w.r.aridx, ridx);
+	_store_v2i32(&self->w.r.asridx, ridx);
+	self->w.r.pridx = self->w.r.psridx = pridx;
+	_print_v2i32(ridx);
+	return;
+}
+
+/**
+ * @fn fill_load_work
+ */
+static _force_inline
+void fill_load_work(
+	struct gaba_dp_context_s *self,
+	struct gaba_joint_tail_s const *tail)
+{
 	/* copy max and middle delta vectors */
 	nvec_t xd = _load_n(&prev_tail->xd);
 	wvec_t md = _load_w(&prev_tail->md);
@@ -996,35 +986,56 @@ struct gaba_joint_block_s fill_load_tail(
 	/* clear offset */
 	self->w.r.acc = prev_tail->acc;
 	self->w.r.ofsd = 0;
+	return;
+}
 
-	/* calc ridx */
-	v2i32_t const z = _zero_v2i32();
-	v2i32_t ridx = _load_v2i32(&prev_tail->aridx);
-	v2i32_t len = _load_v2i32(&self->w.r.s.alen);
-	ridx = _sel_v2i32(_eq_v2i32(ridx, z),		/* if ridx is zero (occurs when section is updated) */
-		len,									/* load the next section */
-		ridx									/* otherwise use the same section as the previous */
-	);
-	_store_v2i32(&self->w.r.aridx, ridx);
-	_store_v2i32(&self->w.r.asridx, ridx);
-	self->w.r.pridx = self->w.r.psridx = prev_tail->pridx;
-	_print_v2i32(ridx);
+/**
+ * @fn fill_save_work
+ */
+static _force_inline
+void fill_save_work(
+	struct gaba_dp_context_s *self)
+{
+	return;
+}
+
+/**
+ * @fn fill_load_tail
+ * @brief load sequences and indices from the previous tail
+ */
+static _force_inline
+struct gaba_block_s *fill_load_tail(
+	struct gaba_dp_context_s *self,
+	struct gaba_fill_s const *fill,
+	struct gaba_section_s const *a,
+	uint32_t aridx,
+	struct gaba_section_s const *b,
+	uint32_t bridx,
+	uint32_t pridx)
+{
+	debug("create head prev_tail(%p), p(%d), ppos(%lld), scnt(%d)",
+		prev_tail, prev_tail->p, prev_tail->f.ppos, prev_tail->scnt);
+
+	/* load sequences */
+	nvec_t const mask = _set_n(0x0f);
+	nvec_t ch = _load_n(&prev_tail->ch.w);
+	nvec_t a = _and_n(mask, ch);
+	nvec_t b = _and_n(mask, _shr_n(ch, 4));		/* bit 7 must be cleared not to affect shuffle mask */
+	_store_n(_rd_bufa(self, 0, BW), a);
+	_store_n(_rd_bufb(self, 0, BW), b);
 
 	/* check if init fetch is needed */
 	uint32_t stat = CONT;
 	if(prev_tail->f.ppos < GP_ROOT) {
 		fill_init_fetch(self, blk, prev_tail);
 		if(prev_tail->f.ppos + blk->acnt + blk->bcnt < GP_ROOT) {
-			stat = UPDATE;
+			return(NULL);
 		}
 		/* init fetch done, issue ungapped here filter if needed */
 	}
 
-	/* continue to fill-in loop */
-	return((struct gaba_joint_block_s){
-		.blk = (struct gaba_block_s *)(blk + 1),
-		.stat = stat
-	});
+	/* extract block pointer, pass to fill-in loop */
+	return((struct gaba_block_s *)prev_tail);
 }
 
 /**
@@ -1084,6 +1095,27 @@ struct gaba_joint_tail_s *fill_create_tail(
 	tail->tail = prev_tail;
 	_memcpy_blk_aa(&tail->s.atail, &self->w.r.s.atail, sizeof(struct gaba_section_pair_s));
 	return(tail);
+}
+
+/**
+ * @fn fill_create_phantom
+ * @brief initialize phantom block
+ */
+static _force_inline
+struct gaba_block_s *fill_create_phantom(
+	struct gaba_dp_context_s *self,
+	struct gaba_block_s const *prev_blk)
+{
+	struct gaba_phantom_s *ph = (struct gaba_phantom_s *)self->stack.top;
+	debug("start stack_top(%p), stack_end(%p)", self->stack.top, self->stack.end);
+
+	/* head sequence buffers are already filled, continue to body fill-in (first copy phantom block) */
+	ph->reserved = 0;							/* overlaps with mask */
+	ph->acnt = ph->bcnt = 0;					/* clear counter (a and b sequences are aligned at the head of the buffer) */
+	ph->xstat = HEAD;							/* FIXME: mark head */
+	ph->blk = prev_blk;
+	_memcpy_blk_aa(&ph->diff, &prev_blk->diff, sizeof(struct gaba_diff_vec_s));
+	return((struct gaba_block_s *)(ph + 1));
 }
 
 /**
@@ -1309,11 +1341,11 @@ int64_t fill_test_xdrop(
 }
 
 /**
- * @fn fill_bulk_test_seq_bound
+ * @fn fill_bulk_test_idx
  * @brief returns negative if ij-bound (for the bulk fill) is invaded
  */
 static _force_inline
-int64_t fill_bulk_test_seq_bound(
+int64_t fill_bulk_test_idx(
 	struct gaba_dp_context_s const *self)
 {
 	debug("test(%lld, %lld), len(%d, %d)",
@@ -1324,13 +1356,13 @@ int64_t fill_bulk_test_seq_bound(
 }
 
 /**
- * @fn fill_cap_test_seq_bound
+ * @fn fill_cap_test_idx
  * @brief returns negative if ij-bound (for the cap fill) is invaded
  */
-#define _fill_cap_test_seq_bound_init() \
+#define _fill_cap_test_idx_init() \
 	uint8_t *alim = _rd_bufa(self, self->w.r.aridx, BW); \
 	uint8_t *blim = _rd_bufb(self, self->w.r.bridx, BW);
-#define _fill_cap_test_seq_bound() ( \
+#define _fill_cap_test_idx() ( \
 	((int64_t)aptr - (int64_t)alim) | ((int64_t)blim - (int64_t)bptr) \
 )
 
@@ -1351,7 +1383,7 @@ void fill_bulk_block(
 	_fill_load_context(blk);
 	/**
 	 * @macro _fill_block
-	 * @brief an element of unrolled fill-in loop
+	 * @brief unit unrolled fill-in loop
 	 */
 	#define _fill_block(_direction, _label, _jump_to) { \
 		_dir_fetch(dir); \
@@ -1380,29 +1412,28 @@ void fill_bulk_block(
 
 /**
  * @fn fill_bulk_predetd_blocks
- * @brief fill <blk_cnt> contiguous blocks without ij-bound test
+ * @brief fill <cnt> contiguous blocks without ij-bound test
  */
 static _force_inline
-struct gaba_joint_block_s fill_bulk_predetd_blocks(
+struct gaba_block_s *fill_bulk_predetd_blocks(
 	struct gaba_dp_context_s *self,
 	struct gaba_block_s *blk,
-	uint64_t blk_cnt)
+	uint64_t cnt)
 {
-	uint32_t stat = CONT;
-	for(struct gaba_block_s *tblk = blk + blk_cnt; blk < tblk; blk++) {
-		/* check xdrop termination */
-		if(fill_test_xdrop(self) < 0) {
-			stat = TERM; break;
-		}
+	/* decrement blk to expose phantom block */
+	blk--;
 
+	/* bulk fill loop, first check termination */
+	struct gaba_block_s *tblk = blk + cnt - 1;
+	while((blk->xstat | (ptrdiff_t)(tblk - blk)) >= 0) {
 		/* bulk fill */
 		debug("blk(%p)", blk);
-		fill_bulk_block(self, blk);
+		fill_bulk_block(self, ++blk);
 	}
-	return((struct gaba_joint_block_s){
-		.blk = blk,
-		.stat = CONT
-	});
+
+	/* fix status flag */
+	blk->xstat = blk->xstat < 0 ? TERM : CONT;
+	return(blk);
 }
 
 /**
@@ -1410,29 +1441,22 @@ struct gaba_joint_block_s fill_bulk_predetd_blocks(
  * @brief fill blocks with ij-bound test
  */
 static _force_inline
-struct gaba_joint_block_s fill_bulk_seq_bounded(
+struct gaba_block_s *fill_bulk_seq_bounded(
 	struct gaba_dp_context_s *self,
 	struct gaba_block_s *blk)
 {
-	uint32_t stat = CONT;
+	/* decrement blk to expose phantom block */
+	blk--;
 
-	/* bulk fill loop */
-	while(1) {
-		/* check termination */
-		if((fill_test_xdrop(self)
-		  | fill_bulk_test_seq_bound(self)) < 0) {
-			break;
-		}
-
-		/* bulk fill */
-		debug("blk(%p)", blk);
-		fill_bulk_block(self, blk++);
+	/* bulk fill loop, first check termination */
+	while((blk->xstat | fill_bulk_test_idx(self)) >= 0) {
+		debug("blk(%p)", blk + 1);
+		fill_bulk_block(self, ++blk);
 	}
-	if(fill_test_xdrop(self) < 0) { stat = TERM; }
-	return((struct gaba_joint_block_s){
-		.blk = blk,
-		.stat = stat 		/* < 0 if stat == TERM */
-	});
+
+	/* fix status flag */
+	blk->xstat = blk->xstat < 0 ? TERM : CONT;
+	return(blk);
 }
 
 /**
@@ -1440,14 +1464,14 @@ struct gaba_joint_block_s fill_bulk_seq_bounded(
  * @brief fill blocks with cap test
  */
 static _force_inline
-struct gaba_joint_block_s fill_cap_seq_bounded(
+struct gaba_block_s *fill_cap_seq_bounded(
 	struct gaba_dp_context_s *self,
 	struct gaba_block_s *blk)
 {
 	#define _fill_cap_seq_bounded_core(_dir) { \
 		/* update sequence coordinate and then check term */ \
 		_fill_##_dir##_update_ptr(); \
-		if(_fill_cap_test_seq_bound() < 0) { \
+		if(_fill_cap_test_idx() < 0) { \
 			_fill_##_dir##_windback_ptr(); \
 			_dir_windback(dir); \
 			break; \
@@ -1455,55 +1479,41 @@ struct gaba_joint_block_s fill_cap_seq_bounded(
 		_fill_##_dir();		/* update band */ \
 	}
 
-	uint32_t stat = CONT;
-	while(1) {
-		/* check xdrop termination */
-		if(fill_test_xdrop(self) < 0) {
-			stat = TERM; break;
-		}
+	blk--;									/* decrement blk to expose phantom block */
+	while(blk->xstat >= 0) {
 		/* fetch sequence */
-		fill_cap_fetch(self, blk);
+		fill_cap_fetch(self, ++blk);
+		_fill_cap_test_idx_init();
+		_fill_load_context(blk);			/* contains ptr as struct gaba_mask_pair_s *ptr = blk->mask; */
 
-		/* vectors on registers inside self block */ {
-			_fill_cap_test_seq_bound_init();
-			_fill_load_context(blk);	/* contains ptr as struct gaba_mask_pair_s *ptr = blk->mask; */
-
-			/* update diff vectors */
-			struct gaba_mask_pair_s *tptr = &blk->mask[BLK];
-			while(ptr < tptr) {			/* ptr is automatically incremented in _fill_right() or _fill_down() */
-				_dir_fetch(dir);		/* determine direction */
-
-				if(_dir_is_right(dir)) {
-					_fill_cap_seq_bounded_core(right);
-				} else {
-					_fill_cap_seq_bounded_core(down);
-				}
-			}
-
-			uint64_t cnt = ptr - blk->mask;		/* calc filled count */
-			_dir_adjust_remainder(dir, cnt);	/* adjust dir remainder */
-			_fill_store_context(blk);			/* store mask and vectors */
-			blk += (cnt != 0);					/* forward block pointer if filled count is not zero */
-
-			if(cnt != BLK) {					/* break if not filled full length */
-				stat = UPDATE; break;
+		/* update diff vectors */
+		struct gaba_mask_pair_s *tptr = &blk->mask[BLK];
+		while(ptr < tptr) {					/* ptr is automatically incremented in _fill_right() or _fill_down() */
+			_dir_fetch(dir);				/* determine direction */
+			if(_dir_is_right(dir)) {
+				_fill_cap_seq_bounded_core(right);
+			} else {
+				_fill_cap_seq_bounded_core(down);
 			}
 		}
+
+		uint64_t i = ptr - blk->mask;		/* calc filled count */
+		_dir_adjust_remainder(dir, i);		/* adjust dir remainder */
+		_fill_store_context(blk);			/* store mask and vectors */
+		if(i != BLK) { blk -= i == 0; break; }/* break if not filled full length */
 	}
 
-	debug("blk(%p), stat(%x)", blk, stat);
-	return((struct gaba_joint_block_s){
-		.blk = blk,
-		.stat = stat
-	});
+	/* fix status flag */
+	blk->xstat = blk->xstat < 0 ? TERM : UPDATE;
+	return(blk);
 }
 
 /**
- * @fn calc_max_bulk_blocks_mem
+ * @fn max_blocks_mem
  * @brief calculate maximum number of blocks (limited by stack size)
  */
 static _force_inline
-uint64_t calc_max_bulk_blocks_mem(
+uint64_t max_blocks_mem(
 	struct gaba_dp_context_s const *self)
 {
 	uint64_t mem_size = self->stack.end - self->stack.top;
@@ -1514,12 +1524,25 @@ uint64_t calc_max_bulk_blocks_mem(
 }
 
 /**
- * @fn calc_min_expected_blocks_ridx
+ * @fn max_blocks_idx
+ * @brief calc max #expected blocks from block,
+ * used to determine #blocks which can be filled without mem boundary check.
+ */
+static _force_inline
+uint64_t max_blocks_idx(
+	struct gaba_dp_context_s const *self)
+{
+	uint64_t p = MIN2(self->w.r.aridx, self->w.r.bridx);
+	return((2*p + p/2) / BLK);
+}
+
+/**
+ * @fn min_blocks_idx
  * @brief calc min #expected blocks from block,
  * #blocks filled without seq boundary check.
  */
 static _force_inline
-uint64_t calc_min_expected_blocks_ridx(
+uint64_t min_blocks_idx(
 	struct gaba_dp_context_s const *self)
 {
 	uint64_t p = MIN2(self->w.r.aridx, self->w.r.bridx);
@@ -1527,91 +1550,29 @@ uint64_t calc_min_expected_blocks_ridx(
 }
 
 /**
- * @fn calc_max_expected_blocks_tail
- * @brief calc max #expected blocks from block,
- * used to determine #blocks which can be filled without mem boundary check.
- */
-static _force_inline
-uint64_t calc_max_expected_blocks_tail(
-	struct gaba_dp_context_s const *self,
-	struct gaba_joint_tail_s const *tail)
-{
-	uint64_t p = MIN2(tail->aridx, tail->bridx);
-	return((2*p + p/2) / BLK);
-}
-
-/**
- * @fn calc_min_expected_blocks_tail
- * @brief calc min #expected blocks from block,
- * used to determine #blocks which can be filled without seq boundary check.
- */
-static _force_inline
-uint64_t calc_min_expected_blocks_tail(
-	struct gaba_dp_context_s const *self,
-	struct gaba_joint_tail_s const *tail)
-{
-	uint64_t p = MIN2(tail->aridx, tail->bridx);
-	return((p + p/2) / BLK);
-}
-
-/**
- * @fn fill_mem_bounded
- * @brief fill <blk_cnt> contiguous blocks without seq bound tests, adding head and tail
- */
-static _force_inline
-struct gaba_joint_tail_s *fill_mem_bounded(
-	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *prev_tail,
-	uint64_t blk_cnt)
-{
-	struct gaba_joint_block_s b = fill_load_tail(self, prev_tail);
-	if(b.stat != CONT) {
-		return(fill_create_tail(self, prev_tail, b.blk, b.stat));
-	}
-
-	b = fill_bulk_predetd_blocks(self, b.blk, blk_cnt);
-	return(fill_create_tail(self, prev_tail, b.blk, b.stat));
-}
-
-/**
  * @fn fill_seq_bounded
- * @brief fill blocks with seq bound tests, adding head and tail
+ * @brief fill blocks with seq bound tests (without mem test), adding head and tail
  */
 static _force_inline
-struct gaba_joint_tail_s *fill_seq_bounded(
+struct gaba_block_s *fill_seq_bounded(
 	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *prev_tail)
+	struct gaba_block_s *blk)
 {
-	struct gaba_joint_block_s b = fill_load_tail(self, prev_tail);
-
-	/* check if term detected in init fetch */
-	if(b.stat != CONT) {
-		goto _fill_seq_bounded_finish;
-	}
-
-	/* calculate block size */
-	uint64_t seq_bulk_blocks = calc_min_expected_blocks_ridx(self);
-	while(seq_bulk_blocks > MIN_BULK_BLOCKS) {
+	uint64_t cnt;						/* #blocks filled in bulk */
+	while((cnt = min_blocks_idx(self)) > MIN_BULK_BLOCKS) {
 		/* bulk fill without ij-bound test */
-		b = fill_bulk_predetd_blocks(self, b.blk, seq_bulk_blocks);
-		if(b.stat != CONT) {
-			goto _fill_seq_bounded_finish;	/* skip cap */
+		if((blk = fill_bulk_predetd_blocks(self, blk, cnt))->xstat != CONT) {
+			return(blk);				/* xdrop termination detected, skip cap */
 		}
-		seq_bulk_blocks = calc_min_expected_blocks_ridx(self);
 	}
 
 	/* bulk fill with ij-bound test */
-	b = fill_bulk_seq_bounded(self, b.blk);
-
-	if(b.stat != CONT) {
-		goto _fill_seq_bounded_finish;		/* skip cap */
+	if((blk = fill_bulk_seq_bounded(self, blk))->xstat != CONT) {
+		return(blk);					/* xdrop termination detected, skip cap */
 	}
 
 	/* cap fill (without p-bound test) */
-	b = fill_cap_seq_bounded(self, stat.blk);
-
-_fill_seq_bounded_finish:;
-	return(fill_create_tail(self, prev_tail, b.blk, b.stat));
+	return(fill_cap_seq_bounded(self, blk));
 }
 
 /**
@@ -1619,50 +1580,35 @@ _fill_seq_bounded_finish:;
  * @brief fill dp matrix inside section pairs
  */
 static _force_inline
-struct gaba_joint_tail_s *fill_section_seq_bounded(
+struct gaba_block_s *fill_section_seq_bounded(
 	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *prev_tail)
+	struct gaba_block_s *prev_blk)
 {
-	/* init tail pointer */
-	struct gaba_joint_tail_s *tail = prev_tail;
-
-	/* calculate block sizes */
-	uint64_t mem_bulk_blocks = calc_max_bulk_blocks_mem(self);
-	uint64_t seq_bulk_blocks = calc_max_expected_blocks_tail(self, tail);
+	/* create phantom head */
+	struct gaba_block_s *blk = fill_create_phantom(self, prev_blk);
 
 	/* extra large bulk fill (with stack allocation) */
-	debug("mem_bulk_blocks(%llu), seq_bulk_blocks(%llu)", mem_bulk_blocks, seq_bulk_blocks);
-	while(_unlikely(mem_bulk_blocks < seq_bulk_blocks)) {
-		uint64_t bulk_cnt = MIN2(
-			mem_bulk_blocks,
-			calc_min_expected_blocks_tail(self, tail)
-		);
+	uint64_t mem_cnt, seq_cnt;			/* #blocks filled in bulk */
+	while((mem_cnt = max_blocks_mem(self)) < (seq_cnt = max_blocks_idx(self))) {
+		debug("mem_cnt(%llu), seq_cnt(%llu)", mem_cnt, seq_cnt);
 
-		if(bulk_cnt > MIN_BULK_BLOCKS) {
+		/* here mem limit reaches first (seq sections too long), so fill without seq test */
+		if((mem_cnt = MIN2(mem_cnt, min_blocks_idx(self))) > MIN_BULK_BLOCKS) {
 			debug("mem bounded fill");
-			if((tail = fill_mem_bounded(self, tail, bulk_cnt))->stat != CONT) {
-				return(tail);
+			if((blk = fill_bulk_predetd_blocks(self, blk, mem_cnt))->xstat != CONT) {
+				return(blk);
 			}
-
-			/* fill-in area has changed */
-			seq_bulk_blocks = calc_max_expected_blocks_tail(self, tail);
 		}
 
-		/* malloc the next stack and set pointers */
+		/* memory ran out: malloc a next stack and create a new phantom head */
 		debug("add stack");
-		if(gaba_dp_add_stack(self, 0) != 0) {
-			return(NULL);
-		}
-
-		/* stack size has changed */
-		mem_bulk_blocks = calc_max_bulk_blocks_mem(self);
-		debug("mem_bulk_blocks(%llu), seq_bulk_blocks(%llu)", mem_bulk_blocks, seq_bulk_blocks);
+		if(gaba_dp_add_stack(self, 0) != 0) { return(NULL); }
+		blk = fill_create_phantom(self, blk);
 	}
-
 	debug("v(%p), ppos(%lld), p(%d)", _last_block(tail)->md, tail->f.ppos, tail->p);
 
 	/* bulk fill with seq bound check */
-	return(fill_seq_bounded(self, tail));
+	return(fill_seq_bounded(self, blk));
 }
 
 /**
@@ -1680,15 +1626,16 @@ struct gaba_fill_s *_export(gaba_dp_fill_root)(
 	/* restore dp context pointer by adding offset */
 	self = _restore_dp_context(self);
 
-	/* store section info */
-	_ptail(self)->aridx = a->len - apos;
-	_ptail(self)->bridx = b->len - bpos;
+	/* load sections and extract the last block pointer */
+	struct gaba_block_s *blk = fill_load_tail(
+		self, _pfill(self),
+		a, a->len - apos,
+		b, b->len - bpos,
+		UINT32_MAX
+	);
 
-	/* init section and restore sequence reader buffer */
-	fill_load_section(self, a, b, UINT32_MAX);
-
-	/* fill */
-	return(_fill(fill_section_seq_bounded(self, _ptail(self))));
+	/* fill blocks then create a tail cap */
+	return(fill_create_tail(self, fill_section_seq_bounded(self, blk)));
 }
 
 /**
@@ -1704,12 +1651,16 @@ struct gaba_fill_s *_export(gaba_dp_fill)(
 {
 	self = _restore_dp_context(self);
 
-	/* load section info to working buffer */
-	fill_load_section(self, a, b, UINT32_MAX);
+	/* load sections and extract the last block pointer */
+	struct gaba_block_s *blk = fill_load_tail(
+		self, _pfill(self),
+		a, _tail(fill)->aridx,
+		b, _tail(fill)->bridx,
+		_tail(fill)->pridx
+	);
 
-	/* fill */
-	struct gaba_joint_tail_s const *tail = _tail(fill);
-	return(_fill(fill_section_seq_bounded(self, tail)));
+	/* fill blocks then create a tail cap */
+	return(fill_create_tail(self, fill_section_seq_bounded(self, blk)));
 }
 
 
@@ -1790,8 +1741,8 @@ void leaf_search(
 	 */
 	v2i32_t ridx = _load_v2i32(&tail->aridx);
 	while(_last_phantom(b)->root != -1 && (max_mask &= ~(--b->max_update_mask)) != 0) {
-		v2i16_t cnt = _load_v2i16(&b->acnt);
-		ridx = _add_v2i32(ridx, _cvt_v2i16_v2i32(cnt));
+		v2i8_t cnt = _load_v2i8(&b->acnt);
+		ridx = _add_v2i32(ridx, _cvt_v2i8_v2i32(cnt));
 	}
 
 	/* fetch from existing blocks */
@@ -1973,13 +1924,11 @@ void trace_reload_section(
  * @brief reload tail, issued at each band-segment boundaries
  */
 #define _trace_reload_tail(t) { \
-	/* load section lengths */ \
-	struct gaba_joint_tail_s const *tail = _last_phantom(blk)->tail; \
 	/* reload block pointer */ \
-	blk = _last_block(tail); \
+	blk = _last_phantom(blk)->blk; \
 	/* reload dir and mask pointer, adjust path offset */ \
 	uint64_t _idx = blk->acnt + blk->bcnt; \
-	ptr = &blk->mask[_idx]; \
+	mask = &blk->mask[_idx]; \
 	dir_mask = _trace_load_block_rem(_idx); \
 }
 
@@ -1988,7 +1937,7 @@ void trace_reload_section(
  * @brief reload block for bulk trace
  */
 #define _trace_reload_block() { \
-	ptr = &(--blk)->mask[BLK - 1]; \
+	mask = &(--blk)->mask[BLK - 1]; \
 	dir_mask = _dir_load(blk, BLK).mask; \
 }
 
@@ -2009,8 +1958,8 @@ void trace_reload_section(
  * otherwise gidx will not updated. must be called just after reload_ptr or reload_tail.
  */
 #define _trace_test_bulk() { \
-	v2i16_t cnt = _load_v2i16(&blk->acnt); \
-	v2i32_t _gidx = _sub_v2i32(gidx, _cvt_v2i16_v2i32(cnt)); \
+	v2i8_t cnt = _load_v2i8(&blk->acnt); \
+	v2i32_t _gidx = _sub_v2i32(gidx, _cvt_v2i8_v2i32(cnt)); \
 	_test_v2i32(_gt_v2i32(_gidx, m00), m11) ? (gidx = _gidx, 1) : 0; \
 }
 
