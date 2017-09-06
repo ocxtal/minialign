@@ -10,13 +10,13 @@ all: native
 
 native:
 	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)'
-	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba_linear_16.o gaba_affine_16.o gaba_linear_32.o gaba_affine_32.o $(LDFLAGS)
+	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba.*.o $(LDFLAGS)
 
 sse41 avx2:
 	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) -DUNITTEST=0 -DNAMESPACE=$@' NAMESPACE=$@
 
 universal: sse41 avx2
-	$(CC) -o $(TARGET) -march=native main.c minialign.*.o gaba_linear.*.o gaba_affine.*.o $(LDFLAGS)
+	$(CC) -o $(TARGET) -march=native universal.c minialign.*.o gaba.*.o $(LDFLAGS)
 
 clean:
 	rm -fr gmon.out *.o a.out $(TARGET) *~ *.a *.dSYM session*
@@ -28,6 +28,6 @@ install:
 uninstall:
 	rm -f $(PREFIX)/bin/$(TARGET)
 
-gaba.c: gaba.h log.h lmm.h unittest.h sassert.h
-gaba_wrap.c: gaba.h log.h unittest.h sassert.h
-minialign.c: kvec.h ksort.h gaba.h lmm.h unittest.h sassert.h
+gaba.c: gaba.h log.h unittest.h sassert.h
+gaba_wrap.h: gaba.h log.h unittest.h sassert.h
+minialign.c: kvec.h ksort.h gaba_wrap.h lmm.h unittest.h sassert.h

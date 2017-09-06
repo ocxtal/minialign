@@ -1,23 +1,16 @@
 
 
 SUFFIX = $(NAMESPACE:$(NAMESPACE)=.$(NAMESPACE))
+MINIALIGN_OBJS = minialign$(SUFFIX).o
+GABA_OBJS = $(shell echo gaba.{linear,affine,combined}.{16,32,64}$(SUFFIX).o)
 
-all: minialign$(SUFFIX).o gaba_linear_16$(SUFFIX).o gaba_affine_16$(SUFFIX).o gaba_linear_32$(SUFFIX).o gaba_affine_32$(SUFFIX).o
+all: $(MINIALIGN_OBJS) $(GABA_OBJS)
 
-minialign$(SUFFIX).o: minialign.c
+$(MINIALIGN_OBJS): minialign.c
 	$(CC) -c -o $@ $(CFLAGS) $<
 
-gaba_linear_16$(SUFFIX).o: gaba.c
-	$(CC) -c -o $@ $(CFLAGS) -DMODEL=LINEAR -DBW=16 -DSUFFIX $<
+$(GABA_OBJS): gaba.c
+	$(CC) -c -o $@ $(CFLAGS) -DMODEL=`echo $@ | cut -d'.' -f2 | tr a-z A-Z` -DBW=`echo $@ | cut -d'.' -f3` -DSUFFIX $<
 
-gaba_affine_16$(SUFFIX).o: gaba.c
-	$(CC) -c -o $@ $(CFLAGS) -DMODEL=AFFINE -DBW=16 -DSUFFIX $<
-
-gaba_linear_32$(SUFFIX).o: gaba.c
-	$(CC) -c -o $@ $(CFLAGS) -DMODEL=LINEAR -DBW=32 -DSUFFIX $<
-
-gaba_affine_32$(SUFFIX).o: gaba.c
-	$(CC) -c -o $@ $(CFLAGS) -DMODEL=AFFINE -DBW=32 -DSUFFIX $<
-
-gaba.c: gaba.h log.h lmm.h unittest.h sassert.h
+gaba.c: gaba.h log.h unittest.h sassert.h
 minialign.c: kvec.h ksort.h gaba_wrap.h gaba.h lmm.h unittest.h sassert.h
