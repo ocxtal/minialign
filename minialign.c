@@ -4,7 +4,7 @@
  *
  * @brief minialign core implementation
  *
- * @author Hajime Suzuki (original file by Heng Li)
+ * @author Hajime Suzuki (original files by Heng Li)
  * @license MIT
  */
 // #define DEBUG
