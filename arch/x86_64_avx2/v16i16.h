@@ -137,17 +137,16 @@ typedef struct v16i16_s {
 	} \
 )
 
-/* horizontal max */
+/* horizontal max (reduction max) */
 #define _hmax_v16i16(a) ({ \
-	__m256i _vmax = _mm256_max_epi16((a).v1, \
-		_mm256_castsi128_si256(_mm256_extracti128_si256((a).v1, 1))); \
-	_vmax = _mm256_max_epi16(_vmax, \
-		_mm256_srli_si256(_vmax, 8)); \
-	_vmax = _mm256_max_epi16(_vmax, \
-		_mm256_srli_si256(_vmax, 4)); \
-	_vmax = _mm256_max_epi16(_vmax, \
-		_mm256_srli_si256(_vmax, 2)); \
-	(int16_t)_mm256_extract_epi16(_vmax, 0); \
+	__m128i _t = _mm_max_epi16( \
+		_mm_castsi256_si128((a).v1), \
+		_mm_extracti128_si256((a).v1, 1) \
+	); \
+	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 8)); \
+	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 4)); \
+	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 2)); \
+	(int16_t)_mm_extract_epi16(_t, 0); \
 })
 
 /* convert */

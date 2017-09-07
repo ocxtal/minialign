@@ -167,6 +167,22 @@ typedef struct v64i16_s {
 	} \
 )
 
+/* horizontal max (reduction max) */
+#define _hmax_v32i16(a) ({ \
+	__m256i _s = _mm256_max_epi16( \
+		_mm256_max_epi16((a).v1, (a).v2), \
+		_mm256_max_epi16((a).v3, (a).v4) \
+	); \
+	__m128i _t = _mm_max_epi16( \
+		_mm_castsi256_si128(_s), \
+		_mm_extracti128_si256(_s, 1) \
+	); \
+	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 8)); \
+	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 4)); \
+	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 2)); \
+	(int16_t)_mm_extract_epi16(_t, 0); \
+})
+
 /* debug print */
 #ifdef _LOG_H_INCLUDED
 #define _print_v64i16(a) { \

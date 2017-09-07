@@ -149,21 +149,11 @@ typedef struct v2i32_s {
 #define V2I32_MASK_11		( 0xff )
 
 /* convert */
-typedef struct v2i16_s {
-	__m128i v1;
-} v2i16_t;
-#define _load_v2i16(p)		_mm_loadu_si32((__m128i const *)(p))
-#define _loadu_v2i16(p)		_mm_loadu_si32((__m128i const *)(p))
-#define _store_v2i16(p, a)	_mm_storeu_si32((__m128i const *)(p), (a).v1)
-#define _storeu_v2i16(p, a)	_mm_storeu_si32((__m128i const *)(p), (a).v1)
-#define _cvt_v2i16_v2i32(a) ( \
+typedef uint64_t v2i8_t;
+#define _load_v2i8(p)		*((uint16_t const *)(p))
+#define _cvt_v2i8_v2i32(a) ( \
 	(v2i32_t) { \
-		_mm_cvtepi16_epi32((a).v1) \
-	} \
-)
-#define _cvt_v2i32_v2i16(a) ( \
-	(v2i32_t) { \
-		_mm_packs_epi32((a).v1, (a).v1) \
+		_mm_cvtepi8_epi32(_mm_cvtsi64_si128(a)) \
 	} \
 )
 
