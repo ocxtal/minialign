@@ -48,15 +48,15 @@ typedef void *(*gaba_malloc_t)(void *opaque, size_t size);
 typedef void *(*gaba_free_t)(void *opaque, void *free);
 
 /**
- * @struct gaba_allocator_s
+ * @struct gaba_alloc_s
  * @brief optional memory allocator, malloc and free pair must not be NULL.
  */
-struct gaba_allocator_s {
+struct gaba_alloc_s {
 	void *opaque;					/** local memory arena */
 	gaba_malloc_t malloc;			/** malloc; dedicated for alignment path generation */
 	gaba_free_t free;
 };
-typedef struct gaba_allocator_s gaba_allocator_t;
+typedef struct gaba_alloc_s gaba_alloc_t;
 
 /**
  * @struct gaba_params_s
@@ -160,16 +160,16 @@ struct gaba_pos_pair_s {
 typedef struct gaba_pos_pair_s gaba_pos_pair_t;
 
 /**
- * @struct gaba_path_section_s
+ * @struct gaba_segment_s
  */
-struct gaba_path_section_s {
+struct gaba_segment_s {
 	uint32_t aid, bid;			/** (8) id of the sections */
 	uint32_t apos, bpos;		/** (8) pos in the sections */
 	uint32_t alen, blen;		/** (8) lengths of the segments */
 	uint64_t ppos;				/** (8) path string position (offset) */
 };
-typedef struct gaba_path_section_s gaba_path_section_t;
-#define gaba_plen(sec)		( (sec)->alen + (sec)->blen )
+typedef struct gaba_segment_s gaba_path_section_t;
+#define gaba_plen(seg)		( (seg)->alen + (seg)->blen )
 
 /**
  * @struct gaba_alignment_s
@@ -177,12 +177,12 @@ typedef struct gaba_path_section_s gaba_path_section_t;
 struct gaba_alignment_s {
 	/* reserved for internal use */
 	void *reserved1[2];
-	uint32_t reserved2180;
+	uint32_t reserved;
 
-	uint32_t sec_len;			/* section length */
-	struct gaba_path_section_s const *sec;
+	uint32_t slen;				/* section length */
+	struct gaba_segment_s const *seg;
 
-	uint64_t path_len;			/* path length */
+	uint64_t plen;				/* path length */
 
 	int64_t score;				/** score */
 	uint32_t mcnt, xcnt;		/** #matches, #mismatches */
@@ -288,7 +288,7 @@ GABA_EXPORT_LEVEL
 gaba_alignment_t *gaba_dp_trace(
 	gaba_dp_t *dp,
 	gaba_fill_t const *tail,
-	gaba_allocator_t const *alloc);
+	gaba_alloc_t const *alloc);
 
 /**
  * @fn gaba_dp_res_free

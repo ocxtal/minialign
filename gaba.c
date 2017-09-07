@@ -177,7 +177,7 @@ _static_assert(sizeof(void *) == 8);
 _static_assert(sizeof(struct gaba_params_s) == 24);
 _static_assert(sizeof(struct gaba_section_s) == 16);
 _static_assert(sizeof(struct gaba_fill_s) == 24);
-_static_assert(sizeof(struct gaba_path_section_s) == 32);
+_static_assert(sizeof(struct gaba_segment_s) == 32);
 _static_assert(sizeof(struct gaba_alignment_s) == 64);
 _static_assert(sizeof(nvec_masku_t) == BW / 8);
 
@@ -185,7 +185,7 @@ _static_assert(sizeof(nvec_masku_t) == BW / 8);
  * @macro _plen
  * @brief extract plen from path_section_s
  */
-#define _plen(sec)		( (sec)->alen + (sec)->blen )
+#define _plen(seg)		( (seg)->alen + (seg)->blen )
 
 /* forward declarations */
 static int32_t gaba_dp_add_stack(struct gaba_dp_context_s *self, uint64_t size);
@@ -376,17 +376,17 @@ struct gaba_aln_intl_s {
 	gaba_free_t free;					/** (8) free */
 
 	uint32_t head_margin;				/** (8) margin size at the head of an alignment object, must be multiple of 8 */
-	uint32_t sec_len;					/** (8) section length */
-	struct gaba_path_section_s const *sec;	/** (8) */
-	uint64_t path_len;					/** (8) path length (psum) */
+	uint32_t slen;						/** (8) section length */
+	struct gaba_segment_s *seg;			/** (8) */
+	uint64_t plen;						/** (8) path length (psum) */
 	int64_t score;						/** (8) score */
 	uint32_t mcnt, xcnt;				/** (8) #matchs, #mismatchs */
 	uint32_t gicnt, gecnt;				/** (8) #gap opens, #gap bases */
 };
 _static_assert(sizeof(struct gaba_alignment_s) == sizeof(struct gaba_aln_intl_s));
-_static_assert(offsetof(struct gaba_alignment_s, sec_len) == offsetof(struct gaba_aln_intl_s, sec_len));
-_static_assert(offsetof(struct gaba_alignment_s, sec) == offsetof(struct gaba_aln_intl_s, sec));
-_static_assert(offsetof(struct gaba_alignment_s, path_len) == offsetof(struct gaba_aln_intl_s, path_len));
+_static_assert(offsetof(struct gaba_alignment_s, slen) == offsetof(struct gaba_aln_intl_s, slen));
+_static_assert(offsetof(struct gaba_alignment_s, seg) == offsetof(struct gaba_aln_intl_s, seg));
+_static_assert(offsetof(struct gaba_alignment_s, plen) == offsetof(struct gaba_aln_intl_s, plen));
 _static_assert(offsetof(struct gaba_alignment_s, mcnt) == offsetof(struct gaba_aln_intl_s, mcnt));
 _static_assert(offsetof(struct gaba_alignment_s, xcnt) == offsetof(struct gaba_aln_intl_s, xcnt));
 _static_assert(offsetof(struct gaba_alignment_s, gicnt) == offsetof(struct gaba_aln_intl_s, gicnt));
@@ -394,7 +394,7 @@ _static_assert(offsetof(struct gaba_alignment_s, gecnt) == offsetof(struct gaba_
 
 /**
  * @struct gaba_leaf_s
- * @brief working buffer for max score search (currently allocated on stack)
+ * @brief working buffer for max score search
  */
 struct gaba_leaf_s {
 	struct gaba_joint_tail_s const *tail;
@@ -428,7 +428,8 @@ struct gaba_writer_work_s {
 	struct gaba_joint_tail_s const *btail;/** (8) */
 	struct gaba_alignment_s *aln;		/** (8) */
 
-	uint64_t _pad1[6];
+	struct gaba_leaf_s leaf;			/** (40) working buffer for max pos search */
+	uint64_t _pad1;
 	/** 64, 192 */
 };
 _static_assert((sizeof(struct gaba_writer_work_s) % 64) == 0);
@@ -1745,8 +1746,7 @@ void leaf_refill_block(
 static _force_inline
 void leaf_search(
 	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *tail,
-	struct gaba_leaf_s *leaf)
+	struct gaba_joint_tail_s const *tail)
 {
 	/* load mask and block pointers */
 	uint64_t max_mask = leaf_load_max_mask(self, tail);
@@ -1757,7 +1757,8 @@ void leaf_search(
 	 * max_mask will be zero if the block contains the maximum scoring cell with the shortest path
 	 */
 	v2i32_t ridx = _load_v2i32(&tail->aridx);
-	while(b->xstat != ROOT && (max_mask &= ~(--b->max_update_mask)) != 0) {
+	while(--b->xstat != ROOT && (max_mask &= ~b->max_update_mask) != 0) {
+		/* FIXME: reload needed for HEAD */
 		v2i8_t cnt = _load_v2i8(&b->acnt);
 		ridx = _add_v2i32(ridx, _cvt_v2i8_v2i32(cnt));
 	}
@@ -1774,9 +1775,9 @@ void leaf_search(
 	while(m > max_mask_arr && (--m->all & b->max_update_mask) != 0) {}
 
 	/* calc (p, q) coordinates */
-	leaf->blk = b;
-	leaf->p = m - max_mask_arr;
-	leaf->q = tzcnt(m->all & b->max_update_mask);
+	self->w.l.blk = b;
+	self->w.l.p = m - max_mask_arr;
+	self->w.l.q = tzcnt(m->all & b->max_update_mask);
 
 	/* restore reverse indices */
 	int64_t filled_count = (m - max_mask_arr) + 1;		/* p + 1 */
@@ -1784,15 +1785,19 @@ void leaf_search(
 	int32_t acnt = filled_count - bcnt;
 	ridx = _add_v2i32(ridx,
 		_seta_v2i32(
-			(b->bcnt - bcnt) + (BW - leaf->q),
-			(b->acnt - acnt) + (1 + leaf->q)
+			(b->bcnt - bcnt) + (BW - self->w.l.q),
+			(b->acnt - acnt) + (1 + self->w.l.q)
 		)
 	);
 
 	v2i32_t eridx = _load_v2i32(&tail->aridx);
 	v2i32_t rem = _sub_v2i32(ridx, eridx);
-	leaf->ppos = tail->f.ppos - _hi32(rem) - _lo32(rem);
-	_store_v2i32(&leaf->aridx, ridx);
+	self->w.l.a.plen = tail->f.ppos - _hi32(rem) - _lo32(rem);
+
+	/* increment by one to convert char index to grid index */
+	v2i32_t gidx = _sub_v2i32(_set_v2i32(1), ridx);
+	_store_v2i32(&self->w.l.agidx, gidx);				/* current gidx */
+	_store_v2i32(&self->w.l.asgidx, gidx);				/* tail gidx (pos) */
 	return;
 }
 
@@ -1805,24 +1810,22 @@ struct gaba_pos_pair_s _export(gaba_dp_search_max)(
 	struct gaba_fill_s const *fill)
 {
 	self = _restore_dp_context(self);
-
-	struct gaba_leaf_s leaf;
-	leaf_search(self, _tail(fill), &leaf);
+	leaf_search(self, _tail(fill));
 
 	struct gaba_joint_tail_s const *atail = _tail(fill), *btail = _tail(fill);
-	int32_t aidx = atail->s.alen - leaf.aridx, bidx = btail->s.blen - leaf.bridx;
+	int32_t agidx = self->w.l.agidx, bgidx = self->w.l.bgidx;
 
-	while(aidx < 0) {
+	while(agidx <= 0) {
 		for(atail = atail->tail; (atail->f.stat & GABA_STATUS_UPDATE_A) == 0; atail = atail->tail) {}
-		aidx += atail->s.alen;
+		agidx += atail->s.alen;
 	}
-	while(bidx < 0) {
+	while(bgidx <= 0) {
 		for(btail = btail->tail; (btail->f.stat & GABA_STATUS_UPDATE_B) == 0; btail = btail->tail) {}
-		bidx += btail->s.blen;
+		bgidx += btail->s.blen;
 	}
 	return((struct gaba_pos_pair_s){
-		.apos = aidx,
-		.bpos = bidx
+		.apos = agidx - 1,
+		.bpos = bgidx - 1
 	});
 }
 
@@ -1996,7 +1999,7 @@ void trace_reload_section(
 #define _trace_tail_load_n(t, _jump_to) { \
 	if(_unlikely(mask < blk->mask)) { \
 		_trace_store_path();					/* store path_array */ \
-		if(_last_phantom(blk)->root + 1 < 2) {	/* head (phantom) block is marked mask == -1 or 0 */ \
+		if(_last_phantom(blk)->xstat == HEAD) {	/* head (phantom) block is marked 0x4000 */ \
 			_trace_reload_tail(t);				/* fetch the previous tail */ \
 			if(!_trace_test_bulk()) {			/* adjust gidx */ \
 				goto _jump_to;					/* dispatch again (bulk loop) */ \
@@ -2016,7 +2019,7 @@ void trace_body(
 	struct gaba_dp_context_s *self)
 {
 	#define _trace_gap_loop(t, _type, _next, _label) { \
-		_trace_forward_##_type##_##_label##_head: \
+		_trace_##_type##_##_label##_head: \
 		_trace_inc_gi();		/* increment #gap regions at the head */ \
 		while(1) { \
 			if(_trace_test_gap_##_label() == 0) { \
@@ -2107,7 +2110,7 @@ _trace_index_break:;
 	_storeu_u64(path, path_array<<ofs);
 
 	/* save gap counts */
-	_store_v2i32(&self->w.l.path.gic, gc);
+	_store_v2i32(&self->w.l.a.gicnt, gc);
 
 	/* store pointers and coordinates */
 	self->w.l.path = path;
@@ -2116,20 +2119,19 @@ _trace_index_break:;
 	self->w.l.p = mask - blk->mask;	/* local p-coordinate */
 	self->w.l.q = q;				/* q coordinate */
 	_store_v2i32(&self->w.l.agidx, gidx);
-	debug("p(%lld), ppos(%lld), q(%llu)", p, self->w.l.ppos, q);
 	return;
 }
 
 /**
- * @fn trace_push_section
+ * @fn trace_push_segment
  */
 static _force_inline
-void trace_push_section(
+void trace_push_segment(
 	struct gaba_dp_context_s *self)
 {
 	/* windback pointer */
-	self->w.l.sec_len++;
-	self->w.l.sec--;
+	self->w.l.a.slen++;
+	self->w.l.a.seg--;
 
 	/* calc ppos */
 	uint64_t ppos = (self->w.l.path - self->w.l.aln->path) * 32 + self->w.l.ofs;
@@ -2140,10 +2142,10 @@ void trace_push_section(
 	v2i32_t id = _load_v2i32(&self->w.l.aid);
 
 	/* store section info */
-	_store_v2i32(&self->w.l.sec->apos, gidx);
-	_store_v2i32(&self->w.l.sec->alen, _sub_v2i32(sgidx, gidx));
-	_store_v2i32(&self->w.l.sec->aid, id);
-	self->w.l.sec->ppos = ppos;
+	_store_v2i32(&self->w.l.a.seg->apos, gidx);
+	_store_v2i32(&self->w.l.a.seg->alen, _sub_v2i32(sgidx, gidx));
+	_store_v2i32(&self->w.l.a.seg->aid, id);
+	self->w.l.a.seg->ppos = ppos;
 
 	/* update rsgidx */
 	_store_v2i32(&self->w.l.asgidx, gidx);
@@ -2151,87 +2153,70 @@ void trace_push_section(
 }
 
 /**
- * @fn trace_init_alignment
+ * @fn trace_init
  */
 static _force_inline
-void trace_init_alignment(
+void trace_init(
 	struct gaba_dp_context_s *self,
-	struct gaba_leaf_s const *leaf,
-	struct gaba_allocator_s const *alloc)
+	struct gaba_joint_tail_s const *tail,
+	struct gaba_alloc_s const *alloc)
 {
-	struct gaba_joint_tail_s const *tail = leaf->tail;
+	/* store tail pointers for sequence segment tracking */
+	self->w.l.atail = tail;
+	self->w.l.btail = tail;
 
 	/* malloc container */
-	uint64_t slen = 2 * tail->scnt, plen = _roundup((tail->f.ppos + 31) / 32 + 1, 8);
+	uint64_t sn = 2 * tail->f.scnt, pn = (self->w.l.a.plen + 31) / 32 + 1;
+	uint64_t psize = _roundup(pn, 8);
 	uint64_t size = (
 		  sizeof(struct gaba_alignment_s)				/* base */
-		+ sizeof(uint32_t) * plen						/* path array and its margin */
-		+ sizeof(struct gaba_path_section_s) * slen		/* section array */
+		+ sizeof(uint32_t) * _roundup(pn, 8)			/* path array and its margin */
+		+ sizeof(struct gaba_segment_s) * sn			/* segment array */
 		+ self->head_margin + self->tail_margin			/* head and tail margins */
 	);
 
-	/* save aln pointer to working buffer */
+	/* save aln pointer and memory management stuffs to working buffer */
 	self->w.l.aln = alloc->malloc(alloc->opaque, size) + self->head_margin;
-	debug("malloc trace mem(%p), opaque(%p)", aln, opaque);
+	self->w.l.a.opaque = alloc->opaque;					/* save opaque pointer */
+	self->w.l.a.free = alloc->free;
+	self->w.l.a.head_margin = self->head_margin;		/* required when free the object */
 
 	/* use gaba_alignment_s buffer instead in the traceback loop */
-	self->w.l.a = (struct gaba_alignment_s){
-		/* internals */
-		.opaque = alloc->opaque,						/* save opaque pointer */
-		.free = alloc->free,
-		.head_margin = self->head_margin,				/* required when free the object */
+	self->w.l.a.score = tail->f.max;					/* just copy */
+	self->w.l.a.mcnt = 0;
+	self->w.l.a.xcnt = 0;
+	self->w.l.a.gicnt = 0;
+	self->w.l.a.gecnt = 0;
 
-		/* score and path element counts */
-		.score = tail->max,								/* just copy */
-		.mcnt = 0,
-		.xcnt = 0,
-		.gicnt = 0,
-		.gecnt = 0,
-
-		/* section */
-		.sec_len = 0,
-		.sec = (struct gaba_path_section_s *)(self->w.l.aln->path + plen, 8) + slen - 1,
-
-		/* path */
-		.path_len = leaf->ppos
-	};
-
-	/* clear array */
-	self->w.l.a.path[0] = 0;
-	self->w.l.a.path[1] = 0;
+	/* section */
+	self->w.l.a.slen = 0;
+	self->w.l.a.seg = (sn - 1) + (struct gaba_segment_s *)(self->w.l.aln->path + _roundup(pn, 8)),
 
 	/* store block and coordinates */
-	self->w.l.path = aln->path + plen - 1;
-	self->w.l.ofs = self->w.l.a.path_len & (BLK - 1);
-	self->w.l.blk = leaf->blk;
-	self->w.l.p = leaf->p;
-	self->w.l.q = leaf->q;
+	self->w.l.path = self->w.l.aln->path + pn - 1;
+	self->w.l.ofs = self->w.l.a.plen & (BLK - 1);
 
-	/* increment by one to convert char index to grid index */
-	v2i32_t gidx = _sub_v2i32(
-		_set_v2i32(1),
-		_load_v2i32(&leaf->aridx)
-	);
-	_store_v2i32(&self->w.l.agidx, gidx);				/* current gidx */
-	_store_v2i32(&self->w.l.asgidx, gidx);				/* tail gidx (pos) */
-	_store_v2i32(&self->w.l.aid, _zero_v2i32());		/* invalid ids, must be loaded afterward */
-
-	/* store tail pointers for sequence segment tracking */
-	self->w.l.atail = leaf->tail;
-	self->w.l.btail = leaf->tail;
+	/* clear array */
+	self->w.l.path[0] = 0;
+	self->w.l.path[1] = 0;
 	return;
 }
 
 /**
- * @fn trace_generate_alignment
+ * @fn trace_core
+ * @brief may fail when path got lost out of the band and returns NULL object
  */
 static _force_inline
-struct gaba_alignment_s *trace_generate_alignment(
+struct gaba_alignment_s *trace_core(
 	struct gaba_dp_context_s *self,
-	struct gaba_leaf_s const *leaf)
+	struct gaba_joint_tail_s const *tail,
+	struct gaba_alloc_s const *alloc)
 {
+	/* create alignment object */
+	trace_init(self, tail, alloc);
+
 	/* blockwise traceback loop, until ppos reaches the root */
-	while((self->w.l.blk - 1)->xstat != ROOT || self->w.l.mask != &self->w.l.blk->mask[1]) {
+	while((self->w.l.blk - 1)->xstat != ROOT || self->w.l.p > 1) {
 		/* update section info */
 		if(self->w.l.agidx <= 0) { trace_reload_section(self, 0); }
 		if(self->w.l.bgidx <= 0) { trace_reload_section(self, 1); }
@@ -2241,25 +2226,21 @@ struct gaba_alignment_s *trace_generate_alignment(
 		debug("p(%d), ppos(%lld), q(%d)", self->w.l.p, self->w.l.ppos, self->w.l.q);
 		if(_unlikely(self->w.l.q >= BW)) {
 			/* out of band: abort */
-			self->w.l.a.free(
-				self->w.l.a.opaque,
+			self->w.l.a.free(self->w.l.a.opaque,
 				(void *)((uint8_t *)self->w.l.aln - self->w.l.a.head_margin)
 			);
 			return(NULL);
 		}
 
-		/* push section info to section array */
-		trace_push_section(self);
+		/* push section info to segment array */
+		trace_push_segment(self);
 	}
 
 	/* calc mismatch and match counts */
-	self->w.l.a.xcnt = (
-		(
-			  self->m * ((self->w.l.a.path_len - self->w.l.a.gecnt)>>1)
-			- (self->w.l.a.score - self->gi * self->w.l.a.gicnt - self->ge * gecnt)
-		) / (m - x)
-	);
-	self->w.l.a.mcnt = ((self->w.l.a.path_len - self->w.l.a.gecnt)>>1) - self->w.l.a.xcnt;
+	self->w.l.a.xcnt = (self->m * ((self->w.l.a.plen - self->w.l.a.gecnt)>>1)
+		- (self->w.l.a.score - self->gi * self->w.l.a.gicnt - self->ge * self->w.l.a.gecnt)
+	) / (self->m - self->x);
+	self->w.l.a.mcnt = ((self->w.l.a.plen - self->w.l.a.gecnt)>>1) - self->w.l.a.xcnt;
 	debug("plen(%lld), gic(%lld), gec(%lld), dcnt(%lld), xcnt(%lld)",
 		self->w.l.a.path->len, gic, gec, (self->w.l.a.path->len - gec)>>1, self->w.l.a.xcnt);
 
@@ -2274,28 +2255,22 @@ struct gaba_alignment_s *trace_generate_alignment(
 struct gaba_alignment_s *_export(gaba_dp_trace)(
 	struct gaba_dp_context_s *self,
 	struct gaba_fill_s const *fill,
-	struct gaba_allocator_s const *alloc)
+	struct gaba_alloc_s const *alloc)
 {
 	/* restore dp context pointer by adding offset */
 	self = _restore_dp_context(self);
 
 	/* restore default alloc if NULL */
-	struct gaba_allocator_s const default_alloc = {
+	struct gaba_alloc_s const default_alloc = {
 		.opaque = (void *)self,
 		.malloc = (gaba_malloc_t)gaba_dp_malloc,
 		.free = (gaba_free_t)gaba_dp_free
 	};
 	alloc = (alloc == NULL) ? &default_alloc : alloc;
 
-	/* search */
-	struct gaba_leaf_s leaf;
-	leaf_search(self, _tail(fill), &leaf);
-
-	/* create alignment object */
-	trace_init_alignment(self, &leaf, alloc);
-
-	/* generate paths, may fail when path got lost out of the band */
-	return(trace_generate_alignment(self));
+	/* search and trace */
+	leaf_search(self, _tail(fill));
+	return(trace_core(self, _tail(fill), alloc));
 }
 
 
@@ -2305,8 +2280,9 @@ struct gaba_alignment_s *_export(gaba_dp_trace)(
 void _export(gaba_dp_res_free)(
 	struct gaba_alignment_s *aln)
 {
-	debug("free mem, ptr(%p), lmm(%p)", (void *)aln - aln->head_margin, lmm);
-	aln->free(aln->opaque, (void *)((uint8_t *)aln - aln->head_margin));
+	struct gaba_aln_intl_s *a = (struct gaba_aln_intl_s *)aln;
+	debug("free mem, ptr(%p), lmm(%p)", (void *)a - a->head_margin, lmm);
+	a->free(a->opaque, (void *)((uint8_t *)a - a->head_margin));
 	return;
 }
 
@@ -4170,7 +4146,7 @@ unittest(with_seq_pair("A", "A"))
 
 	/* forward-reverse traceback with seed */
 	r = _export(gaba_dp_trace)(d, f, f, GABA_TRACE_PARAMS(
-		.sec = &((struct gaba_path_section_s){
+		.sec = &((struct gaba_segment_s){
 			.aid = 100, .bid = 102,
 			.apos = 0, .bpos = 0,
 			.alen = 14, .blen = 14,
