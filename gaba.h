@@ -32,29 +32,29 @@
  * @enum gaba_status
  */
 enum gaba_status {
-	GABA_STATUS_CONT 		= 0,		/* continue, call again the function with the same args (but rarely occurrs) */
-	GABA_STATUS_UPDATE		= 0x100,	/* update either or both of the section(s) */
-	GABA_STATUS_UPDATE_A 	= 0x0f,		/* update required on section a (always combined with GABA_STATUS_UPDATE) */
-	GABA_STATUS_UPDATE_B 	= 0xf0,		/* update required on section b (always combined with GABA_STATUS_UPDATE) */
-	GABA_STATUS_TERM		= 0x200,	/* extension terminated by X-drop */
-	GABA_STATUS_OOM			= 0x400		/* out of memory (indicates malloc returned NULL) */
+	GABA_CONT 		= 0,		/* continue, call again the function with the same args (but rarely occurrs) */
+	GABA_UPDATE		= 0x100,	/* update either or both of the section(s) */
+	GABA_UPDATE_A 	= 0x0f,		/* update required on section a (always combined with GABA_UPDATE) */
+	GABA_UPDATE_B 	= 0xf0,		/* update required on section b (always combined with GABA_UPDATE) */
+	GABA_TERM		= 0x200,	/* extension terminated by X-drop */
+	GABA_OOM		= 0x400		/* out of memory (indicates malloc returned NULL) */
 };
 
 /**
- * @type gaba_malloc_t, gaba_free_t
+ * @type gaba_lmalloc_t, gaba_free_t
  * @brief external malloc can be passed, otherwise system malloc will be used
  */
-typedef void *(*gaba_malloc_t)(void *opaque, size_t size);
-typedef void *(*gaba_free_t)(void *opaque, void *free);
+typedef void *(*gaba_lmalloc_t)(void *opaque, size_t size);
+typedef void (*gaba_lfree_t)(void *opaque, void *ptr);
 
 /**
  * @struct gaba_alloc_s
  * @brief optional memory allocator, malloc and free pair must not be NULL.
  */
 struct gaba_alloc_s {
-	void *opaque;					/** local memory arena */
-	gaba_malloc_t malloc;			/** malloc; dedicated for alignment path generation */
-	gaba_free_t free;
+	void *opaque;				/** local memory arena */
+	gaba_lmalloc_t lmalloc;		/** local malloc; dedicated for alignment path generation */
+	gaba_lfree_t lfree;			/** local free */
 };
 typedef struct gaba_alloc_s gaba_alloc_t;
 

@@ -87,7 +87,7 @@ struct gaba_api_s {
 	gaba_alignment_t *(*dp_trace)(
 		gaba_dp_t *self,
 		gaba_fill_t const *tail,
-		gaba_trace_params_t const *params);
+		gaba_alloc_t const *alloc);
 };
 _static_assert(sizeof(struct gaba_api_s) == 4 * sizeof(void *));		/* must be consistent to gaba_opaque_s */
 #define _api(_dp)				( (struct gaba_api_s const *)(_dp) )
@@ -118,7 +118,7 @@ _decl(void, gaba_dp_clean, gaba_dp_t *self);
 _decl(gaba_fill_t *, gaba_dp_fill_root, gaba_dp_t *self, gaba_section_t const *a, uint32_t apos, gaba_section_t const *b, uint32_t bpos);
 _decl(gaba_fill_t *, gaba_dp_fill, gaba_dp_t *self, gaba_fill_t const *prev_sec, gaba_section_t const *a, gaba_section_t const *b);
 _decl(gaba_pos_pair_t, gaba_dp_search_max, gaba_dp_t *self, gaba_fill_t const *sec);
-_decl(gaba_alignment_t *, gaba_dp_trace, gaba_dp_t *self, gaba_fill_t const *fw_tail, gaba_fill_t const *rv_tail, gaba_trace_params_t const *params);
+_decl(gaba_alignment_t *, gaba_dp_trace, gaba_dp_t *self, gaba_fill_t const *tail, gaba_alloc_t const *alloc);
 _decl(void, gaba_dp_res_free, gaba_alignment_t *res);
 _decl(int64_t, gaba_dp_print_cigar_forward, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
 _decl(int64_t, gaba_dp_print_cigar_reverse, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
@@ -206,21 +206,21 @@ gaba_t *gaba_init(
 
 	uint64_t idx = gaba_init_get_index(params);
 	struct gaba_api_s const (*api)[DP_CTX_MAX] = &api_table[idx];
-	gaba_t *(init_table[][DP_CTX_MAX])(gaba_params_t const *params) = {
+	gaba_t *(*init_table[][DP_CTX_MAX])(gaba_params_t const *params) = {
 		[LINEAR] = {
-			[_dp_ctx_index(16)] = gaba_init_linear_16,
-			[_dp_ctx_index(32)] = gaba_init_linear_32,
-			[_dp_ctx_index(64)] = gaba_init_linear_64
+			[_dp_ctx_index(16)] = _import(gaba_init_linear_16),
+			[_dp_ctx_index(32)] = _import(gaba_init_linear_32),
+			[_dp_ctx_index(64)] = _import(gaba_init_linear_64)
 		},
 		[AFFINE] = {
-			[_dp_ctx_index(16)] = gaba_init_affine_16,
-			[_dp_ctx_index(32)] = gaba_init_affine_32,
-			[_dp_ctx_index(64)] = gaba_init_affine_64
+			[_dp_ctx_index(16)] = _import(gaba_init_affine_16),
+			[_dp_ctx_index(32)] = _import(gaba_init_affine_32),
+			[_dp_ctx_index(64)] = _import(gaba_init_affine_64)
 		},
 		[COMBINED] = {
-			[_dp_ctx_index(16)] = gaba_init_combined_16,
-			[_dp_ctx_index(32)] = gaba_init_combined_32,
-			[_dp_ctx_index(64)] = gaba_init_combined_64
+			[_dp_ctx_index(16)] = _import(gaba_init_combined_16),
+			[_dp_ctx_index(32)] = _import(gaba_init_combined_32),
+			[_dp_ctx_index(64)] = _import(gaba_init_combined_64)
 		}
 	};
 
@@ -244,7 +244,7 @@ void gaba_clean(
 	gaba_t *ctx)
 {
 	// _api(ctx)->clean(ctx);
-	gaba_clean_linear_32(ctx);
+	_import(gaba_clean_linear_32)(ctx);
 	return;
 }
 
@@ -364,25 +364,10 @@ gaba_pos_pair_t gaba_dp_search_max(
 static inline
 gaba_alignment_t *gaba_dp_trace(
 	gaba_dp_t *self,
-	gaba_fill_t const *fw_tail,
-	gaba_fill_t const *rv_tail,
-	gaba_trace_params_t const *params)
+	gaba_fill_t const *tail,
+	gaba_alloc_t const *alloc)
 {
-	return(_api(self)->dp_trace(self, fw_tail, rv_tail, params));
-}
-
-/**
- * @fn gaba_dp_recombine
- */
-static inline
-gaba_alignment_t *gaba_dp_recombine(
-	gaba_dp_t *self,
-	gaba_alignment_t *x,
-	uint32_t xsid,
-	gaba_alignment_t *y,
-	uint32_t ysid)
-{
-	return(_import(gaba_dp_recombine_linear_32)(self, x, xsid, y, ysid));
+	return(_api(self)->dp_trace(self, tail, alloc));
 }
 
 /**
@@ -658,7 +643,7 @@ unittest(with_seq_pair("GGAAAAAAAA", "AAAAAAAA"))
 	assert(f->max == 6, "%lld", f->max);
 
 	/* check traceback function is callable */
-	gaba_alignment_t *r = gaba_dp_trace(d, f, NULL, NULL);
+	gaba_alignment_t *r = gaba_dp_trace(d, f, NULL);
 	assert(r != NULL);
 
 	gaba_dp_clean(d);
@@ -695,7 +680,7 @@ unittest(with_seq_pair("GGAAAAAAAA", "AAAAAAAA"))
 	assert(f->max == 5, "%lld", f->max);
 
 	/* check traceback function is callable */
-	gaba_alignment_t *r = gaba_dp_trace(d, f, NULL, NULL);
+	gaba_alignment_t *r = gaba_dp_trace(d, f, NULL);
 	assert(r != NULL);
 
 	gaba_dp_clean(d);

@@ -101,9 +101,9 @@ typedef struct v32i16_s {
 /* insert and extract */
 #define _ins_v32i16(a, val, imm) { \
 	if((imm) < sizeof(__m256i)/sizeof(int16_t)) { \
-		(a).v1 = _i_v32i8(insert)((a).v1, (val), (imm)); \
+		(a).v1 = _i_v32i16(insert)((a).v1, (val), (imm)); \
 	} else if((imm) < 2*sizeof(__m256i)/sizeof(int16_t)) { \
-		(a).v2 = _i_v32i8(insert)((a).v2, (val), (imm) - sizeof(__m256i)/sizeof(int16_t)); \
+		(a).v2 = _i_v32i16(insert)((a).v2, (val), (imm) - sizeof(__m256i)/sizeof(int16_t)); \
 	} \
 }
 #define _ext_v32i16(a, imm) ( \
@@ -125,8 +125,8 @@ typedef struct v32i16_s {
 #define _hmax_v32i16(a) ({ \
 	__m256i _s = _mm256_max_epi16((a).v1, (a).v2); \
 	__m128i _t = _mm_max_epi16( \
-		_mm_castsi256_si128(_s), \
-		_mm_extracti128_si256(_s, 1) \
+		_mm256_castsi256_si128(_s), \
+		_mm256_extracti128_si256(_s, 1) \
 	); \
 	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 8)); \
 	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 4)); \

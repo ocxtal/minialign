@@ -1,7 +1,8 @@
 CC = gcc
 GIT = git
 VERSION = $(shell $(GIT) describe --tags || grep "define MM_VERSION" minialign.c | grep -o '".*"' | sed 's/"//g')
-CFLAGS = -O3 -Wall -Wno-unused-function -march=native -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
+ARCHFLAGS = -march=native
+CFLAGS = -O3 -Wall -Wno-unused-function -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
 LDFLAGS = -lm -lz -lpthread
 PREFIX = /usr/local
 TARGET = minialign
@@ -9,14 +10,14 @@ TARGET = minialign
 all: native
 
 native:
-	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)'
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) $(ARCHFLAGS)'
 	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba.*.o $(LDFLAGS)
 
 sse41 avx2:
-	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) -DUNITTEST=0 -DNAMESPACE=$@' NAMESPACE=$@
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) $(ARCHFLAGS) -DUNITTEST=0 -DNAMESPACE=$@' NAMESPACE=$@
 
 universal: sse41 avx2
-	$(CC) -o $(TARGET) -march=native universal.c minialign.*.o gaba.*.o $(LDFLAGS)
+	$(CC) -o $(TARGET) $(CFLAGS) -march=generic universal.c minialign.*.o gaba.*.o $(LDFLAGS)
 
 clean:
 	rm -fr gmon.out *.o a.out $(TARGET) *~ *.a *.dSYM session*

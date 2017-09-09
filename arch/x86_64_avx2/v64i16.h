@@ -156,32 +156,41 @@ typedef struct v64i16_s {
 /* mask */
 #define _mask_v64i16(a) ( \
 	(v64_mask_t) { \
-		.m1 = _mm256_movemask_epi8(
-			_mm256_packs_epi16(
-				_mm256_permute4x64_epi64((a).v1, (a).v2, 0x20),
-				_mm256_permute4x64_epi64((a).v1, (a).v2, 0x31))), \
-		.m2 = _mm256_movemask_epi8(
-			_mm256_packs_epi16(
-				_mm256_permute4x64_epi64((a).v3, (a).v4, 0x20),
-				_mm256_permute4x64_epi64((a).v3, (a).v4, 0x31))) \
+		.m1 = _mm256_movemask_epi8( \
+			_mm256_packs_epi16( \
+				_mm256_permute2x128_si256((a).v1, (a).v2, 0x20), \
+				_mm256_permute2x128_si256((a).v1, (a).v2, 0x31))), \
+		.m2 = _mm256_movemask_epi8( \
+			_mm256_packs_epi16( \
+				_mm256_permute2x128_si256((a).v3, (a).v4, 0x20), \
+				_mm256_permute2x128_si256((a).v3, (a).v4, 0x31))) \
 	} \
 )
 
 /* horizontal max (reduction max) */
-#define _hmax_v32i16(a) ({ \
+#define _hmax_v64i16(a) ({ \
 	__m256i _s = _mm256_max_epi16( \
 		_mm256_max_epi16((a).v1, (a).v2), \
 		_mm256_max_epi16((a).v3, (a).v4) \
 	); \
 	__m128i _t = _mm_max_epi16( \
-		_mm_castsi256_si128(_s), \
-		_mm_extracti128_si256(_s, 1) \
+		_mm256_castsi256_si128(_s), \
+		_mm256_extracti128_si256(_s, 1) \
 	); \
 	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 8)); \
 	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 4)); \
 	_t = _mm_max_epi16(_t, _mm_srli_si128(_t, 2)); \
 	(int16_t)_mm_extract_epi16(_t, 0); \
 })
+
+#define _cvt_v64i8_v64i16(a) ( \
+	(v64i16_t) { \
+		_mm256_cvtepi8_epi16(_mm256_castsi256_si128((a).v1)), \
+		_mm256_cvtepi8_epi16(_mm256_extracti128_si256((a).v1, 1)), \
+		_mm256_cvtepi8_epi16(_mm256_castsi256_si128((a).v2)), \
+		_mm256_cvtepi8_epi16(_mm256_extracti128_si256((a).v2, 1)) \
+	} \
+)
 
 /* debug print */
 #ifdef _LOG_H_INCLUDED

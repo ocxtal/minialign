@@ -176,8 +176,8 @@ typedef struct v64i8_s {
 #define _bsl_v64i8(a, imm) ( \
 	(v64i8_t) { \
 		_i_v64i8x(slli)((a).v1, (imm)), \
-		_i_v64i8(alignr)((a).v2, (a).v1, sizeof(__m128i) - (imm)) \
-		_i_v64i8(alignr)((a).v3, (a).v2, sizeof(__m128i) - (imm)) \
+		_i_v64i8(alignr)((a).v2, (a).v1, sizeof(__m128i) - (imm)), \
+		_i_v64i8(alignr)((a).v3, (a).v2, sizeof(__m128i) - (imm)), \
 		_i_v64i8(alignr)((a).v4, (a).v3, sizeof(__m128i) - (imm)) \
 	} \
 )

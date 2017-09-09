@@ -3662,7 +3662,7 @@ typedef struct mm_tbuf_s {
 	ptr_v bin;						/* gaba_alignment_t* array */
 	kh_t pos;						/* alignment dedup hash */
 	gaba_dp_t *dp;					/* alignment work */
-	gaba_trace_params_t trace;		/* lmm contained */
+	gaba_alloc_t alloc;				/* lmm contained */
 } mm_tbuf_t;
 
 /**
@@ -4017,8 +4017,8 @@ uint64_t mm_record(
 {
 	/* put head and tail positions to hash */
 	uint64_t id = _loadu_u64(&self->rid);
-	uint64_t hkey = _key(_loadu_u64(&a->sec->apos), id);
-	uint64_t tkey = _key(_loadu_u64(&a->sec->apos) + _loadu_u64(&a->sec->alen), id);
+	uint64_t hkey = _key(_loadu_u64(&a->seg->apos), id);
+	uint64_t tkey = _key(_loadu_u64(&a->seg->apos) + _loadu_u64(&a->seg->alen), id);
 	debug("hash key, h(%llx), t(%llx)", hkey, tkey);
 
 	v2u32_t *h = (v2u32_t *)kh_put_ptr(&self->pos, hkey, 1);
@@ -4029,7 +4029,7 @@ uint64_t mm_record(
 	uint32_t bid = new ? kv_push(void *, self->bin, (void *)a) : h->u32[1];
 	gaba_alignment_t const **b = (gaba_alignment_t const **)&self->bin.a[bid];
 
-	debug("id(%u, %u)", a->sec->aid, a->sec->bid);
+	debug("id(%u, %u)", a->seg->aid, a->seg->bid);
 	debug("record h(%llx, %u), t(%llx, %u), bid(%u)", h[-1].u64[0], h->u32[1], t[-1].u64[0], t->u32[1], bid);
 
 	/* update res */
@@ -4038,12 +4038,12 @@ uint64_t mm_record(
 	/* update bin */
 	mm_bin_t *bin = (mm_bin_t *)&self->bin.a[res->bid];
 	bin->n_aln += h->u64[0] == KH_INIT_VAL;
-	bin->plen += _p(&a->sec->alen);
-	bin->lb = MIN2(bin->lb, a->sec->bpos);
-	bin->ub = MAX2(bin->ub, a->sec->bpos + a->sec->blen);
+	bin->plen += _p(&a->seg->alen);
+	bin->lb = MIN2(bin->lb, a->seg->bpos);
+	bin->ub = MAX2(bin->ub, a->seg->bpos + a->seg->blen);
 	debug("update bounds, bid(%u), lb(%u), ub(%u)", res->bid, bin->lb, bin->ub);
 
-	debug("record alignment, (%u, %u) -> (%u, %u), n_aln(%u)", a->sec->apos, a->sec->bpos, a->sec->apos + a->sec->alen, a->sec->bpos + a->sec->blen, bin->n_aln);
+	debug("record alignment, (%u, %u) -> (%u, %u), n_aln(%u)", a->seg->apos, a->seg->bpos, a->seg->apos + a->seg->alen, a->seg->bpos + a->seg->blen, bin->n_aln);
 
 	/* update hash */
 	if(b[0]->score > a->score) {
@@ -4094,23 +4094,23 @@ gaba_fill_t const *mm_extend_core(
 	/* fill root */
 	gaba_fill_t const *f = gaba_dp_fill_root(dp, a, s.apos, b, s.bpos);
 	if(_unlikely(f == NULL)) { goto _mm_extend_core_abort; }
-	debug("fill root, max(%lld), status(%x)", f->max, f->status);
+	debug("fill root, max(%lld), status(%x)", f->max, f->stat);
 
 	gaba_fill_t const *m = f;					/* record max */
-	uint32_t flag = GABA_STATUS_TERM;
-	while((flag & f->status) == 0) {
+	uint32_t flag = GABA_TERM;
+	while((flag & f->stat) == 0) {
 		/* update section if reached tail */
-		if(f->status & GABA_STATUS_UPDATE_A) { a = at; }	/* cmov */
-		if(f->status & GABA_STATUS_UPDATE_B) { b = bt; }	/* cmov */
+		if(f->stat & GABA_UPDATE_A) { a = at; }	/* cmov */
+		if(f->stat & GABA_UPDATE_B) { b = bt; }	/* cmov */
 
 		/* update flag for tail detection */
-		flag |= f->status & (GABA_STATUS_UPDATE_A | GABA_STATUS_UPDATE_B);
+		flag |= f->stat & (GABA_UPDATE_A | GABA_UPDATE_B);
 
 		/* fill the next section */
 		if(_unlikely((f = gaba_dp_fill(dp, f, a, b)) == NULL)) {
 			goto _mm_extend_core_abort;
 		}
-		debug("fill, max(%lld, %lld), status(%x)", f->max, m->max, f->status);
+		debug("fill, max(%lld, %lld), status(%x)", f->max, m->max, f->stat);
 		m = (f->max > m->max)? f : m;
 	}
 	return(m);									/* never be null */
@@ -4203,23 +4203,23 @@ uint64_t mm_extend(
 			}
 
 			/* generate alignment: coordinates are reversed again, gaps are left-aligned in the resulting path */
-			gaba_alignment_t const *a = gaba_dp_trace(&self->dp[0], NULL, t, &self->trace);		/* lmm is contained in self->trace */
+			gaba_alignment_t const *a = gaba_dp_trace(&self->dp[0], t, &self->alloc);		/* lmm is contained in self->trace */
 			if(a == NULL) {
 				debug("failed to generate trace: len(%u, %u), score(%lld), <- (%u, %u)", self->r[0].len, self->q[0].len, t->max, tp.apos, tp.bpos);
 				continue;						/* something is wrong... */
 			}
 			debug("len(%u, %u), score(%lld), (%u, %u) <- (%u, %u)",
-				self->r[0].len, self->q[0].len, t->max, a->sec->apos, a->sec->bpos, tp.apos, tp.bpos);
+				self->r[0].len, self->q[0].len, t->max, a->seg->apos, a->seg->bpos, tp.apos, tp.bpos);
 
 			/* record alignment, update current head position */
 			if(mm_record(self, res, a)) { rem = 10; }
-			if(_p(&a->sec->apos) < ppos) {
-				debug("full length captured, cp(%u, %u), p(%u), ppos(%u)", cp.apos, cp.bpos, _p(&a->sec->apos), ppos);
+			if(_p(&a->seg->apos) < ppos) {
+				debug("full length captured, cp(%u, %u), p(%u), ppos(%u)", cp.apos, cp.bpos, _p(&a->seg->apos), ppos);
 				break;							/* full length covered, break before calling mm_next */
 			}
 
 			/* update itr states */
-			cp = *((gaba_pos_pair_t *)&a->sec->apos);
+			cp = *((gaba_pos_pair_t *)&a->seg->apos);
 			narrow = 0;
 			debug("split detected, try narrower(%u), cp(%u, %u), p(%u), ppos(%u), rem(%u)", narrow, cp.apos, cp.bpos, _p(&cp), ppos, rem);
 		}
@@ -4387,7 +4387,7 @@ uint64_t mm_post_map(
 	uint32_t bsc = (n_reg>1)? _aln(reg[n_reg-1])->score : 0;
 	uint32_t tsc = 0;
 
-	double elen = (double)gaba_plen(_aln(reg[0])->sec) / 2.0;
+	double elen = (double)gaba_plen(_aln(reg[0])->seg) / 2.0;
 	double pid = 1.0 - (double)(elen * opt->m - score) / (double)(opt->m + opt->x) / elen;
 	double ec = 2.0 / (pid * (double)(opt->m + opt->x) - (double)opt->x);
 	double ulen = ec * (score - ssc), pe = 1.0 / (ulen * ulen + (double)n_reg);
@@ -4445,7 +4445,7 @@ mm_reg_t const *mm_pack_reg(
 {
 	/* allocate mem from lmm */
 	uint64_t size = sizeof(mm_reg_t) + self->bin.n * sizeof(mm_aln_t *);
-	mm_reg_t *reg = lmm_malloc(self->trace.lmm, size);
+	mm_reg_t *reg = lmm_malloc((lmm_t *)self->alloc.opaque, size);
 	mm_aln_t **p = (mm_aln_t **)reg->aln, **b = p;
 
 	/* build head */
@@ -4465,9 +4465,9 @@ mm_reg_t const *mm_pack_reg(
 			fprintf(stderr, "pack_reg, i(%lu), j(%lu), p(%p), (%u, %u), pos(%u, %u), len(%u, %u), plen(%u)\n",
 				i, j, a,
 				self->r[0].len, self->q[0].len,
-				a->a->sec->apos, a->a->sec->bpos,
-				a->a->sec->alen, a->a->sec->blen,
-				a->a->path->len);
+				a->a->seg->apos, a->a->seg->bpos,
+				a->a->seg->alen, a->a->seg->blen,
+				a->a->plen);
 */
 		}
 
@@ -4507,7 +4507,7 @@ void mm_init_query(
 	self->q[2] = _sec_fw(qid, seq, l_seq);
 
 	/* store lmm */
-	self->trace.lmm = (void *)lmm;
+	self->alloc.opaque = (void *)lmm;
 	return;
 }
 
@@ -5011,7 +5011,7 @@ void mm_print_sam_mapped_core(
 	mm_aln_t const *a,
 	uint16_t flag)
 {
-	const gaba_path_section_t *s = &a->a->sec[0];
+	const gaba_path_section_t *s = &a->a->seg[0];
 	uint32_t rs = s->apos;									/* ref start pos */
 	uint32_t hl = s->bpos, tl = t->l_seq - s->bpos - s->blen;/* head and tail clip lengths */
 	uint32_t qs = (flag & 0x900) ? hl : 0;					/* query start pos */
@@ -5029,8 +5029,8 @@ void mm_print_sam_mapped_core(
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print head clip */
 	}
 
-	// fprintf(stderr, "ppos(%u)\n", a->a->sec->ppos);
-	gaba_dp_print_cigar_forward(mm_cigar_printer, b, a->a->path->array, 0, a->a->path->len);
+	// fprintf(stderr, "ppos(%u)\n", a->a->seg->ppos);
+	gaba_dp_print_cigar_forward(mm_cigar_printer, b, a->a->path, 0, a->a->plen);
 	if(tl) {
 		_putn(b, tl);
 		_put(b, (flag&0x900)? 'H' : 'S');					/* print tail clip */
@@ -5070,7 +5070,7 @@ void mm_print_sam_supp(
 	mm_aln_t const *a)
 {
 	/* rname,pos,strand,CIGAR,mapQ,NM; */
-	const gaba_path_section_t *s = &a->a->sec[0];
+	const gaba_path_section_t *s = &a->a->seg[0];
 	uint32_t rs = s->apos;
 	uint32_t hl = s->bpos, tl = s->bpos + s->blen;			/* head and tail clips */
 	
@@ -5080,7 +5080,7 @@ void mm_print_sam_supp(
 
 	/* print cigar */
 	if(hl != 0) { _putn(b, hl); _put(b, 'H'); }				/* always hard clipped */
-	gaba_dp_print_cigar_forward(mm_cigar_printer, b, a->a->path->array, 0, a->a->path->len);
+	gaba_dp_print_cigar_forward(mm_cigar_printer, b, a->a->path, 0, a->a->plen);
 	if(tl != 0) { _putn(b, tl); _put(b, 'H'); }
 	_c(b);
 
@@ -5109,16 +5109,16 @@ void mm_print_sam_md(
 	uint64_t const f = b->opt->flag;
 	if((f & 0x01ULL<<MM_MD) == 0) { return; }				/* skip if disabled */
 
-	const gaba_path_section_t *s = &a->a->sec[0];
+	const gaba_path_section_t *s = &a->a->seg[0];
 	uint32_t rs = s->apos, qs = s->bpos;
 
 	_puts(b, "\tMD:Z:");
-	// uint64_t const *p = (uint64_t const *)a->a->path->array;
-	// int64_t pos = 0, lim = a->a->path->len;
+	// uint64_t const *p = (uint64_t const *)a->a->path;
+	// int64_t pos = 0, lim = a->a->plen;
 
-	uint64_t const *p = (uint64_t const *)((uint64_t)a->a->path->array & ~(sizeof(uint64_t) - 1));
-	uint64_t lim = (((uint64_t)a->a->path->array & sizeof(uint32_t)) ? 32 : 0) + a->a->path->len;
-	uint64_t ridx = a->a->path->len;
+	uint64_t const *p = (uint64_t const *)((uint64_t)a->a->path & ~(sizeof(uint64_t) - 1));
+	uint64_t lim = (((uint64_t)a->a->path & sizeof(uint32_t)) ? 32 : 0) + a->a->plen;
+	uint64_t ridx = a->a->plen;
 
 	uint64_t dir = (s->bid & 0x01)? 1 : 0;
 	static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
@@ -5252,7 +5252,7 @@ uint64_t mm_print_sam_primary_tags(
 		/* iterate over the supplementary alignments */
 		for(uint64_t i = 1; i < reg->n_uniq; i++) {
 			mm_aln_t const *a = reg->aln[i];
-			uint32_t rid = a->a->sec->aid>>1;
+			uint32_t rid = a->a->seg->aid>>1;
 			mm_idx_seq_t const *r = &mi->s.a[rid - mi->base_rid];
 
 			mm_print_sam_supp(b, r, t, a);
@@ -5284,7 +5284,7 @@ void mm_print_sam_mapped(
 		}
 
 		mm_aln_t const *a = reg->aln[i];
-		uint32_t rid = a->a->sec->aid>>1;
+		uint32_t rid = a->a->seg->aid>>1;
 		mm_idx_seq_t const *r = &mi->s.a[rid - mi->base_rid];
 
 		/* print body */
@@ -5317,8 +5317,8 @@ void mm_print_maf_mapped_ref(
 	mm_aln_t const *a,
 	uint8_t const *rp)
 {
-	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path->array - 1) & ~(sizeof(uint64_t) - 1));
-	int64_t pos = a->a->path->len;
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->a->plen;
 	while(pos > 0) {
 		uint64_t arr, cnt;
 
@@ -5353,8 +5353,8 @@ void mm_print_maf_query_forward(
 	mm_aln_t const *a,
 	uint8_t const *qp)
 {
-	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path->array - 1) & ~(sizeof(uint64_t) - 1));
-	int64_t pos = a->a->path->len;
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->a->plen;
 	while(pos > 0) {
 		uint64_t arr, cnt;
 
@@ -5390,8 +5390,8 @@ void mm_print_maf_query_reverse(
 	mm_aln_t const *a,
 	uint8_t const *qp)
 {
-	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path->array - 1) & ~(sizeof(uint64_t) - 1));
-	int64_t pos = a->a->path->len;
+	uint64_t const *p = (uint64_t const *)((uint64_t)(a->a->path - 1) & ~(sizeof(uint64_t) - 1));
+	int64_t pos = a->a->plen;
 	while(pos > 0) {
 		uint64_t arr, cnt;
 
@@ -5428,7 +5428,7 @@ void mm_print_maf_mapped_core(
 	bseq_t const *t,
 	mm_aln_t const *a)
 {
-	const gaba_path_section_t *s = &a->a->sec[0];
+	const gaba_path_section_t *s = &a->a->seg[0];
 
 	/* header */
 	_put(b, 'a'); _sp(b); _putsk(b, "score="); _putn(b, a->a->score); _cr(b);
@@ -5487,7 +5487,7 @@ void mm_print_maf_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		uint32_t rid = a->a->sec->aid>>1;
+		uint32_t rid = a->a->seg->aid>>1;
 		mm_idx_seq_t const *r = &mi->s.a[rid - mi->base_rid];
 
 		mm_print_maf_mapped_core(b, r, t, a);
@@ -5510,10 +5510,10 @@ void mm_print_blast6_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->sec[0];
+		const gaba_path_section_t *s = &a->a->seg[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		int32_t dcnt = (a->a->path->len - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
 		int32_t mid = 100000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
 		uint32_t rs = s->bid&0x01? r->l_seq - s->apos : s->apos + 1;
 		uint32_t re = s->bid&0x01? s->apos + 1 : r->l_seq - s->apos;
@@ -5558,10 +5558,10 @@ void mm_print_blasr1_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->sec[0];
+		const gaba_path_section_t *s = &a->a->seg[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		int32_t dcnt = (a->a->path->len - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
 		int32_t mid = 1000000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
 		// uint32_t rs = s->bid & 0x01 ? r->l_seq - s->apos - s->alen : s->apos, re = rs + s->alen;
 		uint32_t rs = s->apos, re = s->apos + s->alen;
@@ -5608,10 +5608,10 @@ void mm_print_blasr4_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->sec[0];
+		const gaba_path_section_t *s = &a->a->seg[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		int32_t dcnt = (a->a->path->len - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
 		int32_t mid = 1000000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
 		// uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t rs = s->apos, re = s->apos + s->alen;
@@ -5658,10 +5658,10 @@ void mm_print_paf_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->sec[0];
+		const gaba_path_section_t *s = &a->a->seg[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		uint32_t dcnt = (a->a->path->len - a->a->gecnt)>>1;			/* #matches + #mismatches */
+		uint32_t dcnt = (a->a->plen - a->a->gecnt)>>1;			/* #matches + #mismatches */
 		uint32_t rs = s->apos, re = s->apos + s->alen;
 		uint32_t qs = s->bpos, qe = s->bpos + s->blen;
 
@@ -5707,10 +5707,10 @@ void mm_print_mhap_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->sec[0];
+		const gaba_path_section_t *s = &a->a->seg[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
-		int32_t dcnt = (a->a->path->len - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
 		int32_t merr = 10000.0 * (1.0 - (double)(dcnt - a->a->xcnt) / (double)slen);	/* error rate */
 		// uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
 		uint32_t rs = s->apos, re = s->apos + s->alen;
@@ -5755,7 +5755,7 @@ void mm_print_falcon_mapped(
 	uint64_t const n = (b->opt->flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->sec[0];
+		const gaba_path_section_t *s = &a->a->seg[0];
 		mm_idx_seq_t const *r = &mi->s.a[(s->aid>>1) - mi->base_rid];
 
 		// uint32_t qs = r->l_seq-s->apos-s->alen, qe = r->l_seq-s->apos;
@@ -5959,7 +5959,12 @@ mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 		.t[0] = _sec_fw(0xfffffffe, t->tail, 32),
 
 		/* dp context */
-		.dp = gaba_dp_init(b->gaba, lim, lim)
+		.dp = gaba_dp_init(b->gaba, lim, lim),
+		.alloc = {
+			.opaque = NULL,
+			.lmalloc = (gaba_lmalloc_t)lmm_malloc,
+			.lfree = (gaba_lfree_t)lmm_free
+		}
 	};
 	if(t->dp == NULL) { goto _fail; }
 

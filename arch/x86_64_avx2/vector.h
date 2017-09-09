@@ -87,15 +87,17 @@ typedef union v16_mask_u v16i8_masku_t;
 #include "v16i16.h"
 #include "v32i8.h"
 #include "v32i16.h"
+#include "v64i8.h"
+#include "v64i16.h"
 
 #if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 480
 #  define _mm256_broadcastsi128_si256		_mm_broadcastsi128_si256
 #endif
 
 /* conversion and cast between vector types */
-#define _from_v16i8_v64i8(x)	(v32i8_t){ _mm256_broadcastsi128_si256((x).v1), _mm256_broadcastsi128_si256((x).v1) }
-#define _from_v32i8_v64i8(x)	(v32i8_t){ (x).v1, (x).v1 }
-#define _from_v64i8_v64i8(x)	(v32i8_t){ (x).v1, (x).v2 }
+#define _from_v16i8_v64i8(x)	(v64i8_t){ _mm256_broadcastsi128_si256((x).v1), _mm256_broadcastsi128_si256((x).v1) }
+#define _from_v32i8_v64i8(x)	(v64i8_t){ (x).v1, (x).v1 }
+#define _from_v64i8_v64i8(x)	(v64i8_t){ (x).v1, (x).v2 }
 
 #define _from_v16i8_v32i8(x)	(v32i8_t){ _mm256_broadcastsi128_si256((x).v1) }
 #define _from_v32i8_v32i8(x)	(v32i8_t){ (x).v1 }
@@ -106,9 +108,9 @@ typedef union v16_mask_u v16i8_masku_t;
 #define _from_v64i8_v16i8(x)	(v16i8_t){ _mm256_castsi256_si128((x).v1) }
 
 /* inversed alias */
-#define _to_v64i8_v16i8(x)		(v32i8_t){ _mm256_broadcastsi128_si256((x).v1), _mm256_broadcastsi128_si256((x).v1) }
-#define _to_v64i8_v32i8(x)		(v32i8_t){ (x).v1, (x).v1 }
-#define _to_v64i8_v64i8(x)		(v32i8_t){ (x).v1, (x).v2 }
+#define _to_v64i8_v16i8(x)		(v64i8_t){ _mm256_broadcastsi128_si256((x).v1), _mm256_broadcastsi128_si256((x).v1) }
+#define _to_v64i8_v32i8(x)		(v64i8_t){ (x).v1, (x).v1 }
+#define _to_v64i8_v64i8(x)		(v64i8_t){ (x).v1, (x).v2 }
 
 #define _to_v32i8_v16i8(x)		(v32i8_t){ _mm256_broadcastsi128_si256((x).v1) }
 #define _to_v32i8_v32i8(x)		(v32i8_t){ (x).v1 }

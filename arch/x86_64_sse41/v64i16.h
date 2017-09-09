@@ -253,7 +253,7 @@ typedef struct v64i16_s {
 		_mm_cvtepi8_epi16((a).v1), \
 		_mm_cvtepi8_epi16(_mm_srli_si128((a).v1, 8)), \
 		_mm_cvtepi8_epi16((a).v2), \
-		_mm_cvtepi8_epi16(_mm_srli_si128((a).v2, 8)) \
+		_mm_cvtepi8_epi16(_mm_srli_si128((a).v2, 8)), \
 		_mm_cvtepi8_epi16((a).v3), \
 		_mm_cvtepi8_epi16(_mm_srli_si128((a).v3, 8)), \
 		_mm_cvtepi8_epi16((a).v4), \
