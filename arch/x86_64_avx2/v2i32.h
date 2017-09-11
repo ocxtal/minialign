@@ -108,7 +108,7 @@ typedef struct v2i32_s {
 #define _max_v2i32(...)		_a_v2i32(max, _e_vv, __VA_ARGS__)
 #define _min_v2i32(...)		_a_v2i32(min, _e_vv, __VA_ARGS__)
 
-/* blend */
+/* blend: mask == 1 ? a : b */
 #define _sel_v2i32(mask, a, b) ( \
 	(v2i32_t) { \
 		_mm_blendv_epi8((b).v1, (a).v1, (mask).v1) \
