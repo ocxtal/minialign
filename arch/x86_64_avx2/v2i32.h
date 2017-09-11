@@ -151,10 +151,14 @@ typedef struct v2i32_s {
 /* convert */
 typedef uint64_t v2i8_t;
 #define _load_v2i8(p)		*((uint16_t const *)(p))
+#define _store_v2i8(p, v)	*((uint16_t *)(p)) = (v);
 #define _cvt_v2i8_v2i32(a) ( \
 	(v2i32_t) { \
 		_mm_cvtepi8_epi32(_mm_cvtsi64_si128(a)) \
 	} \
+)
+#define _cvt_v2i32_v2i8(a) ( \
+	(uint16_t)_mm_cvtsi128_si64(_mm_shuffle_epi8((a).v1, _mm_cvtsi64_si128(0x0400))) \
 )
 
 /* transpose */

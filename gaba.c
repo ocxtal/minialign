@@ -330,7 +330,7 @@ struct gaba_joint_tail_s {
 
 	uint32_t aridx, bridx;				/** (8) reverse indices for the tails */
 	uint32_t asridx, bsridx;			/** (8) start reverse indices (for internal use) */
-	uint32_t pridx;						/** (4) p reverse index */
+	uint32_t unused;					/** (4) */
 	int32_t acc;						/** (4) accumulator */
 	int64_t offset;						/** (8) large offset */
 	struct gaba_fill_s f;				/** (24) */
@@ -374,10 +374,10 @@ struct gaba_reader_work_s {
 	/** 64byte alidned */
 	struct gaba_section_pair_s s;		/** (32) section pair */
 	int32_t acc;						/** (4) direction deteminer accumulator */
-	uint32_t ofsd;						/** (4) delta of large offset */
+	int32_t ofsd;						/** (4) delta of large offset */
 	uint32_t aridx, bridx;				/** (8) current ridx */
 	uint32_t asridx, bsridx;			/** (8) start ridx */
-	uint32_t pridx, psridx;				/** (8) p-coordinate (currently unused) */
+	struct gaba_joint_tail_s const *tail;	/** (8) previous tail */
 	/** 64 */
 
 	/** 64byte aligned */
@@ -588,7 +588,7 @@ enum GABA_BLK_STATUS {
 	UPDATE			= 0x0100,
 	TERM			= 0x0200,
 	HEAD			= 0x2000,
-	ROOT			= 0x4000 | UPDATE	/* update flag always set for root */
+	ROOT			= 0x4000 | HEAD | UPDATE	/* update flag always set for root */
 };
 _static_assert((int32_t)CONT == (int32_t)GABA_CONT);
 _static_assert((int32_t)UPDATE == (int32_t)GABA_UPDATE);
@@ -878,13 +878,13 @@ void fill_fetch_core(
 	uint32_t blen)
 {
 	/* fetch seq a */
-	nvec_t a = _load_n(_rd_bufa(self, acnt, BW));
+	nvec_t a = _loadu_n(_rd_bufa(self, acnt, BW));		/* unaligned */
 	fill_fetch_seq_a(self, self->w.r.s.atail - self->w.r.aridx, alen);
-	_store_n(_rd_bufa(self, 0, BW), a);
+	_store_n(_rd_bufa(self, 0, BW), a);					/* always aligned */
 
 	/* fetch seq b */
-	nvec_t b = _load_n(_rd_bufb(self, bcnt, BW));
-	_store_n(_rd_bufb(self, 0, BW), b);
+	nvec_t b = _loadu_n(_rd_bufb(self, bcnt, BW));		/* unaligned */
+	_store_n(_rd_bufb(self, 0, BW), b);					/* always aligned */
 	fill_fetch_seq_b(self, self->w.r.s.btail - self->w.r.bridx, blen);
 	return;
 }
@@ -913,7 +913,8 @@ void fill_cap_fetch(
 static _force_inline
 int64_t fill_init_fetch(
 	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *prev_tail)
+	struct gaba_block_s *blk,
+	int64_t ppos)
 {
 	/* restore remaining head margin lengths */
 	#if 0
@@ -922,7 +923,7 @@ int64_t fill_init_fetch(
 	v2i32_t rem = _sar_v2i32(_add_v2i32(_set_v2i32(prem), adj), 1);
 	#else
 	v2i32_t const adj = _seta_v2i32(1, 0);
-	int64_t prem = -prev_tail->f.ppos;
+	int64_t prem = -ppos;						/* can be loaded from self->w.r.tail->ppos */
 	v2i32_t rem = _sar_v2i32(_sub_v2i32(_set_v2i32(prem), adj), 1);
 	#endif
 
@@ -939,8 +940,11 @@ int64_t fill_init_fetch(
 	);
 	/* fetch sequence and store at (0, 0), then save newly loaded sequence lengths */
 	fill_fetch_core(self, 0, _lo32(len), 0, _hi32(len));
+
+	/* save fetch length for use in the next block fill / tail construction */
+	_store_v2i8(&blk->acnt, _cvt_v2i32_v2i8(len));
 	_store_v2i32(&self->w.r.aridx, _sub_v2i32(ridx, len));
-	return(_lo32(len) + _hi32(len));
+	return(ppos + _lo32(len) + _hi32(len));
 }
 
 /**
@@ -1001,8 +1005,7 @@ void fill_load_section(
 	struct gaba_section_s const *a,
 	uint32_t aridx,
 	struct gaba_section_s const *b,
-	uint32_t bridx,
-	uint32_t pridx)
+	uint32_t bridx)
 {
 	/* load current section lengths */
 	v2i64_t asec = _loadu_v2i64(a);				/* tuple of (64bit ptr, 32-bit id, 32-bit len) */
@@ -1035,109 +1038,8 @@ void fill_load_section(
 	);
 	_store_v2i32(&self->w.r.aridx, ridx);
 	_store_v2i32(&self->w.r.asridx, ridx);
-	self->w.r.pridx = self->w.r.psridx = pridx;
 	_print_v2i32(ridx);
 	return;
-}
-
-/**
- * @fn fill_load_tail
- * @brief load sequences and indices from the previous tail
- */
-static _force_inline
-struct gaba_block_s *fill_load_tail(
-	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *tail,
-	struct gaba_section_s const *a,
-	uint32_t aridx,
-	struct gaba_section_s const *b,
-	uint32_t bridx,
-	uint32_t pridx)
-{
-	/* load sequences and sections */
-	fill_load_section(self, a, aridx, b, bridx, pridx);
-
-	/* clear offset */
-	self->w.r.acc = tail->acc;
-	self->w.r.ofsd = 0;
-
-	/* load sequence vectors */
-	nvec_t const mask = _set_n(0x0f);
-	nvec_t ch = _load_n(&tail->ch.w);
-	nvec_t ach = _and_n(mask, ch);
-	nvec_t bch = _and_n(mask, _shr_n(ch, 4));	/* bit 7 must be cleared not to affect shuffle mask */
-	_store_n(_rd_bufa(self, 0, BW), ach);
-	_store_n(_rd_bufb(self, 0, BW), bch);
-
-	/* copy max and middle delta vectors */
-	nvec_t xd = _load_n(&tail->xd);
-	wvec_t md = _load_w(&tail->md);
-	_store_n(&self->w.r.xd, xd);
-	_store_w(&self->w.r.md, md);
-	_print_n(xd);
-	_print_w(md);
-
-	/* extract the last block pointer, pass to fill-in loop */
-	return(_last_block(tail));
-}
-
-/**
- * @fn fill_create_tail
- * @brief create joint_tail at the end of the blocks
- */
-static _force_inline
-struct gaba_joint_tail_s *fill_create_tail(
-	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *prev_tail,
-	struct gaba_block_s *blk)
-{
-	/* create joint_tail */
-	struct gaba_joint_tail_s *tail = (struct gaba_joint_tail_s *)(blk + 1);
-	self->stack.top = (void *)(tail + 1);	/* write back stack_top */
-	debug("end stack_top(%p), stack_end(%p), blk(%p)", self->stack.top, self->stack.end, blk);
-
-	/* store char vector */
-	nvec_t a = _loadu_n(_rd_bufa(self, blk->acnt, BW));
-	nvec_t b = _loadu_n(_rd_bufb(self, blk->bcnt, BW));
-	_store_n(&tail->ch, _or_n(a, _shl_n(b, 4)));
-
-	/* copy delta vectors */
-	nvec_t xd = _load_n(&self->w.r.xd);
-	wvec_t md = _load_w(&self->w.r.md);
-	_store_n(&tail->xd, xd);
-	_store_w(&tail->md, md);
-	_print_n(xd);
-	_print_w(md);
-
-	/* search max section */
-	md = _add_w(md, _cvt_n_w(xd));					/* xd holds drop from max */
-	uint64_t offset = tail->offset + self->w.r.ofsd;
-	uint64_t max = ((int16_t)_hmax_w(md)) + offset;
-	debug("offset(%lld), max(%d)", tail->offset, _hmax_w(md));
-
-	/* reverse indices */
-	v2i32_t ridx = _load_v2i32(&self->w.r.aridx);
-	v2i32_t sridx = _load_v2i32(&self->w.r.asridx);
-	_store_v2i32(&tail->aridx, ridx);
-	_store_v2i32(&tail->aridx, sridx);
-	tail->pridx = self->w.r.pridx;					/* is this really needed? */
-	_print_v2i32(ridx);
-	_print_v2i32(sridx);
-
-	/* store scores */
-	tail->acc = self->w.r.acc;
-	tail->offset = offset;
-	tail->f.max = max;
-
-	/* status flags, coordinates, link pointer, and sections */
-	v2i32_t update = _eq_v2i32(ridx, _zero_v2i32());
-	v2i32_t adv = _sub_v2i32(sridx, ridx);
-	tail->f.stat = (blk->xstat & (UPDATE | TERM | CONT)) | _mask_v2i32(update);
-	tail->f.scnt = prev_tail->f.scnt - _hi32(update) - _lo32(update);
-	tail->f.ppos = prev_tail->f.ppos + _hi32(adv) + _lo32(adv);
-	tail->tail = prev_tail;
-	_memcpy_blk_aa(&tail->s.atail, &self->w.r.s.atail, sizeof(struct gaba_section_pair_s));
-	return(tail);
 }
 
 /**
@@ -1162,6 +1064,110 @@ struct gaba_block_s *fill_create_phantom(
 }
 
 /**
+ * @fn fill_load_tail
+ * @brief load sequences and indices from the previous tail
+ */
+static _force_inline
+struct gaba_block_s *fill_load_tail(
+	struct gaba_dp_context_s *self,
+	struct gaba_joint_tail_s const *tail,
+	struct gaba_section_s const *a,
+	uint32_t aridx,
+	struct gaba_section_s const *b,
+	uint32_t bridx)
+{
+	/* load sequences and sections */
+	fill_load_section(self, a, aridx, b, bridx);
+	self->w.r.tail = tail;
+
+	/* clear offset */
+	self->w.r.acc = tail->acc;
+	self->w.r.ofsd = 0;
+
+	/* load sequence vectors */
+	nvec_t const mask = _set_n(0x0f);
+	nvec_t ch = _load_n(&tail->ch.w);
+	nvec_t ach = _and_n(mask, ch);
+	nvec_t bch = _and_n(mask, _shr_n(ch, 4));	/* bit 7 must be cleared not to affect shuffle mask */
+	_store_n(_rd_bufa(self, 0, BW), ach);
+	_store_n(_rd_bufb(self, 0, BW), bch);
+	_print_n(ach); _print_n(bch);
+
+	/* copy max and middle delta vectors */
+	nvec_t xd = _load_n(&tail->xd);
+	wvec_t md = _load_w(&tail->md);
+	_store_n(&self->w.r.xd, xd);
+	_store_w(&self->w.r.md, md);
+	_print_n(xd);
+	_print_w(md);
+
+	/* extract the last block pointer, pass to fill-in loop */
+	return(fill_create_phantom(self, _last_block(tail)));
+}
+
+/**
+ * @fn fill_create_tail
+ * @brief create joint_tail at the end of the blocks
+ */
+static _force_inline
+struct gaba_joint_tail_s *fill_create_tail(
+	struct gaba_dp_context_s *self,
+	struct gaba_block_s *blk)
+{
+	/* create joint_tail */
+	struct gaba_joint_tail_s *tail = (struct gaba_joint_tail_s *)(blk + 1);
+	self->stack.top = (void *)(tail + 1);	/* write back stack_top */
+	debug("end stack_top(%p), stack_end(%p), blk(%p)", self->stack.top, self->stack.end, blk);
+
+	/* store char vector */
+	nvec_t ach = _loadu_n(_rd_bufa(self, blk->acnt, BW));
+	nvec_t bch = _loadu_n(_rd_bufb(self, blk->bcnt, BW));
+	_print_n(ach); _print_n(bch);
+	_store_n(&tail->ch, _or_n(ach, _shl_n(bch, 4)));
+
+	/* load previous tail pointer */
+	struct gaba_joint_tail_s const *prev_tail = self->w.r.tail;
+
+	/* copy delta vectors */
+	nvec_t xd = _load_n(&self->w.r.xd);
+	wvec_t md = _load_w(&self->w.r.md);
+	_store_n(&tail->xd, xd);
+	_store_w(&tail->md, md);
+	_print_n(xd);
+	_print_w(md);
+
+	/* search max section */
+	md = _add_w(md, _cvt_n_w(xd));					/* xd holds drop from max */
+	int64_t offset = prev_tail->offset + self->w.r.ofsd;
+	int64_t max = ((int16_t)_hmax_w(md)) + offset;
+	debug("offset(%lld), max(%d)", prev_tail->offset, _hmax_w(md));
+
+	/* reverse indices */
+	v2i32_t ridx = _load_v2i32(&self->w.r.aridx);
+	v2i32_t sridx = _load_v2i32(&self->w.r.asridx);
+	_store_v2i32(&tail->aridx, ridx);
+	_store_v2i32(&tail->asridx, sridx);
+	_print_v2i32(ridx);
+	_print_v2i32(sridx);
+
+	/* store scores */
+	tail->unused = 0;
+	tail->acc = self->w.r.acc;
+	tail->offset = offset;
+	tail->f.max = max;
+
+	/* status flags, coordinates, link pointer, and sections */
+	v2i32_t update = _eq_v2i32(ridx, _zero_v2i32());
+	v2i32_t adv = _sub_v2i32(sridx, ridx);
+	tail->f.stat = (blk->xstat & (UPDATE | TERM | CONT)) | _mask_v2i32(update);
+	tail->f.scnt = prev_tail->f.scnt - _hi32(update) - _lo32(update);
+	tail->f.ppos = prev_tail->f.ppos + _hi32(adv) + _lo32(adv);
+	tail->tail = prev_tail;
+	_memcpy_blk_aa(&tail->s.atail, &self->w.r.s.atail, sizeof(struct gaba_section_pair_s));
+	return(tail);
+}
+
+/**
  * @macro _fill_load_context
  * @brief load vectors onto registers
  */
@@ -1181,8 +1187,8 @@ struct gaba_block_s *fill_create_phantom(
 	/* load delta vectors */ \
 	register nvec_t delta = _zero_n(); \
 	register nvec_t drop = _load_n(self->w.r.xd.drop); \
-	_print_n(drop); \
 	_print_w(_add_w(_cvt_n_w(delta), _load_w(&self->w.r.md))); \
+	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(self->w.r.tail->offset)))); \
 	/* load direction determiner */ \
 	struct gaba_dir_s dir = _dir_init(self);
 #else
@@ -1207,6 +1213,7 @@ struct gaba_block_s *fill_create_phantom(
 	register nvec_t drop = _load_n(self->w.r.xd.drop); \
 	_print_n(drop); \
 	_print_w(_add_w(_cvt_n_w(delta), _load_w(&self->w.r.md))); \
+	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(self->w.r.tail->offset)))); \
 	/* load direction determiner */ \
 	struct gaba_dir_s dir = _dir_init(self);
 #endif
@@ -1217,6 +1224,7 @@ struct gaba_block_s *fill_create_phantom(
  */
 #if MODEL == LINEAR
 #define _fill_body() { \
+	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
 	t = _shuf_n(_load_sb(self->scv), t); \
 	_print_n(t); \
@@ -1229,11 +1237,13 @@ struct gaba_block_s *fill_create_phantom(
 	nvec_t _dv = _sub_n(t, dh); \
 	dh = _sub_n(t, dv); \
 	dv = _dv; \
+	_print_n(drop); \
 	_print_n(_add_n(dh, _load_ofsh(self->scv))); \
 	_print_n(_add_n(dv, _load_ofsv(self->scv))); \
 }
 #else /* MODEL == AFFINE */
 #define _fill_body() { \
+	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
 	_print_n(_loadu_n(aptr)); \
 	_print_n(_loadu_n(bptr)); \
@@ -1276,7 +1286,7 @@ struct gaba_block_s *fill_create_phantom(
 	drop = _op_subs(drop, _t); \
 	_dir_update(dir, _vector, _sign); \
 	_print_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta))); \
-	_print_w(_sub_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _cvt_n_w(drop))); \
+	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(self->w.r.tail->offset)))); \
 	_m;		/* update-flag vector: each element is set only when the new cell value *exceeded* the previous max */ \
 })
 
@@ -1467,7 +1477,7 @@ struct gaba_block_s *fill_bulk_predetd_blocks(
 		fill_bulk_block(self, ++blk);
 	}
 
-	/* fix status flag */
+	/* fix status flag (move MSb to TERM) */
 	blk->xstat = blk->xstat < 0 ? TERM : CONT;
 	return(blk);
 }
@@ -1487,7 +1497,7 @@ struct gaba_block_s *fill_bulk_seq_bounded(
 		fill_bulk_block(self, ++blk);
 	}
 
-	/* fix status flag */
+	/* fix status flag (move MSb to TERM) */
 	blk->xstat = blk->xstat < 0 ? TERM : CONT;
 	return(blk);
 }
@@ -1536,7 +1546,7 @@ struct gaba_block_s *fill_cap_seq_bounded(
 		if(i != BLK) { blk -= i == 0; break; }/* break if not filled full length */
 	}
 
-	/* fix status flag */
+	/* fix status flag (move MSb to TERM) */
 	blk->xstat = blk->xstat < 0 ? TERM : UPDATE;
 	return(blk);
 }
@@ -1618,11 +1628,8 @@ struct gaba_block_s *fill_seq_bounded(
 static _force_inline
 struct gaba_block_s *fill_section_seq_bounded(
 	struct gaba_dp_context_s *self,
-	struct gaba_block_s *prev_blk)
+	struct gaba_block_s *blk)
 {
-	/* create phantom head */
-	struct gaba_block_s *blk = fill_create_phantom(self, prev_blk);
-
 	/* extra large bulk fill (with stack allocation) */
 	uint64_t mem_cnt, seq_cnt;			/* #blocks filled in bulk */
 	while((mem_cnt = max_blocks_mem(self)) < (seq_cnt = max_blocks_idx(self))) {
@@ -1665,20 +1672,17 @@ struct gaba_fill_s *_export(gaba_dp_fill_root)(
 	struct gaba_block_s *blk = fill_load_tail(
 		self, _root(self),
 		a, a->len - apos,
-		b, b->len - bpos,
-		UINT32_MAX
+		b, b->len - bpos
 	);
 
 	/* init fetch */
-	if(_root(self)->f.ppos + fill_init_fetch(self, _root(self)) < GP_ROOT) {
-		return(_fill(fill_create_tail(self, _root(self),
-			fill_create_phantom(self, blk)
-		)));
+	if(fill_init_fetch(self, blk, _root(self)->f.ppos) < GP_ROOT) {
+		return(_fill(fill_create_tail(self, blk)));
 	}
 
 	/* init fetch done, issue ungapped here filter if needed */
 	/* fill blocks then create a tail cap */
-	return(_fill(fill_create_tail(self, _root(self),
+	return(_fill(fill_create_tail(self,
 		fill_section_seq_bounded(self, blk)
 	)));
 }
@@ -1702,22 +1706,19 @@ struct gaba_fill_s *_export(gaba_dp_fill)(
 	struct gaba_block_s *blk = fill_load_tail(
 		self, _tail(fill),
 		a, _tail(fill)->aridx,
-		b, _tail(fill)->bridx,
-		_tail(fill)->pridx
+		b, _tail(fill)->bridx
 	);
 
 	/* check if init fetch is needed */
 	if(_tail(fill)->f.ppos < GP_ROOT) {
-		if(_tail(fill)->f.ppos + fill_init_fetch(self, _tail(fill)) < GP_ROOT) {
-			return(_fill(fill_create_tail(self, _tail(fill),
-				fill_create_phantom(self, blk)
-			)));
+		if(fill_init_fetch(self, blk, _tail(fill)->f.ppos) < GP_ROOT) {
+			return(_fill(fill_create_tail(self, blk)));
 		}
 		/* init fetch done, issue ungapped here filter if needed */
 	}
 
 	/* fill blocks then create a tail cap */
-	return(_fill(fill_create_tail(self, _tail(fill),
+	return(_fill(fill_create_tail(self,
 		fill_section_seq_bounded(self, blk)
 	)));
 }
@@ -1797,7 +1798,7 @@ void leaf_search(
 	 * max_mask will be zero if the block contains the maximum scoring cell with the shortest path
 	 */
 	v2i32_t ridx = _load_v2i32(&tail->aridx);
-	while((--b->xstat & ROOT) == 0 && (max_mask &= ~b->max_update_mask) != 0) {
+	while((--b->xstat & HEAD) == 0 && (max_mask &= ~b->max_update_mask) != 0) {
 		/* FIXME: reload needed for HEAD */
 		v2i8_t cnt = _load_v2i8(&b->acnt);
 		ridx = _add_v2i32(ridx, _cvt_v2i8_v2i32(cnt));
@@ -2813,6 +2814,12 @@ void gaba_init_phantom(
 		.xd.drop = { [BW / 2] = _max_match(p) - _gap_v(p, 1) },
 		.md = gaba_init_middle_delta(p)
 	};
+
+	/* add offsets */
+	ph->tail.offset += 128;
+	_store_n(&ph->tail.xd.drop,
+		_add_n(_load_n(&ph->tail.xd.drop), _set_n(-128))
+	);
 	return;
 }
 
@@ -2837,7 +2844,7 @@ void gaba_init_dp_context(
 			? -(p->gi + p->ge)			/* treat sum of gi and ge as gap extension penalty in linear */
 			: -p->ge,					/* for affine and combined */
 		.gf = -p->gf,					/* for combined */
-		.tx = p->xdrop,
+		.tx = p->xdrop - 128,
 		.tf = p->filter_thresh,
 
 		/* input and output options */
@@ -3496,10 +3503,10 @@ unittest(with_seq_pair("A", "A"))
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	#if MODEL == LINEAR
 		assert(f->stat == 0x1ff, "%x", f->stat);
-		assert(check_tail(f, 4, 40, 53, 4), print_tail(f));
+		assert(check_tail(f, 4, 40, 53, 8), print_tail(f));
 	#else
 		assert(f->stat == 0x10f, "%x", f->stat);
-		assert(check_tail(f, 4, 31, 44, 4), print_tail(f));
+		assert(check_tail(f, 4, 31, 44, 8), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3513,26 +3520,26 @@ unittest(with_seq_pair("A", "A"))
 	/* fill root section */
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->arsec, 0, &s->brsec, 0);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 0, 0, -29, 1), print_tail(f));
+	assert(check_tail(f, 0, 0, -29, 2), print_tail(f));
 
 	/* fill again */
 	f = _export(gaba_dp_fill)(d, f, &s->arsec, &s->brsec);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 0, 0, -27, 2), print_tail(f));
+	assert(check_tail(f, 0, 0, -27, 4), print_tail(f));
 
 	/* fill tail section */
 	f = _export(gaba_dp_fill)(d, f, &s->artail, &s->brtail);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 4, 13, 13, 3), print_tail(f));
+	assert(check_tail(f, 4, 13, 13, 6), print_tail(f));
 
 	/* fill tail section again */
 	f = _export(gaba_dp_fill)(d, f, &s->artail, &s->brtail);
 	#if MODEL == LINEAR
 		assert(f->stat == 0x1ff, "%x", f->stat);
-		assert(check_tail(f, 4, 40, 53, 4), print_tail(f));
+		assert(check_tail(f, 4, 40, 53, 8), print_tail(f));
 	#else
 		assert(f->stat == 0x10f, "%x", f->stat);
-		assert(check_tail(f, 4, 31, 44, 4), print_tail(f));
+		assert(check_tail(f, 4, 31, 44, 8), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3546,26 +3553,26 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	/* fill root section */
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 0, 0, -7, 1), print_tail(f));
+	assert(check_tail(f, 0, 0, -7, 2), print_tail(f));
 
 	/* fill again */
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 16, 17, 17, 2), print_tail(f));
+	assert(check_tail(f, 16, 17, 17, 4), print_tail(f));
 
 	/* fill tail section */
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 48, 40, 57, 3), print_tail(f));
+	assert(check_tail(f, 48, 40, 57, 6), print_tail(f));
 
 	/* fill tail section again */
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	#if MODEL == LINEAR
 		assert(f->stat == 0x1ff, "%x", f->stat);
-		assert(check_tail(f, 48, 40, 97, 4), print_tail(f));
+		assert(check_tail(f, 48, 40, 97, 8), print_tail(f));
 	#else
 		assert(f->stat == 0x10f, "%x", f->stat);
-		assert(check_tail(f, 48, 31, 88, 4), print_tail(f));
+		assert(check_tail(f, 48, 31, 88, 8), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3579,26 +3586,26 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 	/* fill root section */
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->arsec, 0, &s->brsec, 0);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 0, 0, -7, 1), print_tail(f));
+	assert(check_tail(f, 0, 0, -7, 2), print_tail(f));
 
 	/* fill again */
 	f = _export(gaba_dp_fill)(d, f, &s->arsec, &s->brsec);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 16, 17, 17, 2), print_tail(f));
+	assert(check_tail(f, 16, 17, 17, 4), print_tail(f));
 
 	/* fill tail section */
 	f = _export(gaba_dp_fill)(d, f, &s->artail, &s->brtail);
 	assert(f->stat == 0x1ff, "%x", f->stat);
-	assert(check_tail(f, 48, 40, 57, 3), print_tail(f));
+	assert(check_tail(f, 48, 40, 57, 6), print_tail(f));
 
 	/* fill tail section again */
 	f = _export(gaba_dp_fill)(d, f, &s->artail, &s->brtail);
 	#if MODEL == LINEAR
 		assert(f->stat == 0x1ff, "%x", f->stat);
-		assert(check_tail(f, 48, 40, 97, 4), print_tail(f));
+		assert(check_tail(f, 48, 40, 97, 8), print_tail(f));
 	#else
 		assert(f->stat == 0x10f, "%x", f->stat);
-		assert(check_tail(f, 48, 31, 88, 4), print_tail(f));
+		assert(check_tail(f, 48, 31, 88, 8), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3610,14 +3617,16 @@ unittest(with_seq_pair("GAAAAAAAA", "AAAAAAAA"))
 	omajinai();
 
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
-	assert(f->stat == 0x01ff, "%x", f->stat);
+	assert(f->stat == 0x01f0, "%x", f->stat);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	assert(f->stat == 0x010f, "%x", f->stat);
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	assert(f->stat == 0x01f0, "%x", f->stat);
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
 	assert(f->stat == 0x010f, "%x", f->stat);
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 	assert(f->stat == 0x01f0, "%x", f->stat);
-	assert(check_tail(f, 22, 37, 42, 4), print_tail(f));
+	assert(check_tail(f, 22, 37, 42, 5), print_tail(f));
 
 	_export(gaba_dp_clean)(d);
 }
