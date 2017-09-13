@@ -587,6 +587,7 @@ enum GABA_BLK_STATUS {
 	CONT			= 0,
 	UPDATE			= 0x0100,
 	TERM			= 0x0200,
+	STAT_MASK		= UPDATE | TERM | CONT,
 	HEAD			= 0x2000,
 	ROOT			= 0x4000			/* update flag will be combined set for the actual root */
 };
@@ -705,7 +706,7 @@ struct gaba_dir_s {
 		.mask = (_blk)->dir_mask, \
 		.acc = 0 \
 	}; \
-	debug("load dir idx(%d), mask(%x), shifted mask(%x)", (int32_t)_filled_count, _d.mask, _d.mask>>(BLK - (_filled_count))); \
+	debug("load dir cnt(%d), mask(%x), shifted mask(%x)", (int32_t)_filled_count, _d.mask, _d.mask>>(BLK - (_filled_count))); \
 	_d.mask >>= (BLK - (_filled_count)); \
 	_d; \
 })
@@ -1195,7 +1196,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(self->w.r.tail->offset)))); \
 	/* load direction determiner */ \
 	struct gaba_dir_s dir = _dir_init(self);
-#else
+#else	/* AFFINE and COMBINED */
 #define _fill_load_context(_blk) \
 	debug("blk(%p)", (_blk)); \
 	/* load sequence buffer offset */ \
@@ -1228,10 +1229,8 @@ struct gaba_joint_tail_s *fill_create_tail(
  */
 #if MODEL == LINEAR
 #define _fill_body() { \
-	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
 	t = _shuf_n(_load_sb(self->scv), t); \
-	_print_n(t); \
 	t = _max_n(dh, t); \
 	t = _max_n(dv, t); \
 	ptr->h.mask = _mask_n(_eq_n(t, dv)); \
@@ -1241,18 +1240,14 @@ struct gaba_joint_tail_s *fill_create_tail(
 	nvec_t _dv = _sub_n(t, dh); \
 	dh = _sub_n(t, dv); \
 	dv = _dv; \
-	_print_n(drop); \
-	_print_n(_add_n(dh, _load_ofsh(self->scv))); \
-	_print_n(_add_n(dv, _load_ofsv(self->scv))); \
+	/*_print_n(drop);*/ \
+	/*_print_n(_add_n(dh, _load_ofsh(self->scv)));*/ \
+	/*_print_n(_add_n(dv, _load_ofsv(self->scv)));*/ \
 }
-#else /* MODEL == AFFINE */
+#elif MODEL == AFFINE
 #define _fill_body() { \
-	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
-	_print_n(_loadu_n(aptr)); \
-	_print_n(_loadu_n(bptr)); \
 	t = _shuf_n(_load_sb(self->scv), t); \
-	_print_n(t); \
 	t = _max_n(de, t); \
 	t = _max_n(df, t); \
 	ptr->h.mask = _mask_n(_eq_n(t, de)); \
@@ -1272,11 +1267,12 @@ struct gaba_joint_tail_s *fill_create_tail(
 	t = _sub_n(dv, t); \
 	ptr++; \
 	dv = dh; dh = t; \
-	_print_n(_add_n(dh, _load_ofsh(self->scv))); \
-	_print_n(_add_n(dv, _load_ofsv(self->scv))); \
-	_print_n(_sub_n(_sub_n(de, dv), _load_adjh(self->scv))); \
-	_print_n(_sub_n(_add_n(df, dh), _load_adjv(self->scv))); \
+	/*_print_n(_add_n(dh, _load_ofsh(self->scv)));*/ \
+	/*_print_n(_add_n(dv, _load_ofsv(self->scv)));*/ \
+	/*_print_n(_sub_n(_sub_n(de, dv), _load_adjh(self->scv)));*/ \
+	/*_print_n(_sub_n(_add_n(df, dh), _load_adjv(self->scv)));*/ \
 }
+#else /* MODEL == COMBINED */
 #endif /* MODEL */
 
 /**
@@ -1308,7 +1304,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	_fill_body();		/* update vectors */ \
 	_fill_update_delta(_add_n, _subs_n, dh, _load_ofsh(self->scv), 1); \
 }
-#else
+#else	/* AFFINE and COMBINED */
 #define _fill_right() { \
 	dh = _bsl_n(dh, 1);	/* shift left dh */ \
 	df = _bsl_n(df, 1);	/* shift left df */ \
@@ -1328,7 +1324,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	_fill_body();		/* update vectors */ \
 	_fill_update_delta(_add_n, _subs_n, dv, _load_ofsv(self->scv), 1); \
 }
-#else
+#else	/* AFFINE and COMBINED */
 #define _fill_down() { \
 	dv = _bsr_n(dv, 1);	/* shift right dv */ \
 	de = _bsr_n(de, 1);	/* shift right de */ \
@@ -1373,7 +1369,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	_store_n((_blk)->diff.dv, dv); _print_n(dv); \
 	_fill_store_context_intl(_blk); \
 }
-#else
+#else	/* AFFINE and COMBINED */
 #define _fill_store_context(_blk) { \
 	_store_n((_blk)->diff.dh, dh); _print_n(dh); \
 	_store_n((_blk)->diff.dv, dv); _print_n(dv); \
@@ -1455,11 +1451,11 @@ void fill_bulk_block(
 }
 
 /**
- * @fn fill_bulk_predetd_blocks
+ * @fn fill_bulk_k_blocks
  * @brief fill <cnt> contiguous blocks without ij-bound test
  */
 static _force_inline
-struct gaba_block_s *fill_bulk_predetd_blocks(
+struct gaba_block_s *fill_bulk_k_blocks(
 	struct gaba_dp_context_s *self,
 	struct gaba_block_s *blk,
 	uint64_t cnt)
@@ -1473,7 +1469,8 @@ struct gaba_block_s *fill_bulk_predetd_blocks(
 	}
 
 	/* fix status flag (move MSb to TERM) */
-	blk->xstat = blk->xstat < 0 ? TERM : CONT;
+	blk->xstat = blk->xstat < 0 ? TERM : ((blk->xstat & ~STAT_MASK) | CONT);
+	debug("return, blk(%p), xstat(%x)", blk, blk->xstat);
 	return(blk);
 }
 
@@ -1493,7 +1490,8 @@ struct gaba_block_s *fill_bulk_seq_bounded(
 	}
 
 	/* fix status flag (move MSb to TERM) */
-	blk->xstat = blk->xstat < 0 ? TERM : CONT;
+	blk->xstat = blk->xstat < 0 ? TERM : ((blk->xstat & ~STAT_MASK) | CONT);
+	debug("return, blk(%p), xstat(%x)", blk, blk->xstat);
 	return(blk);
 }
 
@@ -1542,7 +1540,8 @@ struct gaba_block_s *fill_cap_seq_bounded(
 	}
 
 	/* fix status flag (move MSb to TERM) */
-	blk->xstat = blk->xstat < 0 ? TERM : UPDATE;
+	blk->xstat = blk->xstat < 0 ? TERM : ((blk->xstat & ~STAT_MASK) | UPDATE);
+	debug("return, blk(%p), xstat(%x)", blk, blk->xstat);
 	return(blk);
 }
 
@@ -1601,14 +1600,15 @@ struct gaba_block_s *fill_seq_bounded(
 	while((cnt = min_blocks_idx(self)) > MIN_BULK_BLOCKS) {
 		/* bulk fill without ij-bound test */
 		debug("fill predetd block");
-		if((blk = fill_bulk_predetd_blocks(self, blk, cnt))->xstat != CONT) {
+		if(((blk = fill_bulk_k_blocks(self, blk, cnt))->xstat & STAT_MASK) != CONT) {
 			debug("term detected, xstat(%x)", blk->xstat);
 			return(blk);				/* xdrop termination detected, skip cap */
 		}
 	}
 
 	/* bulk fill with ij-bound test */
-	if((blk = fill_bulk_seq_bounded(self, blk))->xstat != CONT) {
+	if(((blk = fill_bulk_seq_bounded(self, blk))->xstat & STAT_MASK) != CONT) {
+		debug("term detected, blk(%p), xstat(%x)", blk, blk->xstat);
 		return(blk);					/* xdrop termination detected, skip cap */
 	}
 
@@ -1633,7 +1633,7 @@ struct gaba_block_s *fill_section_seq_bounded(
 		/* here mem limit reaches first (seq sections too long), so fill without seq test */
 		if((mem_cnt = MIN2(mem_cnt, min_blocks_idx(self))) > MIN_BULK_BLOCKS) {
 			debug("mem bounded fill");
-			if((blk = fill_bulk_predetd_blocks(self, blk, mem_cnt))->xstat != CONT) {
+			if(((blk = fill_bulk_k_blocks(self, blk, mem_cnt))->xstat & STAT_MASK) != CONT) {
 				return(blk);
 			}
 		}
@@ -1764,8 +1764,8 @@ void leaf_detect_pos(
 			_fill_down_update_ptr(); \
 			_fill_down(); \
 		} \
+		_m++->mask = _mask_n(_lt_n(max, delta)); \
 		max = _max_n(max, delta); \
-		_m++->mask = _mask_n(_eq_n(max, delta)); \
 		debug("mask(%x)", ((nvec_masku_t){ .mask = (_m - 1)->mask }).all); \
 	}
 
@@ -1782,8 +1782,9 @@ void leaf_detect_pos(
 		debug("max_mask(%llx), m(%llx)", max_mask, (uint64_t)m->all);
 		max_mask &= ~m->all;
 	}
+	debug("max_mask(%llx), m(%llx)", max_mask, (uint64_t)m->all);
 	self->w.l.p = m - mask_arr;
-	self->w.l.q = tzcnt(m->all & blk->max_mask);
+	self->w.l.q = tzcnt(m->all & max_mask);
 	debug("p(%u), q(%u)", self->w.l.p, self->w.l.q);
 	return;
 }
@@ -1827,12 +1828,14 @@ uint64_t leaf_search(
 	/* restore reverse indices */
 	int64_t fcnt = self->w.l.p + 1;					/* #filled vectors */
 	uint32_t dir_mask = _dir_load(self->w.l.blk, fcnt).mask;/* 1 for b-side extension, 0 for a-side extension */
+	_print_v2i32(ridx);
 	ridx = _sub_v2i32(ridx,
 		_seta_v2i32(
 			(0    + popcnt(dir_mask)) - (BW - self->w.l.q),	/* bcnt - bqdiff where popcnt(dir_mask) is #b-side extensions */
 			(fcnt - popcnt(dir_mask)) - (1 + self->w.l.q)	/* acnt - aqdiff */
 		)
 	);
+	_print_v2i32(ridx);
 
 	/* increment by one to convert char index to grid index */
 	v2i32_t gidx = _sub_v2i32(_set_v2i32(1), ridx);
@@ -1985,10 +1988,12 @@ void trace_reload_section(
  * @macro _trace_load_block_rem
  * @brief reload mask pointer and direction mask, and adjust path offset
  */
-#define _trace_load_block_rem(_idx) ({ \
-	path -= ofs < (_idx) + 1; \
-	ofs = (ofs - ((_idx) + 1)) & (BLK - 1); \
-	_dir_load(blk, (_idx) + 1).mask; \
+#define _trace_load_block_rem(_cnt) ({ \
+	debug("ofs(%llu), cnt(%llu), path(%p), ofs(%llu)", \
+		ofs, (uint64_t)_cnt, path - (ofs < (_cnt)), (ofs - (_cnt)) & (BLK - 1)); \
+	path -= ofs < (_cnt); \
+	ofs = (ofs - (_cnt)) & (BLK - 1); \
+	_dir_load(blk, (_cnt)).mask; \
 })
 
 /**
@@ -1996,13 +2001,15 @@ void trace_reload_section(
  * @brief reload tail, issued at each band-segment boundaries
  */
 #define _trace_reload_tail(t) { \
+	/* store path (offset will be adjusted afterwards) */ \
+	_storeu_u64(path, path_array<<ofs); \
 	/* reload block pointer */ \
 	blk = _last_phantom(blk)->blk; \
 	/* reload dir and mask pointer, adjust path offset */ \
-	uint64_t _idx = blk->acnt + blk->bcnt; \
-	debug("reload tail, blk(%p), idx(%llu)", blk, _idx); \
-	mask = &blk->mask[_idx]; \
-	dir_mask = _trace_load_block_rem(_idx); \
+	uint64_t _cnt = blk->acnt + blk->bcnt; \
+	mask = &blk->mask[_cnt - 1]; \
+	dir_mask = _trace_load_block_rem(_cnt); \
+	debug("reload tail, path_array(%llx), blk(%p), idx(%llu), mask(%x)", path_array, blk, _cnt - 1, dir_mask); \
 }
 
 /**
@@ -2010,18 +2017,12 @@ void trace_reload_section(
  * @brief reload block for bulk trace
  */
 #define _trace_reload_block() { \
+	/* store path (bulk, offset does not change here) */ \
+	_storeu_u64(path, path_array<<ofs); path--; \
+	/* reload mask and mask pointer */ \
 	mask = &(--blk)->mask[BLK - 1]; \
 	dir_mask = _dir_load(blk, BLK).mask; \
-}
-
-/**
- * @macro _trace_store_path
- * @brief store path array
- */
-#define _trace_store_path() { \
-	debug("path_array(%llx)", path_array); \
-	_storeu_u64(path, path_array<<ofs); \
-	path--; \
+	debug("reload block, path_array(%llx), blk(%p), mask(%x)", path_array, blk, dir_mask); \
 }
 
 /**
@@ -2045,7 +2046,6 @@ void trace_reload_section(
  */
 #define _trace_bulk_load_n(t, _jump_to) { \
 	if(_unlikely(mask < blk->mask)) { \
-		_trace_store_path();					/* store path_array */ \
 		_trace_reload_block(); \
 		if(_unlikely(!_trace_test_bulk())) {	/* adjust gidx */ \
 			debug("jump to %s", #_jump_to); \
@@ -2055,13 +2055,11 @@ void trace_reload_section(
 }
 #define _trace_tail_load_n(t, _jump_to) { \
 	if(_unlikely(mask < blk->mask)) { \
-		_trace_store_path();					/* store path_array */ \
 		debug("test ph(%p), xstat(%x)", _last_phantom(blk), _last_phantom(blk)->xstat); \
 		if(_last_phantom(blk)->xstat & HEAD) {	/* head (phantom) block is marked 0x4000 */ \
 			_trace_reload_tail(t);				/* fetch the previous tail */ \
 		} else { \
 			/* load dir and update mask pointer */ \
-			debug("reload block"); \
 			_trace_reload_block();				/* not reached the head yet */ \
 			if(_trace_test_bulk()) {			/* adjust gidx */ \
 				goto _jump_to;					/* dispatch again (bulk loop) */ \
@@ -2146,7 +2144,7 @@ void trace_body(
 	struct gaba_block_s const *blk = self->w.l.blk;
 	struct gaba_mask_pair_s const *mask = &blk->mask[self->w.l.p];
 	uint64_t q = self->w.l.q;
-	uint32_t dir_mask = _trace_load_block_rem(self->w.l.p);
+	uint32_t dir_mask = _trace_load_block_rem(self->w.l.p + 1);
 
 	/* load grid indices; assigned for each of N+1 boundaries of length-N sequence */
 	register v2i32_t gidx = _load_v2i32(&self->w.l.agidx);
@@ -2167,7 +2165,8 @@ void trace_body(
 _trace_index_break:;
 	/* reached a boundary of sections, compensate ofs */
 	uint64_t rem = mask - blk->mask + 1;
-	path += ofs + rem >= BLK;
+	debug("rem(%llu), path(%p), ofs(%llu)", rem, path + (ofs + rem >= BLK), (ofs + rem) & (BLK - 1));
+	path += (ofs + rem) >= BLK;
 	ofs = (ofs + rem) & (BLK - 1);
 	_storeu_u64(path, path_array<<ofs);
 
@@ -4028,6 +4027,7 @@ unittest(with_seq_pair("GAAAAAAAA", "AAAAAAAA"))
 
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
@@ -4049,7 +4049,6 @@ unittest(with_seq_pair("TTTTTTTT", "CTTTTTTTT"))
 	omajinai();
 
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
-	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bfsec);
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
@@ -4073,6 +4072,7 @@ unittest(with_seq_pair("GACGTACGT", "ACGTACGT"))
 
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
+	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bftail);
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
 
@@ -4093,7 +4093,6 @@ unittest(with_seq_pair("ACGTACGT", "GACGTACGT"))
 	omajinai();
 
 	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, &s->afsec, 0, &s->bfsec, 0);
-	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	f = _export(gaba_dp_fill)(d, f, &s->afsec, &s->bfsec);
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bfsec);
 	f = _export(gaba_dp_fill)(d, f, &s->aftail, &s->bftail);
