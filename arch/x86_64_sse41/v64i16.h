@@ -180,7 +180,6 @@ typedef struct v64i16_s {
 
 /* compare */
 #define _eq_v64i16(...)		_a_v64i16(cmpeq, _e_vv, __VA_ARGS__)
-#define _lt_v64i16(...)		_a_v64i16(cmplt, _e_vv, __VA_ARGS__)
 #define _gt_v64i16(...)		_a_v64i16(cmpgt, _e_vv, __VA_ARGS__)
 
 /* insert and extract */

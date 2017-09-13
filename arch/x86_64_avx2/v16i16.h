@@ -117,7 +117,6 @@ typedef struct v16i16_s {
 
 /* compare */
 #define _eq_v16i16(...)		_a_v16i16(cmpeq, _e_vv, __VA_ARGS__)
-#define _lt_v16i16(...)		_a_v16i16(cmplt, _e_vv, __VA_ARGS__)
 #define _gt_v16i16(...)		_a_v16i16(cmpgt, _e_vv, __VA_ARGS__)
 
 /* insert and extract */

@@ -102,7 +102,6 @@ typedef struct v32i8_s {
 
 /* compare */
 #define _eq_v32i8(...)		_a_v32i8(cmpeq, _e_vv, __VA_ARGS__)
-#define _lt_v32i8(...)		_a_v32i8(cmplt, _e_vv, __VA_ARGS__)
 #define _gt_v32i8(...)		_a_v32i8(cmpgt, _e_vv, __VA_ARGS__)
 
 /* insert and extract */
