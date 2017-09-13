@@ -103,13 +103,31 @@
 
 
 /**
- * sequence encoding
+ * sequence encoding table
+ * "NTGKCYSBAWRDMHVN"
+ * "NACMGRSVTWYHKDBN"
  */
-static uint8_t const encode_table_f[16] = { [1] = A, [2] = C, [4] = G, [8] = T };
-static uint8_t const encode_table_r[16] = { [1] = T, [2] = G, [4] = C, [8] = A };
-"NTGKCYSBAWRDMHVN"
-"NACMGRSVTWYHKDBN"
-
+enum alphabet {
+	A = 0x00,
+	C = 0x01,
+	G = 0x02,
+	T = 0x03,
+	N = 0x80
+};
+static uint8_t const enc4f[16] = { [1] = A, [2] = C, [4] = G, [8] = T };
+static uint8_t const enc4r[16] = { [1] = T, [2] = G, [4] = C, [8] = A };
+static uint8_t const encaf[16] = {
+	['A' & 0x0f] = A, ['C' & 0x0f] = C,
+	['G' & 0x0f] = G, ['T' & 0x0f] = T,
+	['U' & 0x0f] = T, ['N' & 0x0f] = N
+};
+static uint8_t const encar[16] = {
+	['A' & 0x0f] = T, ['C' & 0x0f] = G,
+	['G' & 0x0f] = C, ['T' & 0x0f] = A,
+	['U' & 0x0f] = A, ['N' & 0x0f] = N
+};
+static uint8_t const decaf[16] = { [A] = 'A', [C] = 'C', [G] = 'G', [T] = 'T' };
+static uint8_t const decar[16] = { [A] = 'T', [C] = 'G', [G] = 'C', [T] = 'A' };
 
 /**
  * @fn cputime
@@ -1908,11 +1926,11 @@ uint64_t bseq_read_bam(
 	s->seq = (uint8_t *)mem->n;
 	if(c->flag & 0x10) {
 		for(int64_t i = c->l_qseq-1; i >= 0; i--) {
-			mem->a[mem->n++] = encode_table_r[0x0f & (sseq[i>>1]>>((~i&0x01)<<2))];
+			mem->a[mem->n++] = enc4r[0x0f & (sseq[i>>1]>>((~i&0x01)<<2))];
 		}
 	} else {
 		for(int64_t i = 0; i < c->l_qseq; i++) {
-			mem->a[mem->n++] = encode_table_f[0x0f & (sseq[i>>1]>>((~i&0x01)<<2))];
+			mem->a[mem->n++] = enc4f[0x0f & (sseq[i>>1]>>((~i&0x01)<<2))];
 		}
 	}
 	mem->a[mem->n++] = '\0';
@@ -2007,12 +2025,9 @@ uint64_t bseq_read_fasta(
 	#define _id(x)			(x)
 	#define _trans(x)		( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
 	/* keep them on registers */
-	static uint8_t const conv[16] = {
-		['A'&0x0f] = A, ['C'&0x0f] = C, ['G'&0x0f] = G, ['T'&0x0f] = T, ['U'&0x0f] = T, ['N'&0x0f] = 0x0f,
-	};
 	v32i8_t const dv = _set_v32i8(fp->delim == '@'? '+' : fp->delim);
 	v32i8_t const sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0xf);
-	v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(conv));
+	v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(encaf));
 
 	bseq_t *s = &seq->a[seq->n-1];
 	uint8_t *p = fp->p, *q = &mem->a[mem->n];
@@ -4997,7 +5012,7 @@ void mm_print_sam_unmapped(
 	_putsk(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");
 
 	/* sequence */
-	_putsnt(b, t->seq, t->l_seq, decode_table_f);
+	_putsnt(b, t->seq, t->l_seq, decaf);
 	_t(b);
 
 	/* quality if available */
@@ -5051,9 +5066,9 @@ void mm_print_sam_mapped_core(
 
 	/* print sequence */
 	if(s->bid & 0x01) {
-		_putsntr(b, &t->seq[t->l_seq-qe], qe-qs, decode_table_r);
+		_putsntr(b, &t->seq[t->l_seq-qe], qe-qs, decar);
 	} else {
-		_putsnt(b, &t->seq[qs], qe-qs, decode_table_f);
+		_putsnt(b, &t->seq[qs], qe-qs, decaf);
 	}
 	_t(b);
 
@@ -5154,7 +5169,7 @@ void mm_print_sam_md(
 			ridx -= cnt = tzcnt(arr);					/* count #del */
 			_putn(b, (int32_t)(rp - rb));
 			_put(b, '^');
-			_putsnt32(b, rp, cnt, decode_table_f);
+			_putsnt32(b, rp, cnt, decaf);
 			rp += cnt;
 			rb = rp;
 		}
@@ -5184,11 +5199,11 @@ void mm_print_sam_md(
 			ridx -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt));
 			qp += dir ? -cnt : cnt;
 			for(uint64_t i = 0; i < cnt - 1; i++) {
-				_put(b, decode_table_f[*rp]);		/* print mismatch base */
+				_put(b, decaf[*rp]);		/* print mismatch base */
 				_put(b, '0');							/* padding */
 				rp++;
 			}
-			_put(b, decode_table_f[*rp]);			/* print mismatch base */
+			_put(b, decaf[*rp]);			/* print mismatch base */
 			rp++;
 			rb = rp;
 		}
@@ -5342,13 +5357,13 @@ void mm_print_maf_mapped_ref(
 		/* deletion */
 		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(arr) - 1);	/* count 0's (deletions) */
-		_putsnt32(b, rp, cnt, decode_table_f);
+		_putsnt32(b, rp, cnt, decaf);
 		rp += cnt;						/* advance pointer */
 		do {
 			arr = _load_uint64(p, pos);
 			cnt = lzcnt(arr^0x5555555555555555)>>1;		/* count diagonals */
 			pos -= 2*cnt;
-			_putsnt32(b, rp, cnt, decode_table_f);
+			_putsnt32(b, rp, cnt, decaf);
 			rp += cnt;					/* advance pointer */
 		} while(cnt == 32);
 	}
@@ -5373,7 +5388,7 @@ void mm_print_maf_query_forward(
 		/* insertions */
 		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(~arr));
-		_putsnt32(b, qp, cnt, decode_table_f);
+		_putsnt32(b, qp, cnt, decaf);
 		qp += cnt;
 
 		/* deletions */
@@ -5386,7 +5401,7 @@ void mm_print_maf_query_forward(
 			arr = _load_uint64(p, pos);
 			cnt = lzcnt(arr^0x5555555555555555)>>1;
 			pos -= 2*cnt;
-			_putsnt32(b, qp, cnt, decode_table_f);
+			_putsnt32(b, qp, cnt, decaf);
 			qp += cnt;
 		} while(cnt == 32);
 	}
@@ -5410,7 +5425,7 @@ void mm_print_maf_query_reverse(
 		/* insertions */
 		arr = _load_uint64(p, pos);
 		pos -= (cnt = lzcnt(~arr));
-		_putsntr32(b, qp, cnt, decode_table_r);
+		_putsntr32(b, qp, cnt, decar);
 		qp -= cnt;
 
 		/* deletions */
@@ -5423,7 +5438,7 @@ void mm_print_maf_query_reverse(
 			arr = _load_uint64(p, pos);
 			cnt = lzcnt(arr^0x5555555555555555)>>1;
 			pos -= 2*cnt;
-			_putsntr32(b, qp, cnt, decode_table_r);
+			_putsntr32(b, qp, cnt, decar);
 			qp -= cnt;
 		} while(cnt == 32);
 	}
@@ -5760,7 +5775,7 @@ void mm_print_falcon_mapped(
 {
 	/* print header line (name seq) */
 	_putsn(b, t->name, t->l_name); _sp(b);
-	_putsnt(b, t->seq, t->l_seq, decode_table_f); _cr(b);
+	_putsnt(b, t->seq, t->l_seq, decaf); _cr(b);
 	
 	/* print alignment lines */
 	mm_idx_t const *mi = b->mi;
@@ -5776,9 +5791,9 @@ void mm_print_falcon_mapped(
 		/* name seq */
 		_putsn(b, r->name, r->l_name); _sp(b);
 		if(s->bid & 0x01) {
-			_putsntr(b, &r->seq[r->l_seq-qe], qe-qs, decode_table_r);
+			_putsntr(b, &r->seq[r->l_seq-qe], qe-qs, decar);
 		} else {
-			_putsnt(b, &r->seq[qs], qe-qs, decode_table_f);
+			_putsnt(b, &r->seq[qs], qe-qs, decaf);
 		}
 		_cr(b);
 	}
@@ -5967,7 +5982,6 @@ mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 		.n_occ = b->n_occ,
 
 		/* tail section */
-		.tail = { 0 },
 		.t[0] = _sec_fw(0xfffffffe, t->tail, 32),
 
 		/* dp context */
@@ -5979,6 +5993,8 @@ mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 		}
 	};
 	if(t->dp == NULL) { goto _fail; }
+	/* tail seq array */
+	memset(t->tail, N, 96);
 
 	/* copy occ */
 	memcpy(t->occ, b->occ, t->n_occ * sizeof(uint32_t));
