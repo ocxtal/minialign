@@ -103,8 +103,6 @@ typedef struct v2i32_s {
 /* arithmetics */
 #define _add_v2i32(...)		_a_v2i32(add, _e_vv, __VA_ARGS__)
 #define _sub_v2i32(...)		_a_v2i32(sub, _e_vv, __VA_ARGS__)
-#define _adds_v2i32(...)	_a_v2i32(adds, _e_vv, __VA_ARGS__)
-#define _subs_v2i32(...)	_a_v2i32(subs, _e_vv, __VA_ARGS__)
 #define _max_v2i32(...)		_a_v2i32(max, _e_vv, __VA_ARGS__)
 #define _min_v2i32(...)		_a_v2i32(min, _e_vv, __VA_ARGS__)
 

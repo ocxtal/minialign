@@ -106,8 +106,6 @@ typedef struct v16i16_s {
 /* arithmetics */
 #define _add_v16i16(...)	_a_v16i16(add, _e_vv, __VA_ARGS__)
 #define _sub_v16i16(...)	_a_v16i16(sub, _e_vv, __VA_ARGS__)
-#define _adds_v16i16(...)	_a_v16i16(adds, _e_vv, __VA_ARGS__)
-#define _subs_v16i16(...)	_a_v16i16(subs, _e_vv, __VA_ARGS__)
 #define _max_v16i16(...)	_a_v16i16(max, _e_vv, __VA_ARGS__)
 #define _min_v16i16(...)	_a_v16i16(min, _e_vv, __VA_ARGS__)
 

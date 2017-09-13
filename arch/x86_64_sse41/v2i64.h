@@ -91,8 +91,6 @@ typedef struct v2i64_s {
 /* arithmetics */
 #define _add_v2i64(...)		_a_v2i64(add, _e_vv, __VA_ARGS__)
 #define _sub_v2i64(...)		_a_v2i64(sub, _e_vv, __VA_ARGS__)
-#define _adds_v2i64(...)	_a_v2i64(adds, _e_vv, __VA_ARGS__)
-#define _subs_v2i64(...)	_a_v2i64(subs, _e_vv, __VA_ARGS__)
 // #define _max_v2i64(...)		_a_v2i64(max, _e_vv, __VA_ARGS__)
 // #define _min_v2i64(...)		_a_v2i64(min, _e_vv, __VA_ARGS__)
 #define _max_v2i64(a, b)	( (v2i64_t) { _mm_max_epi32(a.v1, b.v1) } )
