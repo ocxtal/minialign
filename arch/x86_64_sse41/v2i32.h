@@ -117,7 +117,6 @@ typedef struct v2i32_s {
 
 /* compare */
 #define _eq_v2i32(...)		_a_v2i32(cmpeq, _e_vv, __VA_ARGS__)
-#define _lt_v2i32(...)		_a_v2i32(cmplt, _e_vv, __VA_ARGS__)
 #define _gt_v2i32(...)		_a_v2i32(cmpgt, _e_vv, __VA_ARGS__)
 
 /* test: take mask and test if all zero */
