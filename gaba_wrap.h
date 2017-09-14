@@ -1,6 +1,6 @@
 
 /**
- * @file gaba_wrap.c
+ * @file gaba_wrap.h
  *
  * @brief wrapper API implementation of the GABA library
  * gaba.c must be compiled with the following combinations:
@@ -691,5 +691,5 @@ unittest(with_seq_pair("GGAAAAAAAA", "AAAAAAAA"))
 #endif	/* _GABA_WRAP_H_INCLUDED */
 
 /**
- * end of gaba_wrap.c
+ * end of gaba_wrap.h
  */

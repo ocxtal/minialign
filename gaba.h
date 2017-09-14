@@ -23,8 +23,10 @@
  * @macro GABA_EXPORT_LEVEL
  */
 #ifdef _GABA_WRAP_H_INCLUDED
+/* included from gaba_wrap.h */
 #  define GABA_EXPORT_LEVEL		static inline
 #else
+/* single, linked to an object compiled without -DSUFFIX */
 #  define GABA_EXPORT_LEVEL
 #endif
 
