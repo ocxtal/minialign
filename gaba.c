@@ -700,15 +700,14 @@ struct gaba_dir_s {
  * @macro _dir_load
  */
 #if 1
-#define _dir_load(_blk, _filled_count) ({ \
-	struct gaba_dir_s _d = (struct gaba_dir_s){ \
-		.mask = (_blk)->dir_mask, \
-		.acc = 0 \
-	}; \
-	debug("load dir cnt(%d), mask(%x), shifted mask(%x)", (int32_t)_filled_count, _d.mask, _d.mask>>(BLK - (_filled_count))); \
-	_d.mask >>= (BLK - (_filled_count)); \
-	_d; \
-})
+#define _dir_mask_load(_blk, _cnt)	( (_blk)->dir_mask>>(BLK - (_cnt)) )
+#define _dir_load(_blk, _cnt) ( \
+	(struct gaba_dir_s){ \
+		.mask = _dir_mask_load(_blk, _cnt), \
+		.acc = (_blk)->acc \
+	} \
+	/*debug("load dir cnt(%d), mask(%x), shifted mask(%x)", (int32_t)_filled_count, _d.mask, _d.mask>>(BLK - (_filled_count)));*/ \
+)
 #else
 #define _dir_load(_blk, _local_idx) ({ \
 	struct gaba_dir_s _d = (struct gaba_dir_s){ \
@@ -1996,7 +1995,7 @@ void trace_reload_section(
 		ofs, (uint64_t)_cnt, path - (ofs < (_cnt)), (ofs - (_cnt)) & (BLK - 1)); \
 	path -= ofs < (_cnt); \
 	ofs = (ofs - (_cnt)) & (BLK - 1); \
-	_dir_load(blk, (_cnt)).mask; \
+	_dir_mask_load(blk, (_cnt)); \
 })
 
 /**
@@ -2024,7 +2023,7 @@ void trace_reload_section(
 	_storeu_u64(path, path_array<<ofs); path--; \
 	/* reload mask and mask pointer */ \
 	mask = &(--blk)->mask[BLK - 1]; \
-	dir_mask = _dir_load(blk, BLK).mask; \
+	dir_mask = _dir_mask_load(blk, BLK); \
 	debug("reload block, path_array(%llx), blk(%p), mask(%x)", path_array, blk, dir_mask); \
 }
 
@@ -2133,10 +2132,6 @@ void trace_core(
 	}
 
 	/* constants for agidx and bgidx end detection */
-	// static uint32_t const c00[2] __attribute__(( aligned(16) )) = { 0, 0 };
-	// static uint32_t const c01[2] __attribute__(( aligned(16) )) = { -1, 0 };
-	// static uint32_t const c10[2] __attribute__(( aligned(16) )) = { 0, -1 };
-	// static uint32_t const c11[2] __attribute__(( aligned(16) )) = { -1, -1 };
 	v2i32_t const v00 = _seta_v2i32(0, 0);
 	v2i32_t const v01 = _seta_v2i32(0, -1);
 	v2i32_t const v10 = _seta_v2i32(-1, 0);
