@@ -166,9 +166,8 @@ _static_assert(V2I32_MASK_10 == GABA_UPDATE_B);
  * @macro _force_inline
  * @brief inline directive for gcc-compatible compilers
  */
-// #define _force_inline				inline
-#define static 						/* */
-#define _force_inline				/* */
+#define _force_inline				inline
+// #define _force_inline				/* */
 
 /** assume 64bit little-endian system */
 _static_assert(sizeof(void *) == 8);
@@ -2055,9 +2054,9 @@ void trace_reload_section(
 	if(_unlikely(mask < blk->mask)) { \
 		_trace_reload_block(); \
 		if(_unlikely(!_trace_test_bulk())) {	/* adjust gidx */ \
-			gidx = _add_v2i32(gidx, _seta_v2i32(q - self->w.l.q, self->w.l.q - q)); \
+			gidx = _add_v2i32(gidx, _seta_v2i32(q - qsave, qsave - q)); \
 			debug("jump to %s, adjust gidx, q(%d), prev_q(%d), adj(%d, %d), gidx(%u, %u)", #_jump_to, \
-				q, self->w.l.q, q - self->w.l.q, self->w.l.q - q, _hi32(gidx), _lo32(gidx)); \
+				q, self->w.l.q, q - qsave, qsave - q, _hi32(gidx), _lo32(gidx)); \
 			goto _jump_to;						/* jump to tail loop */ \
 		} \
 	} \
@@ -2073,7 +2072,7 @@ void trace_reload_section(
 			_trace_reload_block();				/* not reached the head yet */ \
 			if(_trace_test_bulk()) {			/* adjust gidx */ \
 				debug("save q(%d)", q); \
-				self->w.l.q = q; \
+				qsave = q; \
 				goto _jump_to;					/* dispatch again (bulk loop) */ \
 			} \
 		} \
