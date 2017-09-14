@@ -147,8 +147,14 @@ typedef struct v2i32_s {
 
 /* convert */
 typedef uint64_t v2i8_t;
-#define _load_v2i8(p)		*((uint16_t const *)(p))
-#define _store_v2i8(p, v)	*((uint16_t *)(p)) = (v);
+#define _load_v2i8(p) ({ \
+	uint8_t const *_p = (uint8_t const *)(p); \
+	*((uint16_t const *)(_p)); \
+})
+#define _store_v2i8(p, v) { \
+	uint8_t *_p = (uint8_t *)(p); \
+	*((uint16_t *)_p) = (v); \
+}
 #define _cvt_v2i8_v2i32(a) ( \
 	(v2i32_t) { \
 		_mm_cvtepi8_epi32(_mm_cvtsi64_si128(a)) \
