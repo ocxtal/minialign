@@ -191,11 +191,11 @@ _static_assert(sizeof(nvec_masku_t) == BW / 8);
 #define _gap_h(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
 #define _gap_v(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
 #elif MODEL == AFFINE
-#define _gap_h(_p, _l)				( -1 * (_p)->gi - (_p)->ge * (_l) )
-#define _gap_v(_p, _l)				( -1 * (_p)->gi - (_p)->ge * (_l) )
+#define _gap_h(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
+#define _gap_v(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
 #else /* MODEL == COMBINED */
-#define _gap_h(_p, _l)				( MAX2(-1 * (_p)->gi + (_p)->ge * (_l), -1 * (_p)->gf * (_l)) )
-#define _gap_v(_p, _l)				( MAX2(-1 * (_p)->gi + (_p)->ge * (_l), -1 * (_p)->gf * (_l)) )
+#define _gap_h(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi + (_p)->ge * (_l), -1 * (_p)->gf * (_l)) )
+#define _gap_v(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi + (_p)->ge * (_l), -1 * (_p)->gf * (_l)) )
 #endif
 #define _ofs_h(_p)					( (_p)->gi + (_p)->ge )
 #define _ofs_v(_p)					( (_p)->gi + (_p)->ge )
@@ -1268,10 +1268,10 @@ struct gaba_joint_tail_s *fill_create_tail(
 	t = _sub_n(dv, t); \
 	ptr++; \
 	dv = dh; dh = t; \
-	/*_print_n(_add_n(dh, _load_ofsh(self->scv)));*/ \
-	/*_print_n(_add_n(dv, _load_ofsv(self->scv)));*/ \
-	/*_print_n(_sub_n(_sub_n(de, dv), _load_adjh(self->scv)));*/ \
-	/*_print_n(_sub_n(_add_n(df, dh), _load_adjv(self->scv)));*/ \
+	_print_n(_add_n(dh, _load_ofsh(self->scv))); \
+	_print_n(_add_n(dv, _load_ofsv(self->scv))); \
+	_print_n(_sub_n(_sub_n(de, dv), _load_adjh(self->scv))); \
+	_print_n(_sub_n(_add_n(df, dh), _load_adjv(self->scv))); \
 }
 #else /* MODEL == COMBINED */
 #endif /* MODEL */
@@ -1374,8 +1374,8 @@ struct gaba_joint_tail_s *fill_create_tail(
 #define _fill_store_context(_blk) ({ \
 	_store_n((_blk)->diff.dh, dh); _print_n(dh); \
 	_store_n((_blk)->diff.dv, dv); _print_n(dv); \
-	_store_n((_blk)->diff.dh, de); _print_n(de); \
-	_store_n((_blk)->diff.dv, df); _print_n(df); \
+	_store_n((_blk)->diff.de, de); _print_n(de); \
+	_store_n((_blk)->diff.df, df); _print_n(df); \
 	_fill_store_context_intl(_blk); \
 })
 #endif
@@ -2081,10 +2081,10 @@ void trace_reload_section(
 }
 
 /**
- * @fn trace_body
+ * @fn trace_core
  */
 static _force_inline
-void trace_body(
+void trace_core(
 	struct gaba_dp_context_s *self)
 {
 	#define _trace_gap_loop(t, _type, _next, _label) { \
@@ -2155,7 +2155,7 @@ void trace_body(
 	/* load pointers and coordinates */
 	struct gaba_block_s const *blk = self->w.l.blk;
 	struct gaba_mask_pair_s const *mask = &blk->mask[self->w.l.p];
-	uint32_t q = self->w.l.q;
+	uint32_t q = self->w.l.q, qsave = q;
 	uint32_t dir_mask = _trace_load_block_rem(self->w.l.p + 1);
 
 	/* load grid indices; assigned for each of N+1 boundaries of length-N sequence */
@@ -2279,12 +2279,12 @@ void trace_init(
 }
 
 /**
- * @fn trace_core
+ * @fn trace_body
  * @brief plen = 0 generates an alignment object with no section (not NULL object).
  * may fail when path got lost out of the band and returns NULL object
  */
 static _force_inline
-struct gaba_alignment_s *trace_core(
+struct gaba_alignment_s *trace_body(
 	struct gaba_dp_context_s *self,
 	struct gaba_joint_tail_s const *tail,
 	struct gaba_alloc_s const *alloc,
@@ -2301,7 +2301,7 @@ struct gaba_alignment_s *trace_core(
 		if((int32_t)self->w.l.bgidx <= 0) { trace_reload_section(self, 1); }
 
 		/* fragment trace: q must be inside [0, BW) */
-		trace_body(self);
+		trace_core(self);
 		debug("p(%d), q(%d)", self->w.l.p, self->w.l.q);
 		if(_unlikely(self->w.l.q >= BW)) {
 			/* out of band: abort */
@@ -2352,7 +2352,7 @@ struct gaba_alignment_s *_export(gaba_dp_trace)(
 	alloc = (alloc == NULL) ? &default_alloc : alloc;
 
 	/* search and trace */
-	return(trace_core(self, _tail(fill), alloc,
+	return(trace_body(self, _tail(fill), alloc,
 		fill->ppos < GP_ROOT ? 0 : leaf_search(self, _tail(fill))
 	));
 }
@@ -2772,19 +2772,22 @@ struct gaba_diff_vec_s gaba_init_diff_vectors(
 	 * de: dE[i, j] + gi + dV[i, j] - ge
 	 * df: dF[i, j] + gi + dH[i, j] - ge
 	 */
-	/* calc dh and dv */
 	for(int i = 0; i < BW/2; i++) {
 		diff.dh[BW/2 - 1 - i] = _ofs_h(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
 		diff.dh[BW/2     + i] = _ofs_h(p) + (_max_match(p) + _gap_v(p, i*2 + 1)) - _gap_v(p, (i + 1) * 2);
 		diff.dv[BW/2 - 1 - i] = _ofs_v(p) + (_max_match(p) + _gap_h(p, i*2 + 1)) - _gap_v(p, (i + 1) * 2);
 		diff.dv[BW/2     + i] = _ofs_v(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
 	#if MODEL == AFFINE || MODEL == COMBINED
-		diff.de[BW/2 - 1 - i] = _ofs_e(p) + diff_dv[BW/2 - 1 - i] + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
-		diff.de[BW/2     + i] = _ofs_e(p) + diff_dv[BW/2     + i] + _gap_h(p, 1) - _gap_h(p, 0);
-		diff.df[BW/2 - 1 - i] = _ofs_f(p) + diff.dv[BW/2 - 1 - i] + _gap_v(p, 1) - _gap_v(p, 0);
-		diff.df[BW/2     + i] = _ofs_f(p) + diff_dh[BW/2 - 1 - i] + _gap_v(p, i*2 + 1) - _gap_v(p, i*2);
+		diff.de[BW/2 - 1 - i] = _ofs_e(p) + diff.dv[BW/2 - 1 - i] + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
+		diff.de[BW/2     + i] = _ofs_e(p) + diff.dv[BW/2     + i] + _gap_h(p, 1) - _gap_h(p, 0);
+		diff.df[BW/2 - 1 - i] = _ofs_f(p) + diff.dh[BW/2 - 1 - i] + _gap_v(p, 1) - _gap_v(p, 0);
+		diff.df[BW/2     + i] = _ofs_f(p) + diff.dh[BW/2     + i] + _gap_v(p, i*2 + 1) - _gap_v(p, i*2);
+		/* negate dh for affine */
 	#endif
 	}
+	#if MODEL == AFFINE || MODEL == COMBINED
+		_store_n(&diff.dh, _sub_n(_zero_n(), _load_n(&diff.dh)));
+	#endif
 	return(diff);
 }
 
@@ -3519,7 +3522,7 @@ unittest(with_seq_pair("A", "A"))
 		assert(check_tail(f, 4, 40, 53, 8), print_tail(f));
 	#else
 		assert(f->stat == 0x10f, "%x", f->stat);
-		assert(check_tail(f, 4, 31, 44, 8), print_tail(f));
+		assert(check_tail(f, 4, 33, 44, 7), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3552,7 +3555,7 @@ unittest(with_seq_pair("A", "A"))
 		assert(check_tail(f, 4, 40, 53, 8), print_tail(f));
 	#else
 		assert(f->stat == 0x10f, "%x", f->stat);
-		assert(check_tail(f, 4, 31, 44, 8), print_tail(f));
+		assert(check_tail(f, 4, 33, 44, 7), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3585,7 +3588,7 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 		assert(check_tail(f, 48, 40, 97, 8), print_tail(f));
 	#else
 		assert(f->stat == 0x10f, "%x", f->stat);
-		assert(check_tail(f, 48, 31, 88, 8), print_tail(f));
+		assert(check_tail(f, 48, 31, 88, 7), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3618,7 +3621,7 @@ unittest(with_seq_pair("ACGTACGTACGT", "ACGTACGTACGT"))
 		assert(check_tail(f, 48, 40, 97, 8), print_tail(f));
 	#else
 		assert(f->stat == 0x10f, "%x", f->stat);
-		assert(check_tail(f, 48, 31, 88, 8), print_tail(f));
+		assert(check_tail(f, 48, 31, 88, 7), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3663,8 +3666,8 @@ unittest(with_seq_pair("TTTTTTTT", "CTTTTTTTT"))
 		assert(f->stat == 0x01f0, "%x", f->stat);
 		assert(check_tail(f, 22, 36, 45, 6), print_tail(f));
 	#else
-		assert(f->stat == 0x010f, "%x", f->stat);
-		assert(check_tail(f, 22, 35, 41, 6), print_tail(f));
+		assert(f->stat == 0x01f0, "%x", f->stat);
+		assert(check_tail(f, 22, 35, 46, 6), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -3690,7 +3693,7 @@ unittest(with_seq_pair("GACGTACGT", "ACGTACGT"))
 		assert(check_tail(f, 20, 37, 42, 5), print_tail(f));
 	#else
 		assert(f->stat == 0x01ff, "%x", f->stat);
-		assert(check_tail(f, 20, 38, 43, 5), print_tail(f));
+		assert(check_tail(f, 20, 38, 43, 6), print_tail(f));
 	#endif
 
 	_export(gaba_dp_clean)(d);
@@ -4644,7 +4647,7 @@ unittest()
 	srand(seed);
 
 	// int64_t cross_test_count = 10000000;
-	int64_t cross_test_count = 1000;
+	int64_t cross_test_count = 100000;
 	for(int64_t i = 0; i < cross_test_count; i++) {
 		/* generate sequences */
 		char *a = unittest_generate_random_sequence(1000);
