@@ -982,7 +982,7 @@ void fill_restore_fetch(
 	/* fetch seq a */
 	fill_fetch_seq_a_n(self, _lo32(ofs), tail->s.atail - _lo32(cridx), _lo32(len));
 	if(_lo32(ofs) > 0) {
-		nvec_t ach = _and_n(_set_n(0x0f), _load_n(&prev_tail->ch));	/* aligned load */
+		nvec_t ach = _and_n(_set_n(0x0f), _loadu_n(&prev_tail->ch));/* aligned to 16byte boundaries */
 		_print_n(ach);
 		_storeu_n(_rd_bufa(self, 0, _lo32(ofs)), ach);				/* invades backward */
 	}
@@ -1059,7 +1059,7 @@ struct gaba_block_s *fill_create_phantom(
 	debug("start stack_top(%p), stack_end(%p)", self->stack.top, self->stack.end);
 
 	/* head sequence buffers are already filled, continue to body fill-in (first copy phantom block) */
-	_memcpy_blk_aa(&ph->diff, &prev_blk->diff, sizeof(struct gaba_diff_vec_s));
+	_memcpy_blk_uu(&ph->diff, &prev_blk->diff, sizeof(struct gaba_diff_vec_s));
 	ph->reserved = 0;							/* overlaps with mask */
 	ph->acc = prev_blk->acc;					/* just copy */
 	ph->xstat = (prev_blk->xstat & (ROOT | UPDATE)) | HEAD;	/* propagate root-update flag and mark head */
@@ -1091,7 +1091,7 @@ struct gaba_block_s *fill_load_tail(
 
 	/* load sequence vectors */
 	nvec_t const mask = _set_n(0x0f);
-	nvec_t ch = _load_n(&tail->ch.w);
+	nvec_t ch = _loadu_n(&tail->ch.w);
 	nvec_t ach = _and_n(mask, ch);
 	nvec_t bch = _and_n(mask, _shr_n(ch, 4));	/* bit 7 must be cleared not to affect shuffle mask */
 	_store_n(_rd_bufa(self, 0, BW), ach);
@@ -1099,8 +1099,8 @@ struct gaba_block_s *fill_load_tail(
 	_print_n(ach); _print_n(bch);
 
 	/* copy max and middle delta vectors */
-	nvec_t xd = _load_n(&tail->xd);
-	wvec_t md = _load_w(&tail->md);
+	nvec_t xd = _loadu_n(&tail->xd);
+	wvec_t md = _loadu_w(&tail->md);
 	_store_n(&self->w.r.xd, xd);
 	_store_w(&self->w.r.md, md);
 	_print_n(xd);
@@ -1128,7 +1128,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	nvec_t ach = _loadu_n(_rd_bufa(self, blk->acnt, BW));
 	nvec_t bch = _loadu_n(_rd_bufb(self, blk->bcnt, BW));
 	_print_n(ach); _print_n(bch);
-	_store_n(&tail->ch, _or_n(ach, _shl_n(bch, 4)));
+	_storeu_n(&tail->ch, _or_n(ach, _shl_n(bch, 4)));
 
 	/* load previous tail pointer */
 	struct gaba_joint_tail_s const *prev_tail = self->w.r.tail;
@@ -1136,8 +1136,8 @@ struct gaba_joint_tail_s *fill_create_tail(
 	/* copy delta vectors */
 	nvec_t xd = _load_n(&self->w.r.xd);
 	wvec_t md = _load_w(&self->w.r.md);
-	_store_n(&tail->xd, xd);
-	_store_w(&tail->md, md);
+	_storeu_n(&tail->xd, xd);
+	_storeu_w(&tail->md, md);
 	_print_n(xd);
 	_print_w(md);
 
@@ -1167,7 +1167,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	tail->f.scnt = prev_tail->f.scnt - _hi32(update) - _lo32(update);
 	tail->f.ppos = prev_tail->f.ppos + _hi32(adv) + _lo32(adv);
 	tail->tail = prev_tail;
-	_memcpy_blk_aa(&tail->s.atail, &self->w.r.s.atail, sizeof(struct gaba_section_pair_s));
+	_memcpy_blk_ua(&tail->s.atail, &self->w.r.s.atail, sizeof(struct gaba_section_pair_s));
 	return(tail);
 }
 
@@ -1184,8 +1184,8 @@ struct gaba_joint_tail_s *fill_create_tail(
 	/* load mask pointer */ \
 	struct gaba_mask_pair_s *ptr = ((struct gaba_block_s *)(_blk))->mask; \
 	/* load vector registers */ \
-	register nvec_t dh = _load_n(((_blk) - 1)->diff.dh); \
-	register nvec_t dv = _load_n(((_blk) - 1)->diff.dv); \
+	register nvec_t dh = _loadu_n(((_blk) - 1)->diff.dh); \
+	register nvec_t dv = _loadu_n(((_blk) - 1)->diff.dv); \
 	_print_n(_add_n(dh, _load_ofsh(self->scv))); \
 	_print_n(_add_n(dv, _load_ofsv(self->scv))); \
 	/* load delta vectors */ \
@@ -1204,10 +1204,10 @@ struct gaba_joint_tail_s *fill_create_tail(
 	/* load mask pointer */ \
 	struct gaba_mask_pair_s *ptr = ((struct gaba_block_s *)(_blk))->mask; \
 	/* load vector registers */ \
-	register nvec_t dh = _load_n(((_blk) - 1)->diff.dh); \
-	register nvec_t dv = _load_n(((_blk) - 1)->diff.dv); \
-	register nvec_t de = _load_n(((_blk) - 1)->diff.de); \
-	register nvec_t df = _load_n(((_blk) - 1)->diff.df); \
+	register nvec_t dh = _loadu_n(((_blk) - 1)->diff.dh); \
+	register nvec_t dv = _loadu_n(((_blk) - 1)->diff.dv); \
+	register nvec_t de = _loadu_n(((_blk) - 1)->diff.de); \
+	register nvec_t df = _loadu_n(((_blk) - 1)->diff.df); \
 	_print_n(_add_n(dh, _load_ofsh(self->scv))); \
 	_print_n(_add_n(dv, _load_ofsv(self->scv))); \
 	_print_n(_sub_n(_sub_n(de, dv), _load_adjh(self->scv))); \
@@ -1366,16 +1366,16 @@ struct gaba_joint_tail_s *fill_create_tail(
 })
 #if MODEL == LINEAR
 #define _fill_store_context(_blk) ({ \
-	_store_n((_blk)->diff.dh, dh); _print_n(dh); \
-	_store_n((_blk)->diff.dv, dv); _print_n(dv); \
+	_storeu_n((_blk)->diff.dh, dh); _print_n(dh); \
+	_storeu_n((_blk)->diff.dv, dv); _print_n(dv); \
 	_fill_store_context_intl(_blk); \
 })
 #else	/* AFFINE and COMBINED */
 #define _fill_store_context(_blk) ({ \
-	_store_n((_blk)->diff.dh, dh); _print_n(dh); \
-	_store_n((_blk)->diff.dv, dv); _print_n(dv); \
-	_store_n((_blk)->diff.de, de); _print_n(de); \
-	_store_n((_blk)->diff.df, df); _print_n(df); \
+	_storeu_n((_blk)->diff.dh, dh); _print_n(dh); \
+	_storeu_n((_blk)->diff.dv, dv); _print_n(dv); \
+	_storeu_n((_blk)->diff.de, de); _print_n(de); \
+	_storeu_n((_blk)->diff.df, df); _print_n(df); \
 	_fill_store_context_intl(_blk); \
 })
 #endif
@@ -1731,8 +1731,8 @@ uint64_t leaf_load_max_mask(
 	debug("ppos(%lld), scnt(%d), offset(%lld)", tail->f.ppos, tail->f.scnt, tail->offset);
 
 	/* load max vector, create mask */
-	nvec_t drop = _load_n(tail->xd.drop);
-	wvec_t md = _load_w(tail->md.delta);
+	nvec_t drop = _loadu_n(tail->xd.drop);
+	wvec_t md = _loadu_w(tail->md.delta);
 	uint64_t max_mask = ((nvec_masku_t){
 		.mask = _mask_w(_eq_w(
 			_set_w(tail->f.max - tail->offset),
@@ -2328,7 +2328,7 @@ struct gaba_alignment_s *trace_body(
 		self->m - self->x, self->w.l.a.xcnt);
 
 	/* copy */
-	_memcpy_blk_aa(self->w.l.aln, &self->w.l.a, sizeof(struct gaba_alignment_s));
+	_memcpy_blk_ua(self->w.l.aln, &self->w.l.a, sizeof(struct gaba_alignment_s));
 	return(self->w.l.aln);
 }
 
@@ -4647,7 +4647,7 @@ unittest()
 	srand(seed);
 
 	// int64_t cross_test_count = 10000000;
-	int64_t cross_test_count = 100000;
+	int64_t cross_test_count = 1000;
 	for(int64_t i = 0; i < cross_test_count; i++) {
 		/* generate sequences */
 		char *a = unittest_generate_random_sequence(1000);
