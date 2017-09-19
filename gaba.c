@@ -614,7 +614,9 @@ _static_assert((int32_t)TERM<<8 == (int32_t)GABA_TERM);
 
 
 /**
- * aligned malloc
+ * @fn gaba_malloc, gaba_free
+ * @brief a pair of malloc and free, aligned and margined.
+ * any pointer created by gaba_malloc MUST be freed by gaba_free.
  */
 static _force_inline
 void *gaba_malloc(
@@ -1272,6 +1274,34 @@ struct gaba_joint_tail_s *fill_create_tail(
 	_print_n(_sub_n(_add_n(df, dh), _load_adjv(self->scv))); \
 }
 #else /* MODEL == COMBINED */
+#define _fill_body() { \
+	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
+	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
+	t = _shuf_n(_load_sb(self->scv), t); \
+	t = _max_n(de, t); \
+	t = _max_n(df, t); \
+	ptr->h.mask = _mask_n(_eq_n(t, de)); \
+	ptr->v.mask = _mask_n(_eq_n(t, df)); \
+	debug("mask(%x, %x)", ptr->h.all, ptr->v.all); \
+	/* update de and dh */ \
+	de = _add_n(de, _load_adjh(self->scv)); \
+	nvec_t te = _max_n(de, t); \
+	ptr->e.mask = _mask_n(_eq_n(te, de)); \
+	de = _add_n(te, dh); \
+	dh = _add_n(dh, t); \
+	/* update df and dv */ \
+	df = _add_n(df, _load_adjv(self->scv)); \
+	nvec_t tf = _max_n(df, t); \
+	ptr->f.mask = _mask_n(_eq_n(tf, df)); \
+	df = _sub_n(tf, dv); \
+	t = _sub_n(dv, t); \
+	ptr++; \
+	dv = dh; dh = t; \
+	_print_n(_add_n(dh, _load_ofsh(self->scv))); \
+	_print_n(_add_n(dv, _load_ofsv(self->scv))); \
+	_print_n(_sub_n(_sub_n(de, dv), _load_adjh(self->scv))); \
+	_print_n(_sub_n(_add_n(df, dh), _load_adjv(self->scv))); \
+}
 #endif /* MODEL */
 
 /**
@@ -1931,6 +1961,8 @@ void trace_reload_section(
 #define _trace_dec_gi()					{ gc = _add_v2i32(gc, v01); }
 #define _trace_inc_ge()					{ gc = _sub_v2i32(gc, v10); }
 #define _trace_dec_ge()					{ gc = _add_v2i32(gc, v10); }
+#define _trace_inc_gf()					{ gc = _sub_v2i32(gc, v00); }
+#define _trace_dec_gf()					{ gc = _add_v2i32(gc, v00); }
 
 /**
  * @macro _trace_*_*_test_index
@@ -2085,49 +2117,35 @@ static _force_inline
 void trace_core(
 	struct gaba_dp_context_s *self)
 {
-	#define _trace_gap_loop(t, _type, _next, _label) { \
-		_trace_##_type##_##_label##_head: \
-		_trace_inc_gi();		/* increment #gap regions at the head */ \
-		while(1) { \
-			if(_trace_test_gap_##_label() == 0) { \
-				goto _trace_##_type##_d_head; \
-			} \
-			if(_trace_##_type##_##_label##_test_index()) { \
-				debug("test index failed (%s), break traceback", #_label); _print_v2i32(gidx); \
-				goto _trace_index_break; \
-			} \
-			_trace_inc_ge();	/* increment #gap bases on every iter */ \
-			debug("go %s (%s), dir(%x), mask_h(%x), mask_v(%x), p(%lld), q(%d), ptr(%p), path_array(%llx)", \
-				#_label, #_type, dir_mask, mask->h.all, mask->v.all, (int64_t)(mask - blk->mask), (int32_t)q, mask, path_array); \
-			_trace_##_type##_##_label##_update_index(); \
-			_trace_##_label##_update_path_q(); \
-			_trace_##_type##_load_n(t, _trace_##_next##_##_label##_head); \
-		} \
+	#define _pop_vector(_c, _l, _jump_to) { \
+		debug("go %s (%s), dir(%x), mask_h(%x), mask_v(%x), p(%lld), q(%d), ptr(%p), path_array(%llx)", \
+			#_l, #_c, dir_mask, mask->h.all, mask->v.all, (int64_t)(mask - blk->mask), (int32_t)q, mask, path_array); \
+		_trace_##_c##_##_l##_update_index(); \
+		_trace_##_l##_update_path_q(); \
+		_trace_##_c##_load_n(t, _jump_to); \
 	}
-
-	#define _trace_diag_loop(t, _type, _next) { \
+	#define _trace_gap_loop(t, _c, _n, _l) { \
+		_trace_##_c##_##_l##_head: \
+			if(_trace_##_c##_##_l##_test_index()) { goto _trace_term; } \
+			_trace_inc_gi();		/* increment #gap regions at the head */ \
+			_pop_vector(_c, _l, _trace_##_n##_##_l##_head); \
+			while(1) { \
+				if(_trace_test_gap_##_l() == 0) { goto _trace_##_c##_d_head; } \
+				if(_trace_##_c##_##_l##_test_index()) { goto _trace_term; } \
+				_trace_inc_ge();	/* increment #gap bases on every iter */ \
+				_pop_vector(_c, _l, _trace_##_n##_##_l##_head); \
+			} \
+	}
+	#define _trace_diag_loop(t, _c, _n) { \
 		while(1) { \
-		_trace_##_type##_d_head: \
-			if(_trace_test_diag_h() != 0) { \
-				goto _trace_##_type##_h_head; \
-			} \
-			if(_trace_##_type##_d_test_index()) { \
-				debug("test index failed (d), break traceback"); _print_v2i32(gidx); \
-				goto _trace_index_break; \
-			} \
-			debug("go d (%s), dir(%x), mask_h(%x), mask_v(%x), p(%lld), q(%d), ptr(%p), path_array(%llx)", \
-				#_type, dir_mask, mask->h.all, mask->v.all, (int64_t)(mask - blk->mask), (int32_t)q, mask, path_array); \
-			_trace_##_type##_h_update_index(); \
-			_trace_h_update_path_q(); \
-			_trace_##_type##_load_n(t, _trace_##_next##_d_mid); \
-		_trace_##_type##_d_mid: \
-			_trace_##_type##_v_update_index(); \
-			_trace_v_update_path_q(); \
-			_trace_##_type##_load_n(t, _trace_##_next##_d_tail); \
-		_trace_##_type##_d_tail: \
-			if(_trace_test_diag_v() != 0) { \
-				goto _trace_##_type##_v_head; \
-			} \
+		_trace_##_c##_d_head: \
+			if(_trace_test_diag_h() != 0) { goto _trace_##_c##_h_head; } \
+			if(_trace_##_c##_d_test_index()) { goto _trace_term; } \
+			_pop_vector(_c, h, _trace_##_n##_d_mid); \
+		_trace_##_c##_d_mid: \
+			_pop_vector(_c, v, _trace_##_n##_d_tail); \
+		_trace_##_c##_d_tail: \
+			if(_trace_test_diag_v() != 0) { goto _trace_##_c##_v_head; } \
 		} \
 	}
 
@@ -2168,7 +2186,7 @@ void trace_core(
 		_trace_gap_loop(self, bulk, tail, h);
 	}
 
-_trace_index_break:;
+_trace_term:;
 	/* reached a boundary of sections, compensate ofs */
 	uint64_t rem = mask - blk->mask + 1;
 	debug("rem(%llu), path(%p), ofs(%llu)", rem, path + (ofs + rem >= BLK), (ofs + rem) & (BLK - 1));
@@ -2186,6 +2204,7 @@ _trace_index_break:;
 	self->w.l.p = mask - blk->mask;	/* local p-coordinate */
 	self->w.l.q = q;				/* q coordinate */
 	_store_v2i32(&self->w.l.agidx, gidx);
+	_print_v2i32(gidx);
 	return;
 }
 
@@ -2660,9 +2679,17 @@ void gaba_init_restore_default(
 	#define restore(_name, _default) { \
 		p->_name = ((uint64_t)(p->_name) == 0) ? (_default) : (p->_name); \
 	}
-	if(p->m == 0 && p->x == 0 && p->gi == 0 && p->ge == 0 && p->gf == 0) {
-		p->m = 1; p->x = 1;						/* score matrix for erroneous long reads */
-		p->gi = 1; p->ge = 1; p->gf = 0;		/* affine gap penalty */
+	uint32_t zm = _mask_v32i8(_eq_v32i8(_loadu_v32i8(p->score_matrix), _zero_v32i8()));
+	if((zm & 0xfffff) == 0) {
+		/* score matrix for erroneous long reads */
+		p->score_matrix = (int8_t [16]){
+			1, -1, -1, -1,
+			-1, 1, -1, -1,
+			-1, -1, 1, -1,
+			-1, -1, -1, 1,
+		};
+		/* affine gap penalty */
+		p->gi = 1; p->ge = 1; p->gfa = 0; p->gfb = 0;
 	}
 	restore(xdrop, 			50);
 	restore(filter_thresh,	0);					/* disable filter */
@@ -2682,7 +2709,9 @@ int64_t gaba_init_check_score(
 	if(_max_match(p) > 7) { return(-1); }
 	if(p->ge <= 0) { return(-1); }
 	if(p->gi < 0) { return(-1); }
-	if(p->gf < 0 || (p->gf != 0 && p->gf <= p->ge)) { return(-1); }
+	if(p->gfa < 0 || (p->gfa != 0 && p->gfa <= p->ge)) { return(-1); }
+	if(p->gfb < 0 || (p->gfb != 0 && p->gfb <= p->ge)) { return(-1); }
+	if((p->gfa == 0) ^ (p->gfb == 0)) { return(-1); }
 	for(int32_t i = 0; i < BW/2; i++) {
 		int32_t t1 = _ofs_h(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
 		int32_t t2 = _ofs_h(p) + (_max_match(p) + _gap_v(p, i*2 + 1)) - _gap_v(p, (i + 1) * 2);
@@ -2853,7 +2882,8 @@ void gaba_init_dp_context(
 		.ge = (MODEL == LINEAR)
 			? -(p->gi + p->ge)			/* treat sum of gi and ge as gap extension penalty in linear */
 			: -p->ge,					/* for affine and combined */
-		.gf = -p->gf,					/* for combined */
+		.gfa = -p->gfa,					/* for combined */
+		.gfb = -p->gfb,					/* for combined */
 		.tx = p->xdrop - 128,
 		.tf = p->filter_thresh,
 
