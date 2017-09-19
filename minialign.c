@@ -62,7 +62,6 @@
 #  define _DARWIN_C_SOURCE	_DARWIN_C_FULL
 #endif
 
-#include <getopt.h>
 #include <inttypes.h>
 #include <math.h>
 #include <pthread.h>
@@ -128,6 +127,7 @@ static uint8_t const encar[16] = {
 };
 static uint8_t const decaf[16] = { [A] = 'A', [C] = 'C', [G] = 'G', [T] = 'T' };
 static uint8_t const decar[16] = { [A] = 'T', [C] = 'G', [G] = 'C', [T] = 'A' };
+static uint8_t const idxaf[256] = { ['A'] = 1, ['C'] = 2, ['G'] = 3, ['T'] = 4, ['U'] = 4 };
 
 /**
  * @fn cputime
@@ -521,37 +521,6 @@ void kh_clear(kh_t *h)
 	}
 	return;
 }
-
-#if 0
-/**
- * @fn kh_put_intl
- * @brief insert key-val pair or replace val if key already exists, returns #bin newly used
- */
-static _force_inline
-uint64_t kh_put_intl(v4u32_t *a, uint64_t k, uint64_t v, uint64_t mask)
-{
-	uint64_t kc = k, pos = k & mask;		/* current key and candidate pos */
-	while(1) {
-		uint64_t kt = a[pos].u64[0];		/* load key onto register */
-
-		/* test if the current key-val pair can be pushed to the pos */
-		if(kc <= kt) {						/* k < kt || is_empty(kt) || is_moved(kt) */
-			uint64_t vt = a[pos].u64[1];	/* save existing val onto register */
-			a[pos] = (v4u32_t){
-				.u64 = { k, v }
-			};
-			if(kt + 2 < 2) { return(1); }	/* is_empty(kt) || is_moved(kt) */
-			if(k == kt) { return(0); }		/* k == kt, val was replaced by the new one */
-			k = kc = kt; v = vt;			/* robinhood swap */
-		}
-
-		/* adjust key when rounded, update pos for the next itr */
-		kc -= (mask + 1) & (pos + 1);
-		pos = mask & (pos + 1);
-	}
-	return(0);
-}
-#endif
 
 /**
  * @fn kh_allocate
@@ -2157,7 +2126,7 @@ bseq_t *bseq_read(
 {
 	uint8_v mem = { 0 };
 	bseq_v seq = { 0 };
-	static uint8_t const margin[64] = { 0 };
+	static uint8_t const margin[BSEQ_MGN] = { 0 };
 
 	set_info(0, "[bseq_read] read sequence block from file");
 
@@ -2166,7 +2135,7 @@ bseq_t *bseq_read(
 
 	/* reserve mem */
 	kv_reserve(uint8_t, mem, 2*fp->size);
-	kv_pushm(uint8_t, mem, margin, 64);
+	kv_pushm(uint8_t, mem, margin, BSEQ_MGN);
 	if(fp->bh) {
 		/* bam */
 		while(mem.n < fp->size) {
@@ -2213,7 +2182,7 @@ bseq_t *bseq_read(
 	_tail:;
 	}
 
-	kv_pushm(uint8_t, mem, margin, 64);
+	kv_pushm(uint8_t, mem, margin, BSEQ_MGN);
 
 	/* adjust pointers */
 	for(uint64_t i = 0; i < seq.n; i++) {
@@ -2629,6 +2598,7 @@ void mm_sketch(
 /* end of sketch.c */
 
 /* map.c, options */
+
 #define MM_RG			( 0 )				/* Z: read group */
 #define MM_CO			( 1 )				/* Z: comment */
 #define MM_NH			( 2 )				/* i: #hits */
@@ -2652,19 +2622,27 @@ void mm_sketch(
 #define MM_MHAP 		( 0x06ULL<<56 )
 #define MM_FALCON		( 0x07ULL<<56 )
 
+/**
+ * @struct mm_opt_parser_t
+ * @brief option parser function prototype
+ */
+typedef struct mm_opt_parser_s {
+	uint8_t type;							/* 1 for boolean, 2 for option mandatory */
+	int (*fn)(mm_opt_t *o, char const *arg);
+} mm_opt_parser_t;
 
 /**
- * @struct mm_mapopt_t
- * @brief parameter container
- * note: implement loggers
+ * @struct mm_opt_t
+ * @brief parameter, logger, and parser container
  */
-typedef struct mm_mapopt_s {
+typedef struct mm_opt_s {
 	/* global */
-	uint32_t nth;
-	uint64_t flag;
+	ptr_v parg;
+	char *fnw;
+	char *arg_line;
+	uint32_t nth, flag;
 
 	/* sequence parser params */
-	uint32_t rmin, qmin;
 	uint32_t base_rid, base_qid;
 
 	/* index params */
@@ -2673,29 +2651,34 @@ typedef struct mm_mapopt_s {
 	float frq[MAX_FRQ_CNT + 1];
 
 	/* chain and extension */
-	int32_t m, x, gi, ge, xdrop, wlen, glen;
+	gaba_params_t p;
+	int32_t wlen, glen;
 	float min_ratio;
-	uint32_t min_score, max_cnt;
+	uint32_t min_score, max_cnt, min_len;
 
 	/* buffer sizes */
 	uint64_t batch_size, outbuf_size;
 	
 	/* sam optionals */
-	uint16_v tags;
-	char *rg_line, *rg_id, *arg_line;
+	uint32_t format;
+	uint8_v tags;
+	char *rg_line, *rg_id;
 
 	/* logger */
 	double inittime;
 	uint32_t verbose;
-	int (*log)(struct mm_mapopt_s const *, char, char const *, char const *, ...);
+	int (*log)(struct mm_opt_s const *, char, char const *, char const *, ...);
 	void *fp;
-} mm_mapopt_t;
+
+	/* parser */
+	mm_opt_parse_t t[256];
+} mm_opt_t;
 
 /**
  * @type mm_fprintf_t
  * @brief log printer
  */
-typedef int (*mm_log_t)(mm_mapopt_t const *opt, char level, char const *func, char const *fmt, ...);
+typedef int (*mm_log_t)(mm_opt_t const *opt, char level, char const *func, char const *fmt, ...);
 
 /**
  * @fn mm_log_printer
@@ -2703,7 +2686,7 @@ typedef int (*mm_log_t)(mm_mapopt_t const *opt, char level, char const *func, ch
  */
 static
 int mm_log_printer(
-	mm_mapopt_t const *opt,	/* option object */
+	mm_opt_t const *opt,	/* option object */
 	char level,				/* 'E' and 'W' for error and warning, 0, 1,... for message */
 	char const *func,		/* __func__ must be passed */
 	char const *fmt,		/* format string */
@@ -2734,139 +2717,6 @@ int mm_log_printer(
 	va_end(l);
 	return(r);
 }
-
-
-/**
- * @fn mm_mapopt_destroy
- */
-static _force_inline
-void mm_mapopt_destroy(mm_mapopt_t *opt)
-{
-	free(opt->rg_line);
-	free(opt->rg_id);
-	free(opt->arg_line);
-	free(opt);
-	return;
-}
-
-/**
- * @fn mm_mapopt_init
- */
-static _force_inline
-mm_mapopt_t *mm_mapopt_init(void)
-{
-	set_info(0, "[mm_mapopt_init] initialize mapopt object");
-	mm_mapopt_t *opt = calloc(1, sizeof(mm_mapopt_t));
-	*opt = (mm_mapopt_t){
-		/* -V */ .verbose = 1,
-		/* -f, -k, -w, -b, -T */ .k = 15, .w = 16, .b = 14, .flag = 0,
-		/* -a, -b, -p, -q, -Y */ .m = 1, .x = 1, .gi = 1, .ge = 1, .xdrop = 50,
-		/* -s, -m */ .min_score = 50, .min_ratio = 0.3,
-		/* -M */ .max_cnt = 0,
-		/* -f */ .n_frq = 3, .frq[0] = 0.05, .frq[1] = 0.01, .frq[2] = 0.001,
-		/* -t */ .nth = 1,
-		/* -R */ .rg_line = NULL, .rg_id = NULL,
-
-		/* -L, -H */.rmin = 0, .qmin = 0,
-		/* -W, -G */.wlen = 7000, .glen = 7000,
-		// .hlim = 7000, .llim = 7000, .blim = 0, .elim = 200,
-		.batch_size = 512 * 1024,
-		.outbuf_size = 512 * 1024,
-		.base_rid = 0, .base_qid = 0,
-
-		/* initialized time */ .inittime = realtime(),
-		/* logger */ .log = (mm_log_t)mm_log_printer, .fp = (void *)stderr
-	};
-	return(opt);
-}
-
-/**
- * @fn mm_mapopt_check
- * @brief check sanity of the option object and print message if not. returns #errors.
- */
-static _force_inline
-int mm_mapopt_check(mm_mapopt_t *opt)
-{
-	#define _opt_assert(_cond, _level, ...) { \
-		if((_cond)) { \
-			ret++; \
-			opt->log(opt, _level, __func__, __VA_ARGS__); \
-		} \
-	}
-
-	int ret = 0;
-	/* k-mer length and window size */
-	_opt_assert(opt->k >= 32, 								'E', "k must be inside [1,32).");
-	_opt_assert(opt->w >= 16,								'E', "w must be inside [1,16).");
-
-	/* score params */
-	_opt_assert(opt->m < 1 || opt->m > 5,					'E', "Match award (-a) must be inside [1,5].");
-	_opt_assert(opt->x < 1 || opt->x > 5,					'E', "Mismatch penalty (-b) must be inside [1,5].");
-	_opt_assert(opt->gi > 5,								'E', "Gap open penalty (-p) must be inside [0,5].");
-	_opt_assert(opt->ge < 1 || opt->ge > 5,					'E', "Gap extension penalty (-q) must be inside [1,5].");
-	_opt_assert(opt->xdrop < 10 || opt->xdrop > 100,		'E', "Xdrop cutoff must be inside [10,100].");
-	_opt_assert(opt->min_score > INT32_MAX, 				'E', "Minimum alignment score must be > 0.");
-	_opt_assert(opt->min_ratio < 0.0 || opt->min_ratio > 1.0,
-		'E',
-		"Minimum alignment score ratio must be inside [0.0,1.0]."
-	);
-
-	/* undesired params */
-	_opt_assert(opt->gi == 0 && opt->x == 1 && opt->ge == 1,
-		'W',
-		"(M,X,Gi,Ge) = (1,1,0,1) has positive expected score for two independent random sequences (thus result in false positives)."
-		"Please consider using a more stringent score."
-	);
-	_opt_assert(opt->gi != 0 && opt->x >= (opt->gi + opt->ge),
-		'W',
-		"Large mismatch penalty with respect to the gap open/extend penalty may cause SEGV or broken CIGAR. [issue #2]"
-	);
-	_opt_assert(opt->gi != 0 && opt->m + 2*(opt->gi + opt->ge) > 10,
-		'W',
-		"Large match award or large gap open/extend penalty may cause SEGV or broken CIGAR. [issue #7]"
-	);
-
-	/* occurrence filter params */
-	_opt_assert(opt->n_frq > MAX_FRQ_CNT,					'E', "Frequency thresholds must be fewer than 16.");
-	for(uint64_t i = 0; i < opt->n_frq; i++) {
-		_opt_assert(opt->frq[i] < 0.0 || opt->frq[i] > 1.0 || (i != 0 && opt->frq[i-1] < opt->frq[i]),
-			'E',
-			"Frequency thresholds must be inside [0.0,1.0] and descending."
-		);
-	}
-
-	_opt_assert(opt->nth < 1 || opt->nth >= MAX_THREADS,
-		'E',
-		"Thread counts must be inside [1,%u]. For larger values, recompile is needed.", MAX_THREADS
-	);
-	_opt_assert(opt->batch_size < 64 * 1024,				'E', "Batch size must be > 64k.");
-	_opt_assert(opt->outbuf_size < 64 * 1024,				'E', "Output buffer size must be > 64k.");
-
-	_opt_assert(opt->wlen < 100 || opt->wlen >= 100000,		'E', "window edge length must be inside [100,100000).");
-	_opt_assert(opt->glen < 100 || opt->glen >= 10000,		'E', "gap chain length must be inside [100,10000).");
-	// _opt_assert(opt->sidx >= 16,							'E', "sidx must be inside [0,16).");
-	// _opt_assert(opt->eidx >= 16,							'E', "eidx must be inside [0,16).");
-	// _opt_assert(opt->hlim < 100 || opt->hlim >= 100000,		'E', "hlim must be inside [100,100000).");
-	// _opt_assert(opt->llim < 100 || opt->llim >= 100000,		'E', "llim must be inside [100,100000).");
-	// _opt_assert(opt->blim >= 10000,							'E', "blim must be inside [0,10000).");
-	// _opt_assert(opt->elim >= 10000,							'E', "elim must be inside [0,10000).");
-
-	#define _dup(x)	({ char *_p = malloc(strlen(x)+1); memcpy(_p, (x), strlen(x)); _p[strlen(x)] = '\0'; _p; })
-	if(opt->flag&(0x01ULL<<MM_RG)) {
-		if(opt->rg_line == NULL && opt->rg_id == NULL) {
-			opt->rg_line = _dup("@RG\tID:1\tSM:default");
-			opt->rg_id = _dup("1");
-		}
-	}
-	#undef _dup
-
-	_opt_assert(!(opt->flag&MM_AVA) && (opt->flag&MM_COMP),	'W', "`-A' flag is only effective in all-versus-all mode. ignored.");
-	/* opt->flag &= ~MM_COMP; */
-	return ret;
-
-	#undef _opt_assert
-}
-
 /* end of map.c, options */
 
 /* index.c */
@@ -4605,7 +4455,7 @@ mm_reg_t const *mm_align_seq(
 
 /**
  * @struct mm_tmpbuf_t
- q > 0 && * @brief 
+ * @brief temporary string storage for output formatter
  */
 typedef struct {
 	uint8_t *tail, *p;
@@ -6076,15 +5926,7 @@ mm_align_t *mm_align_init(mm_mapopt_t const *opt, mm_idx_t const *mi)
 		.fp = NULL,
 		.icnt = 0, .ocnt = 0,
 		.base_qid = opt->base_qid,
-		.gaba = gaba_init(&((struct gaba_params_s const){
-			.m = opt->m,
-			.x = opt->x,
-			.gi = opt->gi,
-			.ge = opt->ge,
-			.xdrop = opt->xdrop,
-			// .filter_thresh = 7,		/* note: can be disabled? */
-			.head_margin = sizeof(mm_aln_t)
-		})),
+		.gaba = gaba_init(&opt->g),
 		.hq = { .n = 1, .m = 1, .a = NULL },
 		.printer = printer[opt->flag>>56],
 
@@ -6186,89 +6028,42 @@ void mm_print_version(mm_mapopt_t const *opt)
 }
 
 /**
- * @fn mm_mapopt_load_preset
- * @brief load preset params
+ * @macro mm_split_foreach
+ * @brief split string and pass to _body.
+ * p, len, and i are reserved for pointer, length, and #parsed.
+ * break and continue can be used to terminate / skip the current element.
  */
-static _force_inline
-int mm_mapopt_load_preset(mm_mapopt_t *o, char const *arg)
-{
-	if(strcmp(arg, "pacbio") == 0) {
-		o->k = 15; o->w = 10; o->m = 1; o->x = 2; o->gi = 2; o->ge = 1; o->xdrop = 50; o->min_score = 50; o->min_ratio = 0.3;
-	} else if(strcmp(arg, "ont") == 0) {
-		o->k = 15; o->w = 10; o->m = 1; o->x = 1; o->gi = 1; o->ge = 1; o->xdrop = 50; o->min_score = 50; o->min_ratio = 0.3;
-	} else if(strcmp(arg, "ava") == 0) {
-		o->k = 14; o->w = 5; o->m = 1; o->x = 2; o->gi = 0; o->ge = 1; o->xdrop = 50; o->min_score = 30; o->min_ratio = 0.05;
-		o->flag |= MM_AVA | MM_PAF;
-	} else {
-		o->log(o, 'W', __func__, "Warning: Unknown preset tag: `%s'.", arg);
-		return 1;
-	}
-	return 0;
+#define mm_split_foreach(_ptr, _delims, _body) { \
+	char const *_q = (_ptr); \
+	int64_t i = 0; \
+	v16i8_t dv = _bsl_v16i8(_load_v16i8(_delims), 1);	/* push '\0' at the head of the vector */ \
+	uint16_t mask = (0x01<<(strlen(_delims) + 1)) - 1;	/* inc by one to reserve space for '\0' */ \
+	while(*_q != '\0') { \
+		char const *_p = _q; \
+		/* test char one by one until dilimiter found */ \
+		while((_mask_v16i8(_eq_v16i8(_set_v16i8(*_q), dv)) & mask) == 0) { _q++; } \
+		/* delimiter found, pass to _body */ \
+		char const *p = _p; \
+		uint64_t len = _q++ - _p; \
+		if(len > 0) { _body; i++; } \
+	} \
 }
 
 /**
- * @fn mm_mapopt_parse_threshs
- * @brief parse frequence thresholds
- */
-static _force_inline
-int mm_mapopt_parse_threshs(
-	mm_mapopt_t *o,
-	char const *arg)
-{
-	char const *p = optarg; o->n_frq = 0;
-	while(*p != '\0') {
-		o->frq[o->n_frq++] = atof(p);
-		while(*p != '\0' && *p != ',') { p++; }
-		if(*p != '\0' || o->n_frq >= 16) { break; }
-		p++;
-	}
-	for(uint64_t i = 0; i < o->n_frq; i++) {
-		if(o->frq[i] < 0.0 || o->frq[i] > 1.0) {
-			o->log(o, 'W', __func__, "Warning: Invalid threshold `%f' parsed from `%s'.", o->frq[i], arg);
-		}
-	}
-	return 0;
-}
-
-/**
- * @fn mm_mapopt_parse_base_ids
- * @brife parse base id, returns nonzero if failed
- */
-static _force_inline
-int mm_mapopt_parse_base_ids(
-	mm_mapopt_t *o,
-	char const *arg)
-{
-	char const *p = optarg;
-	if(!isdigit(*p)) { return(1); }
-
-	/* reference-side id */
-	o->base_rid = atoi(p);
-	while(*p != '\0' && *p != ',') { p++; }
-
-	/* query-side id */
-	if(*p != '\0' && isdigit(p[1])) {
-		o->base_qid = atoi(&p[1]);
-	}
-	return(0);
-}
-
-/**
- * @macro _encode
+ * @macro mm_encode_tag
  * @brief map tag string to 16-bit int
  */
-#define _encode(p)		( (uint16_t)p[0] | ((uint16_t)p[1]<<8) )
+#define mm_encode_tag(p)		( (uint16_t)p[0] | ((uint16_t)p[1]<<8) )
 
 /**
- * @fn mm_mapopt_tag2flag
+ * @fn mm_opt_tag2flag
  */
 static _force_inline
-uint64_t mm_mapopt_tag2flag(
+uint64_t mm_opt_tag2flag(
 	mm_mapopt_t *o,
 	uint16_t t)
 {
-	#define _test(_str) ( _encode(_str) == t )
-
+	#define _test(_str) ( mm_encode_tag(_str) == t )
 	if(_test("RG")) { return(0x01ULL<<MM_RG); }
 	if(_test("CO")) { return(0x01ULL<<MM_CO); }
 	if(_test("NH")) { return(0x01ULL<<MM_NH); }
@@ -6278,220 +6073,367 @@ uint64_t mm_mapopt_tag2flag(
 	if(_test("NM")) { return(0x01ULL<<MM_NM); }
 	if(_test("SA")) { return(0x01ULL<<MM_SA); }
 	if(_test("MD")) { return(0x01ULL<<MM_MD); }
-
-	o->log(o, 'W', __func__, "Unknown tag: `%c%c'.", t & 0xff, t>>8);
 	return(0);
-
 	#undef _test
 }
 
 /**
- * @fn mm_mapopt_parse_tags
- * @brief parse sam tag identifier and convert to flags
+ * @fn mm_opt_parse_argv
+ * @brief parse (argc, argv)-style option arrays. only argv is required here (MUST be NULL-terminated).
  */
 static _force_inline
-uint64_t mm_mapopt_parse_tags(
-	mm_mapopt_t *o,
-	char const *p,
-	uint16_v *buf)
+int mm_opt_parse_argv(
+	mm_opt_t *o,
+	char const *const *argv)
 {
-	uint32_t flag = 0;
-	while(*p != '\0') {
-		char const *q = p;
-
-		/* split first tag */
-		while(*q != '\0' && *q != ',') { q++; }
-
-		/* skip if the length is not 2 */
-		if(q - p != 2) {
-			o->log(o, 'W', __func__,
-				"Unparsable tag: `%.*s', must be two-character string like `RG'.",
-				q - p, p
-			);
-			p = q + 1;
-			continue;
+	char const *const *p = argv - 1;
+	char const *q;
+	while(++p != NULL && (q = *p)) {
+		if(*q == '-') {
+			while(o->t[*++q].type == 1) { o->t[*q].fn(o, NULL); }	/* eat boolean options */
+			if(*q) { o->t[*q].fn(o, q[1] ? q + 1 : *++p); }			/* option with argument would be found at the tail */
+		} else {
+			kv_push(o->parg, p);									/* positional argument */
 		}
-
-		/* save if buffer is available */
-		uint16_t t = _encode(p);
-		if(buf != NULL) { kv_push(uint16_t, *buf, t); }
-
-		/* set tag */
-		uint64_t f = mm_mapopt_tag2flag(o, t);
-		if(f == 0 && o->verbose >= 1) {
-			o->log(o, 'W', __func__, "Unknown tag: `%.*s'.", 2, p);
-		}
-		flag |= f;
-
-		/* test tail and advance pointer */
-		if(*q == '\0') { break; }
-		p = q + 1;
 	}
-	return(flag);
+	return(0);
 }
 
-#undef _encode
+/**
+ * @fn mm_opt_parse_line
+ * @brief parse tab/space-delimited command line arguments
+ */
+static void mm_opt_parse_line(mm_opt_t *o, char const *arg)
+{
+	kvec_t(char) str = { 0 };
+	kvec_t(char *) ptr = { 0 };
+	mm_split_foreach(arg, " \t\r\n", {
+		kv_push(char *, ptr, (uintptr_t)kv_size(str));
+		kv_pushm(char, str, p, len);
+		kv_push(char, str, '\0');
+	});
+	kv_foreach(ptr, { *p += (ptrdiff_t)str.a; });
+	kv_push(char *, ptr, NULL);
+	mm_parse_argv(o, ptr.a);
+	return;
+}
 
 /**
- * @fn mm_mapopt_parse_rg
- * @brief parse read group string
+ * @fn mm_opt_preset
+ * @brief parse preset line
  */
-static _force_inline
-void mm_mapopt_parse_rg(
-	mm_mapopt_t *o,
-	char const *arg)
+static void mm_opt_preset(mm_opt_t *o, char const *arg)
 {
-	/* cleanup old ones */
-	free(o->rg_line);	o->rg_line = NULL;
-	free(o->rg_id);		o->rg_id = NULL;
+	static struct mm_preset_s const *presets[] = {
+		_pre("pacbio", "-k15 -w10 -a2 -b4 -p4 -q2 -Y50 -s50 -r0.3",
+			_pre("clr", "-b3 -p5 -q1", NULL),
+			_pre("ccs", "-r1,1", NULL)
+		),
+		_pre("ont", "-k15 -w10 -a2 -b4 -p4 -q2 -r1,1 -Y50 -s50 -r0.3",
+			_pre("r7", "-b2 -p2",
+				_pre("1d", "", NULL),
+				_pre("2d", "", NULL)
+			),
+			_pre("r9", "",
+				_pre("1d", "", NULL),
+				_pre("1dsq", "", NULL),
+				_pre("2d", "", NULL)
+			),
+		),
+		_pre("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50, -s30 -r0.05", NULL),
+		NULL
+	};
+	struct mm_preset_s *c = presets - 1;
+	mm_split_foreach(arg, ".:", {		/* traverse preset param tree along with parsing */
+		while(++c && strcasecmp(p, c->key) == 0) {}
+		if(!c) { break; }				/* terminate if not matched */
+		mm_parse_line(o, c->val);		/* apply recursively */
+		c = c->children - 1;			/* visit child nodes */
+	});
+	return;
+}
+
+/**
+ * @fn mm_opt_rg
+ * @brief parse RG tag
+ */
+static void mm_opt_rg(mm_opt_t *o, char const *arg)
+{
+	/* clear existing tags */
+	free(o->rg_line); o->rg_line = NULL;
+	free(o->rg_id);   o->rg_id = NULL;
 	o->flag &= ~(0x01ULL<<MM_RG);
 
-	/* first unescape tabs */
-	char const *id, *p = arg;
-	char b[256], *q = b;
-	while(q < b+256 && *p != '\0') {
-		if(p[0] == '\\' && p[1] == 't') {
-			if(p[1] == '\0') { break; }
-			*q++ = '\t';
-			p += 2;
-		} else {
-			*q++ = *p++;
-		}
-	}
-	*q = '\0';
-
-	/* search header and id */
-	if(strstr(b, "@RG") != b || (id = strstr(b, "\tID:")) == 0) {
-		o->log(o, 'E', __func__, "RG line must start with @RG and contains ID, like `@RG\\tID:1'.");
-		return;
-	}
-
-	/* copy */
-	#define _dup(x)	({ char *_p = malloc(strlen(x)+1); memcpy(_p, (x), strlen(x)); _p[strlen(x)] = '\0'; _p; })
-	o->rg_line = _dup(b);
-	o->rg_id = _dup(id+4);
-	#undef _dup
-
-	/* truncate tail of id line */
-	char *t = o->rg_id;
-	while(*t != '\t' && *t != '\n' && *t != '\0') { t++; }
-	*t = '\0';
-
-	/* enable rg tag */
-	o->flag |= 0x01ULL<<MM_RG;
+	/* parse */
+	kvec_t(char) b;
+	char const *p = arg - 1;			/* unescape tabs */
+	while(*++p != '\0') { kv_push(char, b, *p == '\\' ? (++p, '\t') : *p); }
+	o->rg_line = strdup_n(b.a, b.n);	/* copy to save */
+	mm_split_foreach(b.a, "\t\r\n", {	/* find ID tag */
+		if(strstr(p, "ID:") == p) { o->rg_id = strdup_n(p, l); }
+	});
+	o->flag |= 0x01ULL<<MM_RG;			/* set flag */
+	opt_assert(o->rg_id != NULL, "RG line must start with @RG and contains ID, like `@RG\\tID:1'.");
 	return;
 }
 
 /**
- * @fn mm_mapopt_parse_format
+ * @fn mm_opt_tags
+ * @brief parse sam tag identifiers and push to tags array.
+ */
+static void mm_opt_tags(mm_mapopt_t *o, char const *arg)
+{
+	mm_split_foreach(arg, ",;:/", {
+		opt_assert(l == 2, "Unknown tag: `%.*s'.", len, p);
+		kv_push(uint16_t, o->tags, mm_encode_tag(p));
+	});
+	return;
+}
+
+/**
+ * @fn mm_opt_format
  * @brief convert format string to flag
  */
-static _force_inline
-uint64_t mm_mapopt_parse_format(
-	mm_mapopt_t *o,
-	char const *arg)
+static void mm_opt_format(mm_mapopt_t *o, char const *arg)
 {
-	if(strcmp(arg, "sam") == 0) { return(0); }
-	if(strcmp(arg, "maf") == 0) { return(MM_MAF); }
-	if(strcmp(arg, "blast6") == 0) { return(MM_BLAST6); }
-	if(strcmp(arg, "blasr1") == 0) { return(MM_BLASR1); }
-	if(strcmp(arg, "blasr4") == 0) { return(MM_BLASR4); }
-	if(strcmp(arg, "paf") == 0) { return(MM_PAF); }
-	if(strcmp(arg, "mhap") == 0) { return(MM_MHAP); }
-	if(strcmp(arg, "falcon") == 0) { return(MM_FALCON); }
-	o->log(o, 'W', __func__, "Unknown output format: `%s'.", arg);
-	return 0;
+	struct mm_format_s { char const *k; uint32_t v; } t = {
+		{ "sam",    0 },
+		{ "maf",    MM_MAF },
+		{ "blast6", MM_BLAST6 },
+		{ "blasr1", MM_BLASR1 },
+		{ "blasr4", MM_BLASR4 },
+		{ "paf",    MM_PAF },
+		{ "mhap",   MM_MHAP },
+		{ "falcon", MM_FALCON },
+		{ NULL, 0xff }
+	}, *p = t - 1;
+	while(++p->k && strcasecmp(p->k, arg) != 0) {}
+	o->format = p->v;
+	opt_assert(o->format != 0xff, "Unknown output format `%s'.", arg);
+	return;
 }
 
+/* save index file name */
+static mm_opt_fnw(mm_opt_t *o, char const *arg) { o->fnw = strdup(p); }
+
+/* flags, global params */
+static mm_opt_ava(mm_opt_t *o, char const *arg) { o->flag |= MM_AVA; }
+static mm_opt_comp(mm_opt_t *o, char const *arg) { o->flag = MM_COMP; }
+static mm_opt_keep_qual(mm_opt_t *o, char const *arg) { o->flag |= MM_KEEP_QUAL; }
+static mm_opt_omit_rep(mm_opt_t *o, char const *arg) { o->flag |= MM_OMIT_REP; }
+static mm_opt_verbose(mm_opt_t *o, char const *arg) { o->verbose = arg ? (isnumber(*arg) ? atoi(arg) : strlen(arg)) : 0; }
+static mm_opt_threads(mm_opt_t *o, char const *arg) {
+	o->nth = atoi(p);
+	opt_assert(o->nth < MAX_THREADS, "#threads must be less than %d.", MAX_THREADS);
+}
+
+/* input configurations */
+static mm_opt_base_id(mm_opt_t *o, char const *arg) {
+	o->base_rid = UINT32_MAX;					/* first clear ids */
+	o->base_qid = UINT32_MAX;
+	mm_split_foreach(arg, ",;:/", {
+		switch(i) {
+			case 0: o->base_rid = atoi_l(p, l);	/* fall through to set both */
+			case 1: o->base_qid = atoi_l(p, l);
+		}
+	});
+}
+static mm_opt_circular(mm_opt_t *o, char const *arg) {
+	mm_split_foreach(arg, ",;:/", {
+		kv_pushm(char, o->circ, p, len);
+	});
+}
+
+/* indexing */
+static mm_opt_kmer(mm_opt_t *o, char const *arg) {
+	o->k = atoi(arg);
+	opt_assert(o->k < 32, "k must be inside [1,32).");
+}
+static mm_opt_window(mm_opt_t *o, char const *arg) {
+	o->w = atoi(arg);
+	opt_assert(o->w < 16, "w must be inside [1,16).");
+}
+static mm_opt_frq(mm_opt_t *o, char const *arg) {
+	o->n_frq = 0;			/* clear counter */
+	mm_split_foreach(arg, ",;:/", {
+		float f = o->frq[o->n_frq++] = atof(p);
+		opt_assert(i < MAX_FRQ_CNT, "#thresholds must not exceed %d.", MAX_FRQ_CNT);
+		opt_assert(f > 0.0 && f < 1.0, "Invalid threshold `%f' parsed from `%.*s'.", f, len, p);
+		opt_assert(i == 0 || (o->frq[i-1] > o->frq[i]), "Frequency thresholds must be descending.");
+	});
+}
+
+/* mapping */
+static mm_opt_wlen(mm_opt_t *o, char const *arg) {
+	o->wlen = atoi(arg);
+	opt_assert(opt->wlen < 100 || opt->wlen >= 100000, "window edge length must be inside [100,100000).");
+}
+static mm_opt_glen(mm_opt_t *o, char const *arg) {
+	o->glen = atoi(arg);
+	opt_assert(opt->glen < 100 || opt->glen >= 10000, "gap chain length must be inside [100,10000).");
+}
+static mm_opt_match(mm_opt_t *o, char const *arg) {
+	int8_t m = atoi(arg);
+	for(uint64_t i = 0; i < 16; i++) {
+		if((i&0x03) == (i>>2)) { o->p.score_matrix[i] = m; }
+	}
+	opt_assert(m > 0 && m < 7, "Match award (-a) must be inside [1,7].");
+}
+static mm_opt_mismatch(mm_opt_t *o, char const *arg) {
+	int8_t x = atoi(arg);
+	for(uint64_t i = 0; i < 16; i++) {
+		if((i&0x03) != (i>>2)) { o->p.score_matrix[i] = x; }
+	}
+	opt_assert(x > 0 && x < 7, "Mismatch penalty (-b) must be inside [1,7].");
+}
+static mm_opt_mod(mm_opt_t *o, char const *arg) {
+	mm_split_foreach(arg, ",;:/", {
+		opt_assert(idxaf[p[0]] != 0, "Unknown base `%c' in modifier `%.*s'.", p[0], l, p);
+		opt_assert(idxaf[p[1]] != 0, "Unknown base `%c' in modifier `%.*s'.", p[1], l, p);
+		o->p.score_matrix[idxaf[p[0]]][idxaf[p[1]]] += atoi_l(&p[2], l - 2);
+	});
+}
+static mm_opt_gi(mm_opt_t *o, char const *arg) {
+	o->p.gi = atoi(arg);
+	opt_assert(o->p.ge < 32, "Gap open penalty (-p) must be inside [0,32].");
+}
+static mm_opt_ge(mm_opt_t *o, char const *arg) {
+	o->p.ge = atoi(arg);
+	opt_assert(o->p.ge > 0 && o->p.ge < 32, "Gap extension penalty (-q) must be inside [1,32].");
+}
+static mm_opt_gf(mm_opt_t *o, char const *arg) {
+	mm_split_foreach(arg, ",;:/", {
+		switch(i) {
+			case 0: o->p.gfa = atoi_l(p, l);		/* fall through to set both */
+			case 1: o->p.gfb = atoi_l(p, l);
+		}
+	});
+}
+static mm_opt_xdrop(mm_opt_t *o, char const *arg) {
+	o->p.xdrop = atoi(arg);
+	opt_assert(o->p.xdrop > 10 && o->p.xdrop < 128, "Xdrop cutoff must be inside [10,128].");
+}
+static mm_opt_min_len(mm_opt_t *o, char const *arg) {
+	o->min_len = atoi(arg);
+	opt_assert(o->min_len > 0, "Minimum sequence length must be > 0.");
+}
+static mm_opt_min_score(mm_opt_t *o, char const *arg) {
+	o->min_score = atoi(arg);
+	opt_assert(o->min_score > 0, "Minimum alignment score must be > 0.");
+}
+static mm_opt_min_ratio(mm_opt_t *o, char const *arg) {
+	o->min_ratio = atof(arg);
+	opt_assert(o->min_ratio > 0.0 && o->min_ratio < 1.0, "Minimum alignment score ratio must be inside [0.0,1.0].");
+}
+static mm_opt_batch(mm_opt_t *o, char const *arg) {
+	o->batch_size = atoi(arg);
+	opt_assert(opt->batch_size > 64 * 1024, "Batch size must be > 64k.");
+}
+static mm_opt_outbuf(mm_opt_t *o, char const *arg) {
+	o->outbuf_size = atoi(arg);
+	opt_assert(opt->outbuf_size > 64 * 1024, "Output buffer size must be > 64k.");
+}
+
+
 /**
- * @fn mm_mapopt_save_args
+ * @fn mm_opt_destroy
  */
 static _force_inline
-void mm_mapopt_save_args(
-	mm_mapopt_t *o,
-	int argc, char *const *argv)
+void mm_opt_destroy(mm_opt_t *o)
 {
-	kvec_t(char) v = { .n = 0, .m = 0, .a = NULL };
-	for(uint64_t i = 0; i < (uint64_t)argc; i++) {
-		kv_pushm(char, v, argv[i], strlen(argv[i]));
-		kv_push(char, v, ' ');
-	}
-	v.a[v.n - 1] = '\0';
-	o->arg_line = v.a;
+	free(o->tags.a);
+	free(o->rg_line);
+	free(o->rg_id);
+	free(o->arg_line);
+	free(o);
 	return;
 }
 
 /**
- * @fn mm_mapopt_parse
- * @brief parse option string and set to mapopt_t object
+ * @fn mm_opt_init
  */
 static _force_inline
-int mm_mapopt_parse(
-	mm_mapopt_t *o,
-	int argc, char *argv[],
-	char const **fnr,				/* input index filename */
-	char const **fnw,				/* output index filename */
-	ptr_v *v)						/* positional argumants */
+mm_opt_t *mm_opt_init(void)
 {
-	int ret = 0;
-	mm_mapopt_save_args(o, argc, argv);
-	while(optind < argc) {
-		int ch;
+	set_info(0, "[mm_opt_init] initialize mapopt object");
+	mm_opt_t *o = calloc(1, sizeof(mm_opt_t));
+	*o = (mm_opt_t){
+		/* global */
+		.nth = 1,
+		.flag = 0,
+		/* input configurations */
+		.base_rid = 0, .base_qid = 0,
+		.min_len = 1,
+		/* indexing params */
+		.k = 15, .w = 16, .b = 14,		/* w will be overwritten later */
+		.n_frq = 3,
+		.frq = { 0.05, 0.01, 0.001 },
+		/* mapping */
+		.wlen = 7000, .glen = 7000,
+		.p = {
+			.score_matrix = {
+				1, -1, -1, -1,
+				-1, 1, -1, -1,
+				-1, -1, 1, -1,
+				-1, -1, -1, 1
+			},
+			.gi = 1, ge = 1,
+			.gfa = 0, .gfb = 0,
+			.xdrop = 50
+		},
+		.min_score = 50,
+		.min_ratio = 0.3,
+		/* buffer sizes */
+		.batch_size = 512 * 1024,
+		.outbuf_size = 512 * 1024,
+		/* output options */
+		.format = 0, .tags = { 0 },
+		/* initialized time and loggers */
+		.inittime = realtime(),
+		.log = (mm_log_t)mm_log_printer, .fp = (void *)stderr
+		/* parsers: mapping from option character to functionality */
+		.t = {
+			['x'] = { 2, mm_opt_preset },
+			['R'] = { 2, mm_opt_rg },
+			['T'] = { 2, mm_opt_tags },
+			['O'] = { 2, mm_opt_format },
+			['d'] = { 2, mm_opt_fnw },
 
-		if((ch = getopt(argc, argv, "t:x:V:c:k:w:f:B:d:l:C:NXAs:m:r:M:a:b:p:q:W:G:L:H:D:Y:O:PQR:T:U:vh")) < 0) {
-			/* positional argument */
-			kv_push(void *, *v, argv[optind]);
-			optind++;
-			continue;
-		}
+			['X'] = { 1, mm_opt_ava },
+			['A'] = { 1, mm_opt_comp },
+			['P'] = { 1, mm_opt_omit_rep },
+			['Q'] = { 1, mm_opt_keep_qual },
+			['v'] = { 2, mm_opt_verbose },
+			['h'] = { 1, mm_opt_help },
+			['t'] = { 2, mm_opt_threads },
 
-		/* option */
-		switch (ch) {
-			case 't': o->nth = atoi(optarg); break;
-			case 'x': mm_mapopt_load_preset(o, optarg); break;
-			case 'V':
-				if(isdigit(optarg[0])) {
-					o->verbose = atoi(optarg);
-				} else {
-					for(char const *p = optarg; *p == 'V'; p++, o->verbose++) {}
-				}
-				break;
-			case 'k': o->k = atoi(optarg); break;
-			case 'w': o->w = atoi(optarg); break;
-			case 'f': mm_mapopt_parse_threshs(o, optarg); break;
-			case 'B': o->b = atoi(optarg); break;
-			case 'd': *fnw = optarg; break;
-			case 'l': *fnr = optarg; break;
-			case 'C': mm_mapopt_parse_base_ids(o, optarg); break;
-			case 'N': o->base_rid = UINT32_MAX; o->base_qid = UINT32_MAX; break;
-			case 'X': o->flag |= MM_AVA; break;
-			case 'A': o->flag |= MM_COMP; break;
-			case 's': o->min_score = atoi(optarg); break;
-			case 'm': o->min_ratio = atof(optarg); break;
-			case 'M': o->max_cnt = atoi(optarg); break;
-			case 'a': o->m = atoi(optarg); break;
-			case 'b': o->x = atoi(optarg); break;
-			case 'p': o->gi = atoi(optarg); break;
-			case 'q': o->ge = atoi(optarg); break;
-			case 'W': o->wlen = atoi(optarg); break;
-			case 'G': o->glen = atoi(optarg); break;
-			case 'L': o->rmin = atoi(optarg); break;
-			case 'H': o->qmin = atoi(optarg); break;
-			case 'D': o->batch_size = atoi(optarg); break;
-			case 'Y': o->xdrop = atoi(optarg); break;
-			case 'O': o->flag &= ~(0xffULL<<56); o->flag |= mm_mapopt_parse_format(o, optarg); break;
-			case 'P': o->flag |= MM_OMIT_REP; break;
-			case 'Q': o->flag |= MM_KEEP_QUAL; break;
-			case 'R': mm_mapopt_parse_rg(o, optarg); break;
-			case 'T': o->flag |= mm_mapopt_parse_tags(o, optarg, NULL); break;
-			case 'U': mm_mapopt_parse_tags(o, optarg, &o->tags); break;
-			case 'v': ret = 1; o->verbose = 0; break;
-			case 'h': ret = 1; break;
+			['C'] = { 2, mm_opt_base_id },
+			['N'] = { 1, mm_opt_base_id },
+			['c'] = { 2, mm_opt_circular },
+
+
+			['k'] = { 2, mm_opt_kmer },
+			['w'] = { 2, mm_opt_window },
+			['f'] = { 2, mm_opt_frq },
+
+			['W'] = { 2, mm_opt_wlen },
+			['G'] = { 2, mm_opt_glen },
+			['a'] = { 2, mm_opt_match },
+			['b'] = { 2, mm_opt_mismatch },
+			['e'] = { 2, mm_opt_mod },
+			['p'] = { 2, mm_opt_gi },
+			['q'] = { 2, mm_opt_ge },
+			['r'] = { 2, mm_opt_gf },
+			['Y'] = { 2, mm_opt_xdrop },
+			['L'] = { 2, mm_opt_min_len },
+			['s'] = { 2, mm_opt_min_score },
+			['m'] = { 2, mm_opt_min_ratio },
+			['1'] = { 2, mm_opt_batch },
+			['2'] = { 2, mm_opt_outbuf }
 		}
-	}
-	return(ret);
+	};
+	return(o);
 }
-
 
 /**
  * @fn mm_print_help
@@ -6506,45 +6448,42 @@ void mm_print_help(mm_mapopt_t const *opt)
 	}
 
 	_msg(1, "\n"
-			"  minialign - fast aligner for PacBio and Nanopore long reads\n"
-			"\n"
-			"minialign is a fast long-read (nucleotide sequence) alignment tool built on\n"
-			"the top of minimap long-read overlapper adopting libgaba SIMD-parallelized\n"
-			"Smith-Waterman extension algorithm.\n"
-			"");
+			"  minialign - fast and accurate alignment tool for long reads\n"
+			"\n");
 	_msg(1, "Usage:"
 			"  first trial:\n"
-			"    $ minialign -t4 -xont <ref.fa> <ont2d.{fa,fq,bam}> > mapping.sam\n"
+			"    $ minialign -t4 -xont.r9.1d ref.fa ont_r9.4_1d.fq > mapping.sam\n"
 			"\n"
 			"  mapping on a prebuilt index (saves ~1min for human genome per run):\n"
-			"    $ minialign [indexing options] -d <index.mai> <ref.fa>\n"
-			"    $ minialign -l <index.mai> <reads.{fa,fq,bam}> > mapping.sam\n"
+			"    $ minialign [indexing options] -d index.mai ref.fa\n"
+			"    $ minialign index.mai reads.fq > mapping.sam\n"
 			"\n"
 			"  all-versus-all alignment in a read set:\n"
-			"    $ minialign -X -xava <reads.fa> [<reads.fa> ...] > allvsall.paf\n"
+			"    $ minialign -X -xava reads.fa [reads.fa ...] > allvsall.paf\n"
 			"");
 	_msg(1, "Options:");
 	_msg(1, "  Global:");
 	_msg(1, "    -x STR       load preset params {pacbio,ont,ava} [ont]");
 	_msg(1, "    -t INT       number of threads [%d]", opt->nth);
-	_msg(1, "    -X           switch to all-versus-all alignment mode");
+	_msg(1, "    -d FILE      index construction mode, dump index to FILE");
+	_msg(1, "    -X           all-versus-all alignment mode");
 	_msg(1, "    -v           show version number [%s]", version());
 	_msg(1, "  Indexing:");
-	_msg(7, "    -c STR,...   treat specified sequences as circular []");
+	_msg(1, "    -c STR,...   treat specified sequences as circular []");
 	_msg(1, "    -k INT       k-mer size [%d]", opt->k);
 	_msg(1, "    -w INT       minimizer window size [{-k}*2/3]");
-	_msg(1, "    -d FILE      dump index to FILE []");
-	_msg(1, "    -l FILE      load index from FILE [] (overriding -k and -w)");
 	_msg(2, "    -C INT[,INT] set base rid and qid [%u, %u]", opt->base_rid, opt->base_qid);
 	_msg(2, "    -N           treat sequence name as id (seq must be sorted)");
 	_msg(2, "    -L INT       sequence length filter: min. ref. length; 0 to disable [%u]", opt->rmin);
 	_msg(2, "    -H INT       sequence length filter: min. query length; 0 to disable [%u]", opt->qmin);
 	_msg(1, "  Mapping:");
-	_msg(2, "    -f FLOAT,... occurrence thresholds [0.05,0.01,0.001]");
+	_msg(2, "    -f FLOAT,... occurrence thresholds [%rf]", opt->n_occ, opt->occ);
 	_msg(1, "    -a INT       match award [%d]", opt->m);
 	_msg(1, "    -b INT       mismatch penalty [%d]", opt->x);
-	_msg(1, "    -p INT       gap open penalty [%d]", opt->gi);
-	_msg(1, "    -q INT       gap extension penalty [%d]", opt->ge);
+	_msg(1, "    -e INT       score matrix modifier, \"GA+3\" adds 3 to (r,q)=(G,A) pair");
+	_msg(1, "    -p INT       gap open penalty offset for large indels [%d]", opt->gi);
+	_msg(1, "    -q INT       per-base penalty for large indels [%d]", opt->ge);
+	_msg(1, "    -r INT[,INT] per-base penalty for small ins[,del] (0 to disable) [%d,%d]", opt->gfa, opt->gfb);
 	_msg(2, "    -Y INT       X-drop threshold [%d]", opt->xdrop);
 	_msg(1, "    -s INT       minimum alignment score [%d]", opt->min_score);
 	_msg(1, "    -m INT       minimum alignment score ratio [%1.2f]", opt->min_ratio);
@@ -6555,7 +6494,7 @@ void mm_print_help(mm_mapopt_t const *opt)
 		(char const *[]){ "sam", "maf", "blast6", "blasr1", "blasr4", "paf", "mhap", "falcon" }[opt->flag>>56]);
 	_msg(2, "    -P           omit secondary (repetitive) alignments");
 	_msg(1, "    -Q           include quality string");
-	_msg(1, "    -R STR       read group header line, like \"@RG\\tID:1\" [%s]", opt->rg_line? opt->rg_line : "");
+	_msg(1, "    -R STR       read group header line, such as \"@RG\\tID:1\" [%s]", opt->rg_line? opt->rg_line : "");
 	_msg(1, "    -T STR,...   list of optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []");
 	_msg(1, "                   RG is also inferred from -R");
 	_msg(1, "                   supp. records are omitted when SA tag is enabled");
@@ -6571,68 +6510,54 @@ void mm_print_help(mm_mapopt_t const *opt)
 }
 
 /**
- * @fn main
+ * @fn main_index
  */
-int _export(main)(int argc, char *argv[])
+static _force_inline
+int main_index(mm_opt_t *o)
 {
-	int ret = 1;
-	char const *fnr = NULL, *fnw = NULL;
-	FILE *fpr = NULL, *fpw = NULL;
-	ptr_v query = { 0 };
-
-	/* unittest hook, see unittest.h for the details */
-	#if UNITTEST != 0
-	if(argc > 1 && strcmp(argv[1], "unittest") == 0) {
-		return(unittest_main(argc, argv));
+	FILE *fpw = fopen(fnw, "wb");
+	if(!fpw) {
+		opt->log(opt, 'E', __func__,
+			"failed to open index file `%s' in write mode. Please check file path and its permission.",
+			fnw
+		);
+		return(1);
 	}
-	#endif
 
-	/* enable debug info */
-	enable_info(0);
-	set_info(0, "[main] parsing arguments");
+	/* iterate over index *blocks* */
+	for(uint64_t i = 0; o->parg.n; i++) {
+		bseq_file_t *fp = bseq_open((char const *)o->parg.a[i], o->batch_size, 0, o->min_len, 0, NULL);
+		mm_idx_t *mi = mm_idx_gen(opt, fp);
+		opt->base_rid += bseq_close(fp);
 
-	/* elevate memory limit */
-	liftrlimit();
-
-	/* set option parser behavior to posix-compatible */
-	posixly_correct();
-
-	/* init option object (init base time) and parse args */
-	mm_mapopt_t *opt = mm_mapopt_init();
-	if(mm_mapopt_parse(opt, argc, argv, &fnr, &fnw, &query)) {
-		/* set logger to stdout when invoked by option */
-		opt->fp = stdout;
-		if(opt->verbose == 0) {
-			mm_print_version(opt);
-		} else {
-			mm_print_help(opt);
+		/* check sanity of the index */
+		if(mi == NULL) {
+			opt->log(opt, 'E', __func__, "failed to %s `%s'. Please check %s.",
+				fpr? "load index file" : "open sequence file",
+				fpr? fnr : (const char*)query.a[i],
+				fpr? "file path, format and its version" : "file path and format"
+			);
+			return(1);
 		}
 
-		/* also exit status is 0 */
-		ret = 0;
-		goto _final;
+		/* dump index */
+		opt->log(opt, 9, __func__, "built index for %lu target sequence(s).", mi->s.n);
+		mm_idx_dump(fpw, mi, opt->nth);
+		mm_idx_destroy(mi);
 	}
+	return(0);
+}
 
-	/* if no input is given, print help to stderr and exit with 1 */
-	if(!fnr && query.n == 0) {
-		mm_print_help(opt);
-		goto _final;
-	}
-
+/**
+ * @fn main_align
+ */
+static _force_inline
+int main_align(mm_opt_t *o)
+{
 	/* if not in index construction mode and query-side file is missing, pour stdin to query */
-	if(!fnw && ((fnr && query.n == 0) || (!fnr && query.n == 1 && !(opt->flag&MM_AVA)))) {
-		opt->log(opt, 1, __func__, "query-side input redirected to stdin.");
-		kv_push(void *, query, "-");
-	}
-
-	/* calculate default window size if not specified */
-	if(opt->w >= 16) {
-		opt->w = (int)(.6666667 * opt->k + .499);
-	}
-
-	/* check options */
-	if(mm_mapopt_check(opt)) {
-		goto _final;
+	if(!o->fnw && o->parg.n == 1) {
+		o->log(o, 1, __func__, "query-side input redirected to stdin.");
+		kv_push(void *, o->parg, "-");
 	}
 
 	/* open input index file */
@@ -6729,19 +6654,54 @@ int _export(main)(int argc, char *argv[])
 		/* cleanup index for the current iteration */
 		mm_idx_destroy(mi);
 	}
+}
 
-	opt->log(opt, 1, __func__, "Version: %s", MM_VERSION);
-	opt->log(opt, 1, __func__, "CMD: %s", opt->arg_line);
-	opt->log(opt, 1, __func__, "Real time: %.3f sec; CPU: %.3f sec",
-		realtime() - opt->inittime,
+/**
+ * @fn main
+ */
+int _export(main)(int argc, char *argv[])
+{
+	int ret = 1;
+
+	/* unittest hook, see unittest.h for the details */
+	#if UNITTEST != 0
+	if(argc > 1 && strcmp(argv[1], "unittest") == 0) {
+		return(unittest_main(argc, argv));
+	}
+	#endif
+
+	/* enable debug info */
+	enable_info(0);
+	set_info(0, "[main] parsing arguments");
+
+	liftrlimit();								/* elevate memory limit */
+	posixly_correct();							/* set option parser behavior to posix-compatible */
+
+	/* init option object (init base time) and parse args */
+	mm_opt_t *o = mm_opt_init();
+	o->log(o, 1, __func__, "%s", MM_VERSION);	/* always print version at the head */
+	mm_opt_parse_argv(o, argv);					/* getopt alternative */
+	if(o->help || o->parg.n == 0) {				/* when -h is passed or no input file is given, print help message */
+		if(o->help) { o->fp = stdout; ret = 0; }/* set logger to stdout when invoked by -h option, also exit status is 0 (not an error) */
+		mm_print_help(o);
+		goto _final;
+	}
+
+	/* calculate default window size (proportional to kmer length) if not specified */
+	if(o->w >= 16) { o->w = (int)(.6666667 * o->k + .499); }
+
+	/* jump to modes */
+	ret = (o->fnw ? mm_main_index : mm_main_align)(o);
+
+	/* finished */
+	o->log(o, 1, __func__, "CMD: %s", o->arg_line);
+	o->log(o, 1, __func__, "Real time: %.3f sec; CPU: %.3f sec",
+		realtime() - o->inittime,
 		cputime()
 	);
 	ret = 0;
 _final:
-	free(query.a);
-	mm_mapopt_destroy(opt);
-	if(fpr != NULL) { fclose(fpr); }
-	if(fpw != NULL) { fclose(fpw); }
+	mm_opt_destroy(o);
 	return(ret);
 }
 
