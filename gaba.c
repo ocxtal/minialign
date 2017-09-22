@@ -55,6 +55,13 @@
 #  define MODEL_LABEL				combined
 #endif
 
+#ifdef BIT
+#  if BIT == 2 || BIT == 4
+#    error "BIT must be 2 or 4."
+#  endif
+#else
+#  define BIT						4
+#endif
 
 /* define ENABLE_FILTER to enable gapless alignment filter */
 // #define ENABLE_FILTER
@@ -173,7 +180,7 @@ _static_assert(V2I32_MASK_10 == GABA_UPDATE_B);
 _static_assert(sizeof(void *) == 8);
 
 /** check size of structs declared in gaba.h */
-_static_assert(sizeof(struct gaba_params_s) == 24);
+_static_assert(sizeof(struct gaba_params_s) == 48);
 _static_assert(sizeof(struct gaba_section_s) == 16);
 _static_assert(sizeof(struct gaba_fill_s) == 24);
 _static_assert(sizeof(struct gaba_segment_s) == 32);
@@ -184,8 +191,8 @@ _static_assert(sizeof(nvec_masku_t) == BW / 8);
  * @macro _max_match, _gap_h, _gap_v
  * @brief calculate scores
  */
-#define _max_match(_p)				( (_p)->m )
-#define _max_match_base(_p)			( 0x01 )
+#define _max_match(_p)				( _hmax_v16i8(_loadu_v16i8((_p)->score_matrix)) )
+#define _max_match_base(_p)			( 0 )
 #if MODEL == LINEAR
 #define _gap_h(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
 #define _gap_v(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
@@ -193,8 +200,8 @@ _static_assert(sizeof(nvec_masku_t) == BW / 8);
 #define _gap_h(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
 #define _gap_v(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
 #else /* MODEL == COMBINED */
-#define _gap_h(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi + (_p)->ge * (_l), -1 * (_p)->gf * (_l)) )
-#define _gap_v(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi + (_p)->ge * (_l), -1 * (_p)->gf * (_l)) )
+#define _gap_h(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi + (_p)->ge * (_l), -1 * (_p)->gfa * (_l)) )
+#define _gap_v(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi + (_p)->ge * (_l), -1 * (_p)->gfb * (_l)) )
 #endif
 #define _ofs_h(_p)					( (_p)->gi + (_p)->ge )
 #define _ofs_v(_p)					( (_p)->gi + (_p)->ge )
@@ -509,13 +516,9 @@ struct gaba_dp_context_s {
 	uint8_t const *alim, *blim;			/** (16) max index of seq array */
 
 	/* scores */
-	int8_t m;							/** (1) match award */
-	int8_t x;							/** (1) mismatch penalty (neg.int) */
-	int8_t gi;							/** (1) gap open penalty */
-	int8_t ge;							/** (1) gap extension penalty */
-	int8_t gf, gfb;						/** (1) linear-gap extension penalty for short indels (gf > ge) */
 	int8_t tx;							/** (1) xdrop threshold */
-	int8_t tf;							/** (1) offsetted xdrop threshold */
+	int8_t tf;							/** (1) filter threshold */
+	uint8_t _pad1[6];
 
 	/** output options */
 	uint32_t head_margin;				/** (1) margin at the head of gaba_res_t */
@@ -723,14 +726,6 @@ struct gaba_dir_s {
 #endif
 
 /**
- * @macro _match_n
- * @brief alias to sequence matcher macro
- */
-#ifndef _match_n
-#  define _match_n				_and_n		/* 4bit encoded */
-#endif /* _match */
-
-/**
  * seqreader macros
  */
 #define _rd_bufa_base(k)		( (k)->w.r.bufa + BLK + BW )
@@ -742,13 +737,51 @@ struct gaba_dir_s {
 #define _lo32(v)				_ext_v2i32(v, 0)
 #define _hi32(v)				_ext_v2i32(v, 1)
 
+/* sequence encoding */
+/**
+ * @macro _match_n
+ * @brief alias to sequence matcher macro
+ */
+#if BIT == 2
+#  define _match_n				_or_n		/* 4bit encoded */
+#else
+#  define _match_n				_and_n		/* 4bit encoded */
+#endif
+
+/**
+ * @macro _adjust_n
+ */
+#if BIT == 2
+#  define _adjust_v16i8(_v)		_shl_v16i8(_v, 2)
+#  define _adjust_v32i8(_v)		_shl_v32i8(_v, 2)
+#else
+#  define _adjust_v16i8(_v)		(_v)
+#  define _adjust_v32i8(_v)		(_v)
+#endif
+
+/**
+ * @enum BASES
+ */
+#if BIT == 2
+enum BASES { A = 0x00, C = 0x01, G = 0x02, T = 0x03 };
+#else
+enum BASES { A = 0x01, C = 0x02, G = 0x04, T = 0x08 };
+#endif
+
 /**
  * @var comp_mask
  */
+#if BIT == 2
+static uint8_t const comp_mask[16] __attribute__(( aligned(16) )) = {
+	0x03, 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+#else
 static uint8_t const comp_mask[16] __attribute__(( aligned(16) )) = {
 	0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
 	0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
 };
+#endif
 
 /**
  * @fn fill_fetch_seq_a
@@ -823,13 +856,15 @@ void fill_fetch_seq_b(
 		debug("forward fetch b: pos(%p), len(%llu)", pos, len);
 		/* forward fetch: pos */
 		v32i8_t bch = _loadu_v32i8(pos);
-		_storeu_v32i8(_rd_bufb(self, BW, len), bch);					/* forward */
+		_storeu_v32i8(_rd_bufb(self, BW, len), _adjust_v32i8(bch));		/* forward */
 	} else {
 		debug("reverse fetch b: pos(%p), len(%llu)", pos, len);
 		/* reverse fetch: 2 * blen - pos + (len - 32) */
 		v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(comp_mask));	/* complement mask */
 		v32i8_t bch = _loadu_v32i8(_rev(pos, self->blim) - (BLK - 1));
-		_storeu_v32i8(_rd_bufb(self, BW, len), _shuf_v32i8(cv, _swap_v32i8(bch)));	/* reverse complement */
+		_storeu_v32i8(_rd_bufb(self, BW, len),
+			_adjust_v32i8(_shuf_v32i8(cv, _swap_v32i8(bch)))			/* reverse complement */
+		);
 	}
 	return;
 }
@@ -851,7 +886,7 @@ void fill_fetch_seq_b_n(
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);					/* advance length */
 			v16i8_t bch = _loadu_v16i8(pos);
-			_storeu_v16i8(_rd_bufb(self, ofs, l), bch);
+			_storeu_v16i8(_rd_bufb(self, ofs, l), _adjust_v16i8(bch));
 			len -= l; pos += l; ofs += l;
 		}
 	} else {
@@ -861,7 +896,9 @@ void fill_fetch_seq_b_n(
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);					/* advance length */
 			v16i8_t bch = _loadu_v16i8(_rev(pos + (16 - 1), self->blim));
-			_storeu_v16i8(_rd_bufb(self, ofs, l), _shuf_v16i8(cv, _swap_v16i8(bch)));
+			_storeu_v16i8(_rd_bufb(self, ofs, l),
+				_adjust_v16i8(_shuf_v16i8(cv, _swap_v16i8(bch)))
+			);
 			len -= l; pos += l; ofs += l;
 		}
 	}
@@ -2329,6 +2366,8 @@ struct gaba_alignment_s *trace_body(
 	}
 
 	/* calc mismatch and match counts */
+	self->w.l.a.xcnt = 0;
+	/*
 	self->w.l.a.xcnt = ((int64_t)self->m * ((self->w.l.a.plen - self->w.l.a.gecnt)>>1)
 		- (self->w.l.a.score - (int64_t)self->gi * self->w.l.a.gicnt - (int64_t)self->ge * self->w.l.a.gecnt)
 	) / (self->m - self->x);
@@ -2339,6 +2378,7 @@ struct gaba_alignment_s *trace_body(
 		(uint32_t)(self->w.l.a.plen - self->w.l.a.gecnt)>>1,
 		self->w.l.a.score - (int64_t)self->gi * self->w.l.a.gicnt - (int64_t)self->ge * self->w.l.a.gecnt,
 		self->m - self->x, self->w.l.a.xcnt);
+	*/
 
 	/* copy */
 	_memcpy_blk_ua(self->w.l.aln, &self->w.l.a, sizeof(struct gaba_alignment_s));
@@ -2679,15 +2719,18 @@ void gaba_init_restore_default(
 	#define restore(_name, _default) { \
 		p->_name = ((uint64_t)(p->_name) == 0) ? (_default) : (p->_name); \
 	}
-	uint32_t zm = _mask_v32i8(_eq_v32i8(_loadu_v32i8(p->score_matrix), _zero_v32i8()));
+	uint32_t zm = ((v32i8_masku_t){
+		.mask = _mask_v32i8(_eq_v32i8(_loadu_v32i8(p->score_matrix), _zero_v32i8()))
+	}).all;
 	if((zm & 0xfffff) == 0) {
 		/* score matrix for erroneous long reads */
-		p->score_matrix = (int8_t [16]){
+		v16i8_t sc = _seta_v16i8(
 			1, -1, -1, -1,
 			-1, 1, -1, -1,
 			-1, -1, 1, -1,
-			-1, -1, -1, 1,
-		};
+			-1, -1, -1, 1
+		);
+		_storeu_v16i8(p->score_matrix, sc);
 		/* affine gap penalty */
 		p->gi = 1; p->ge = 1; p->gfa = 0; p->gfb = 0;
 	}
@@ -2731,16 +2774,20 @@ static _force_inline
 struct gaba_score_vec_s gaba_init_score_vector(
 	struct gaba_params_s const *p)
 {
-	int8_t m = p->m, x = -p->x, ge = -p->ge, gi = -p->gi;
-	int8_t sb[16] __attribute__(( aligned(16) ));
+	v16i8_t scv = _loadu_v16i8(p->score_matrix);
+	int8_t ge = -p->ge, gi = -p->gi;
 	struct gaba_score_vec_s sc __attribute__(( aligned(MEM_ALIGN_SIZE) ));
 
-	sb[0] = x - 2 * (ge + gi);
-	for(int i = 1; i < 16; i++) {
-		sb[i] = m - 2 * (ge + gi);
-	}
-	_store_sb(sc, _load_v16i8(sb));
+	/* score matrices */
+	#if BIT == 4
+		int8_t m = _hmax_v16i8(scv);
+		int8_t x = _hmax_v16i8(_sub_v16i8(_zero_v16i8(), scv));
+		scv = _add_v16i8(_bsl_v16i8(_set_v16i8(m + x), 1), _set_v16i8(-x));
+		_store_sb(sc, scv);
+	#endif
+	_store_sb(sc, scv);
 
+	/* gap penalties */
 	#if MODEL == LINEAR
 		_store_adjh(sc, 0, 0, ge + gi, ge + gi);
 		_store_adjv(sc, 0, 0, ge + gi, ge + gi);
@@ -2874,16 +2921,6 @@ void gaba_init_dp_context(
 	ctx->dp = (struct gaba_dp_context_s){
 		/* score vectors */
 		.scv = gaba_init_score_vector(p),
-		.m = p->m,
-		.x = -p->x,
-		.gi = (MODEL == LINEAR)
-			? 0							/* always zero for linear */
-			: -p->gi,					/* gi for affine and combined */
-		.ge = (MODEL == LINEAR)
-			? -(p->gi + p->ge)			/* treat sum of gi and ge as gap extension penalty in linear */
-			: -p->ge,					/* for affine and combined */
-		.gfa = -p->gfa,					/* for combined */
-		.gfb = -p->gfb,					/* for combined */
 		.tx = p->xdrop - 128,
 		.tf = p->filter_thresh,
 
@@ -2911,7 +2948,7 @@ gaba_t *_export(gaba_init)(
 	/* restore defaults and check sanity */
 	struct gaba_params_s pi = (p != NULL		/* copy params to local stack to modify it afterwards */
 		? *p
-		: (struct gaba_params_s){ 0 }
+		: (struct gaba_params_s){ { 0 }, 0 }
 	);
 	gaba_init_restore_default(&pi);				/* restore defaults */
 	if(gaba_init_check_score(&pi) != 0) {		/* check the scores are applicable */
@@ -3210,7 +3247,6 @@ uint8_t unittest_encode_base(
 	#define _b(x)	( (x) & 0x1f )
 
 	/* conversion tables */
-	enum bases { A = 0x01, C = 0x02, G = 0x04, T = 0x08 };
 	static uint8_t const table[] = {
 		[_b('A')] = A,
 		[_b('C')] = C,
@@ -4235,8 +4271,9 @@ struct unittest_naive_result_s unittest_naive(
 	#define m(p, q)			( a[(p) - 1] == b[(q) - 1] ? m : x )
 
 	/* load gap penalties */
-	int8_t m = sc->m;
-	int8_t x = -sc->x;
+	v16i8_t scv = _loadu_v16i8(sc->score_matrix);
+	int8_t m = _hmax_v16i8(scv);
+	int8_t x = -_hmax_v16i8(_sub_v16i8(_zero_v16i8(), scv));
 	int8_t g = -(sc->gi + sc->ge);
 
 	/* calc lengths */
@@ -4244,7 +4281,7 @@ struct unittest_naive_result_s unittest_naive(
 	int64_t blen = strlen(b);
 
 	/* calc min */
-	int64_t min = INT16_MIN + sc->x - 2 * g;
+	int64_t min = INT16_MIN - x - 2 * g;
 
 	/* malloc matrix */
 	int16_t *mat = (int16_t *)malloc(
@@ -4346,8 +4383,9 @@ struct unittest_naive_result_s unittest_naive(
 	#define m(p, q)			( a[(p) - 1] == b[(q) - 1] ? m : x )
 
 	/* load gap penalties */
-	int8_t m = sc->m;
-	int8_t x = -sc->x;
+	v16i8_t scv = _loadu_v16i8(sc->score_matrix);
+	int8_t m = _hmax_v16i8(scv);
+	int8_t x = -_hmax_v16i8(_sub_v16i8(_zero_v16i8(), scv));
 	int8_t gi = -sc->gi;
 	int8_t ge = -sc->ge;
 
@@ -4356,7 +4394,7 @@ struct unittest_naive_result_s unittest_naive(
 	int64_t blen = strlen(b);
 
 	/* calc min */
-	int64_t min = INT16_MIN + sc->x - 2*gi;
+	int64_t min = INT16_MIN - x - 2*gi;
 
 	/* malloc matrix */
 	int16_t *mat = (int16_t *)malloc(

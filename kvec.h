@@ -127,6 +127,12 @@ int main() {
 		} \
 	} while (0)
 
+#define kv_foreach(type, v, _body) { \
+	type *p = (type *)(v).a - 1; \
+	type *_t = (type *)(v).a + (v).n; \
+	while(++p < _t) { _body; } \
+}
+
 /** heap queue : elements in v must be orderd in heap */
 #define kv_hq_init(v)		{ (v).n = (v).m = 1; (v).a = NULL; }
 #define kv_hq_inits(type)	((kvec_t(type)){ .n = 1, .m = 1, .a = NULL })

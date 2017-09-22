@@ -6,6 +6,7 @@
  */
 #ifndef _ARCH_UTIL_H_INCLUDED
 #define _ARCH_UTIL_H_INCLUDED
+#define MM_ARCH			"SSE4.1"
 
 #include <x86intrin.h>
 #include <stdint.h>

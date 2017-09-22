@@ -6,6 +6,7 @@
  */
 #ifndef _ARCH_UTIL_H_INCLUDED
 #define _ARCH_UTIL_H_INCLUDED
+#define MM_ARCH			"AVX2"
 
 #include "vector.h"
 #include <x86intrin.h>

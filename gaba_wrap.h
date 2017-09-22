@@ -168,7 +168,7 @@ int64_t gaba_init_get_index(
 	}
 
 	if(params->gi != 0) {
-		if(params->gf != 0) {
+		if(params->gfa != 0 && params->gfb != 0) {
 			return(COMBINED);
 		}
 		return(AFFINE);
