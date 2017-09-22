@@ -73,7 +73,7 @@ int main() {
 	} while (0)
 
 #define kv_reserve(type, v, s) ( \
-	(v).m > (s) ? 0 : ((v).m = (s), (v).a = realloc((v).a, sizeof(type) * (v).m), 0) )
+	(v).m > (s) ? 0 : ((v).m = kv_max2(2*(v).m, (s)), (v).a = realloc((v).a, sizeof(type) * (v).m), 0) )
 
 #define kv_copy(type, v1, v0) do {							\
 		if ((v1).m < (v0).n) kv_resize(type, v1, (v0).n);	\
