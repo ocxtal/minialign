@@ -286,13 +286,13 @@ static _force_inline
 int mm_startswith(char const *p, char const *prf)
 {
 	uint64_t l = strlen(p), r = strlen(prf);
-	return(l >= r && strncmp(p, prf, r));
+	return(l >= r && strncmp(p, prf, r) == 0);
 }
 static _force_inline
 int mm_endswith(char const *p, char const *suf)
 {
 	uint64_t l = strlen(p), r = strlen(suf);
-	return(l >= r && strncmp(p + l - r, suf, r));
+	return(l >= r && strncmp(p + l - r, suf, r) == 0);
 }
 static _force_inline
 char *mm_append(char *p, char const *suf)
@@ -497,11 +497,7 @@ kh_bidx_t kh_allocate(v4u32_t *a, uint64_t k, uint64_t v, uint64_t mask)
 
 	uint64_t i = k & mask, k0 = k, v0 = v;
 	uint64_t k1 = _poll_bucket(i, i & mask);		/* search first bucket */
-
-	if(k0 == k1) {									/* duplicated key */
-		// a[i].u64[0] = k0;
-		return((kh_bidx_t){ i, 0 });
-	}
+	if(k0 == k1) { return((kh_bidx_t){ i, 0 }); }	/* duplicated key */
 
 	uint64_t j = i;
 	a[i].u64[0] = k0;								/* update key */
@@ -604,7 +600,7 @@ uint64_t *kh_put_ptr(kh_t *h, uint64_t key, uint64_t extend)
  * @brief returns val or UINT64_MAX if not found
  */
 static _force_inline
-uint64_t kh_get(kh_t *h, uint64_t key)
+uint64_t kh_get(kh_t const *h, uint64_t key)
 {
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
@@ -620,7 +616,7 @@ uint64_t kh_get(kh_t *h, uint64_t key)
  * @fn kh_get_ptr
  * @brief returns pointer to val or NULL if not found
  */
-static uint64_t *kh_get_ptr(kh_t *h, uint64_t key)
+static uint64_t *kh_get_ptr(kh_t const *h, uint64_t key)
 {
 	uint64_t mask = h->mask, pos = key & mask, k;
 	do {
@@ -2715,7 +2711,7 @@ typedef struct {
 	uint64_t mask;					/* must be (1<<b) - 1 */
 	mm_idx_bucket_t *bkt;			/* 2nd stage hash table */
 	mm_idx_seq_v s;					/* sequence array */
-	uint8_t b, w, k, circular;		/* bucket size (in bits), window and k-mer size, circular flag */
+	uint8_t b, w, k, _pad1;			/* bucket size (in bits), window and k-mer size, circular flag */
 	uint32_t base_rid;				/* base sequence id (for all-versus-all) */
 	mm_idx_mem_v mem;				/* sequence buckets */
 } mm_idx_t;
@@ -2726,18 +2722,14 @@ typedef struct {
 static _force_inline
 mm_idx_t *mm_idx_init(
 	uint32_t w, uint32_t k, uint32_t b,
-	uint32_t base_rid,
-	uint32_t circular)
+	uint32_t base_rid)
 {
 	b = MIN2(k*2, b);				/* clip bucket size */
 	mm_idx_t *mi = (mm_idx_t *)calloc(1, sizeof(mm_idx_t));
 	*mi = (mm_idx_t){
 		.mask = (1<<b) - 1,
 		.bkt = (mm_idx_bucket_t *)calloc(1<<b, sizeof(mm_idx_bucket_t)),
-		.b = b,
-		.w = w<1? 1 : w,
-		.k = k,
-		.circular = circular,
+		.w = w<1? 1 : w, .k = k, .b = b,
 		.base_rid = base_rid
 	};
 	return(mi);
@@ -2851,6 +2843,7 @@ uint32_t *mm_idx_cal_max_occ(
 typedef struct {
 	uint32_t icnt, ocnt;
 	bseq_file_t *fp;
+	mm_opt_t const *opt;
 	mm_idx_t *mi;
 	kvec_t(v4u32_t) hq;
 } mm_idx_pipeline_t;
@@ -2870,38 +2863,35 @@ typedef struct {
  * @fn mm_idx_source
  * @brief sequence reader (source) of the index construction pipeline
  */
-static
+static 
 void *mm_idx_source(uint32_t tid, void *arg)
 {
-	mm_idx_pipeline_t *q = (mm_idx_pipeline_t*)arg;
-	mm_idx_step_t *s = (mm_idx_step_t*)calloc(1, sizeof(mm_idx_step_t));
+	mm_idx_pipeline_t *q = (mm_idx_pipeline_t *)arg;
+	mm_idx_step_t *s = (mm_idx_step_t *)calloc(1, sizeof(mm_idx_step_t));
 
 	/* fetch sequence */
 	uint64_t size;
 	void *base;
-	s->seq = bseq_read(q->fp, &s->n_seq, &base, &size);
-	if(s->seq == NULL) {
-		free(s); s = NULL;
-		return NULL;
+	if((s->seq = bseq_read(q->fp, &s->n_seq, &base, &size)) == NULL) {
+		free(s); return(NULL);				/* fetch failed */
 	}
+	s->id = q->icnt++;						/* assign block id */
+	kv_push(mm_idx_mem_t, q->mi->mem, ((mm_idx_mem_t){ .size = size, .base = base }));	/* register fetched block */
 
-	/* assign block id */
-	s->id = q->icnt++;
-
-	/* update base_rid and seq array (for all-versus-all) */
-	if(q->mi->base_rid == UINT32_MAX) {
-		q->mi->base_rid = atoi(s->seq[0].name);		/* assume first seq name is base_rid */
-	}
+	/* update base_rid and seq array (for all-versus-all), parse from first sequence name if not valid one is set (assuming seq name is number) */
+	if(q->mi->base_rid == UINT32_MAX) { q->mi->base_rid = atoi(s->seq[0].name); }
 	s->base_rid = q->mi->base_rid + q->mi->s.n;
 
-	/* register fetched block */
-	kv_push(mm_idx_mem_t, q->mi->mem, ((mm_idx_mem_t){ .size = size, .base = base }));
+	/* circular flags */
+	uint64_t const call = q->opt->carr.a && q->opt->carr.n == 0;	/* mark all sequences as circular if array is instanciated but no entry found */
+	uint64_t const ctest = q->opt->carr.a && q->opt->carr.n > 0;
+	#define _test_circular(_o, _s) ({ \
+		char const *_k = (char const *)kh_get(&_o->chash, mm_shashn((_s)->name, (_s)->l_name)); \
+		_k && strcmp(_k, (_s)->name) == 0; \
+	})
 
 	/* copy sequence pointers */
-	if(q->mi->s.n + s->n_seq > q->mi->s.m) {
-		q->mi->s.m = MAX2(256, 2*q->mi->s.m);
-		q->mi->s.a = realloc(q->mi->s.a, sizeof(mm_idx_seq_t) * q->mi->s.m);
-	}
+	kv_reserve(mm_idx_seq_t, q->mi->s, q->mi->s.n + s->n_seq);
 	bseq_t const *src = s->seq;
 	mm_idx_seq_t *dst = &q->mi->s.a[q->mi->s.n];
 	for(uint64_t i = 0; i < s->n_seq; i++) {
@@ -2909,7 +2899,7 @@ void *mm_idx_source(uint32_t tid, void *arg)
 			.seq = src[i].seq,   .l_seq = src[i].l_seq,
 			.name = src[i].name, .l_name = src[i].l_name,
 			.rid = s->base_rid + i,
-			.circular = q->mi->circular
+			.circular = call | (ctest && _test_circular(q->opt, &src[i]))
 		};
 	}
 	q->mi->s.n += s->n_seq;
@@ -3045,31 +3035,25 @@ void *mm_idx_post(uint32_t tid, void *arg, void *item)
 static _force_inline
 mm_idx_t *mm_idx_gen(mm_opt_t const *o, bseq_file_t *fp)
 {
-	mm_idx_pipeline_t pl = {0}, **p;
+	if(fp == NULL) { return(NULL); }		/* fp must be instanciated */
+	pt_t *pt = pt_init(o->nth);
 
-	/* init pipeline context */
-	pl.icnt = pl.ocnt = 0;
-	pl.fp = fp;
-	if(pl.fp == NULL) { return(NULL); }		/* fp must be instanciated */
-
-	/* initialize index object */
-	pl.mi = mm_idx_init(o->w, o->k, o->b, o->base_rid, (o->flag&MM_CIRCULAR) != 0);
-	kv_hq_init(pl.hq);
-
-	/* create thread contexts */
-	p = (mm_idx_pipeline_t **)calloc(o->nth, sizeof(mm_idx_pipeline_t*));
-	for(uint64_t i = 0; i < o->nth; i++) { p[i] = &pl; }
+	mm_idx_pipeline_t pl = {				/* init pipeline context */
+		.icnt = 0, .ocnt = 0,
+		.fp = fp, .opt = o, .mi = mm_idx_init(o->w, o->k, o->b, o->base_rid)
+	};
 
 	/* read sequence and collect minimizers */
-	pt_t *pt = pt_init(o->nth);
+	kv_hq_init(pl.hq);						/* initialize heapqueue for packet sorting */
+	mm_idx_pipeline_t **p = calloc(o->nth, sizeof(mm_idx_pipeline_t *));
+	for(uint64_t i = 0; i < o->nth; i++) { p[i] = &pl; }
 	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, (void **)p, mm_idx_drain, &pl);
-	free(p);
-	kv_hq_destroy(pl.hq);
+	kv_hq_destroy(pl.hq); free(p);
 	o->log(o, 9, __func__, "collected minimizers");
 
 	/* sort minimizers */
 	mm_idx_post_t *q = (mm_idx_post_t *)calloc(o->nth, sizeof(mm_idx_post_t));
-	mm_idx_post_t **qq = (mm_idx_post_t **)calloc(o->nth, sizeof(mm_idx_post_t*));
+	mm_idx_post_t **qq = (mm_idx_post_t **)calloc(o->nth, sizeof(mm_idx_post_t *));
 	for(uint64_t i = 0; i < o->nth; i++) {
 		q[i].mi = pl.mi;
 		q[i].from = (1ULL<<pl.mi->b) * i / o->nth;
@@ -3077,11 +3061,10 @@ mm_idx_t *mm_idx_gen(mm_opt_t const *o, bseq_file_t *fp)
 		qq[i] = &q[i];
 	}
 	pt_parallel(pt, mm_idx_post, NULL, (void **)qq);
-	pt_destroy(pt);
+	free(q); free(qq);
 	o->log(o, 9, __func__, "sorted minimizers");
 
-	free(q);
-	free(qq);
+	pt_destroy(pt);
 	return(pl.mi);
 }
 
@@ -3137,7 +3120,7 @@ void mm_idx_cmp(mm_opt_t const *opt, mm_idx_t const *m1, mm_idx_t const *m2)
  * @struct mm_idx_hdr_s
  */
 typedef struct mm_idx_hdr_s {
-	uint8_t b, w, k, circular;
+	uint8_t b, w, k, _pad1;
 	uint32_t base_rid;
 	uint64_t n_seq, size;
 } mm_idx_hdr_t;
@@ -3154,7 +3137,6 @@ void mm_idx_dump(mm_idx_t const *mi, void *fp, write_t wfp)
 
 	mm_idx_hdr_t hdr = {
 		.b = mi->b, .w = mi->w, .k = mi->k,
-		.circular = mi->circular,
 		.base_rid = mi->base_rid,
 		.n_seq = mi->s.n,
 		.size = 0
@@ -3223,7 +3205,7 @@ mm_idx_t *mm_idx_load(void *fp, read_t rfp)
 	mm_idx_hdr_t hdr = _reada(mm_idx_hdr_t);			/* read header */
 
 	/* instanciate index object */
-	mi = mm_idx_init(hdr.w, hdr.k, hdr.b, hdr.base_rid, hdr.circular);
+	mi = mm_idx_init(hdr.w, hdr.k, hdr.b, hdr.base_rid);
 
 	/* load hash tables */
 	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
@@ -3445,7 +3427,8 @@ typedef struct mm_tbuf_s {
 	uint8_t tail[96];				/* zeros */
 	gaba_section_t r[2];			/* [0]: rf, [1]: rr */
 	gaba_section_t q[3];			/* [0]: qf, [1]: qr, [2]: qf */
-	gaba_section_t t[1];
+	gaba_section_t t[1];			/* tail section info */
+	gaba_section_t *rtp, *qtp;		/* tail section pointers, &r[0] or &t[0] */
 
 	/* working buffers */
 	mm_resc_v resc;					/* rescued seed array, also used as query minimizer vector */
@@ -3939,6 +3922,7 @@ uint64_t mm_extend(
 		self->rid = rid;
 		self->r[0] = _sec_fw(ref->rid, ref->seq, ref->l_seq);
 		self->r[1] = _sec_rv(ref->rid, ref->seq, ref->l_seq);
+		self->rtp = ref->circular ? self->r : self->t;
 
 		debug("chain(%llu), cid(%u), rev(%d), plen(%d), (%u, %u), (%d, %d), (%d, %d)", k, self->map.a[~p->rid].cid, rev, plen, self->rid, self->qid, p->apos, p->bpos, cp.apos, cp.bpos);
 
@@ -3965,7 +3949,7 @@ uint64_t mm_extend(
 
 			/* downward extension */
 			gaba_pos_pair_t tp = cp;
-			u = mm_extend_core(&self->dp[narrow], &self->r[0], self->t, &self->q[-rev], self->t, tp);
+			u = mm_extend_core(&self->dp[narrow], &self->r[0], self->rtp+1, &self->q[-rev], self->qtp-rev, tp);
 
 			/* search pos if extended */
 			if(u->max > 0) { tp = gaba_dp_search_max(&self->dp[narrow], u); }
@@ -3980,7 +3964,7 @@ uint64_t mm_extend(
 			}
 
 			/* upward extension: coordinate reversed here */
-			t = mm_extend_core(&self->dp[0], &self->r[1], self->t, &self->q[1+rev], self->t,
+			t = mm_extend_core(&self->dp[0], &self->r[1], self->rtp+1, &self->q[1+rev], self->qtp+1+rev,
 				((gaba_pos_pair_t){
 					.apos = self->r[0].len - tp.apos - 1,
 					.bpos = self->q[0].len - tp.bpos - 1
@@ -5726,15 +5710,12 @@ mm_tbuf_t *mm_tbuf_init(mm_align_t *b)
 		}
 	};
 	if(t->dp == NULL) { goto _fail; }
-	/* tail seq array */
-	memset(t->tail, N, 96);
 
-	/* copy occ */
-	memcpy(t->occ, b->occ, t->n_occ * sizeof(uint32_t));
-	memset(t->occ + t->n_occ, 0, (MAX_FRQ_CNT + 1 - t->n_occ) * sizeof(uint32_t));
-
-	/* init hash */
-	kh_init_static(&t->pos, 0);
+	/* miscellaneous */
+	memset(t->tail, N, 96);									/* tail seq array */
+	t->qtp = &t->q[1];											/* query tail section info pointer */
+	memcpy(t->occ, b->occ, t->n_occ * sizeof(uint32_t));	/* copy occ */
+	kh_init_static(&t->pos, 128);							/* init hash */
 	return(t);
 _fail:
 	mm_tbuf_destroy(t);
@@ -5960,9 +5941,7 @@ uint64_t mm_opt_tag2flag(
  * @brief parse (argc, argv)-style option arrays. only argv is required here (MUST be NULL-terminated).
  */
 static _force_inline
-int mm_opt_parse_argv(
-	mm_opt_t *o,
-	char const *const *argv)
+int mm_opt_parse_argv(mm_opt_t *o, char const *const *argv)
 {
 	char const *const *p = argv - 1;
 	char const *q;
@@ -6128,13 +6107,12 @@ static void mm_opt_threads(mm_opt_t *o, char const *arg) {
 	o->nth = atoi(arg);
 	oassert(o, o->nth < MAX_THREADS, "#threads must be less than %d.", MAX_THREADS);
 }
-static void mm_opt_help(mm_opt_t *o, char const *arg) { o->help++; }
+static void mm_opt_help(mm_opt_t *o, char const *arg) { o->verbose = 1; o->help++; }
 
 /* input configurations */
 static void mm_opt_base_id(mm_opt_t *o, char const *arg) {
-	o->base_rid = UINT32_MAX;					/* first clear ids */
-	o->base_qid = UINT32_MAX;
-	mm_split_foreach(arg, ",;:/", {
+	o->base_rid = o->base_qid = UINT32_MAX;		/* first clear ids (= infer-from-name state) */
+	mm_split_foreach(arg, ",;:/*", {			/* FIXME: '*' should be treated in separete */
 		switch(i) {
 			case 0: o->base_rid = atoi(p);		/* fall through to set both */
 			case 1: o->base_qid = atoi(p);
@@ -6142,11 +6120,12 @@ static void mm_opt_base_id(mm_opt_t *o, char const *arg) {
 	});
 }
 static void mm_opt_circular(mm_opt_t *o, char const *arg) {
-	kh_put(&o->chash, )
-	mm_split_foreach(arg, ",;:/", {
+	if(!o->chash.a) { kh_init_static(&o->chash, 128); }
+	mm_split_foreach(arg, ",;:/*", {			/* FIXME: '*' should be treated in separete */
+		kh_put(&o->chash, kv_size(o->carr), mm_shashn(p, l));
 		kv_pushm(uint8_t, o->carr, p, l);
+		kv_push(uint8_t, o->carr, '\0');
 	});
-	kv_push(uint8_t, o->carr, '\0');
 }
 
 /* indexing */
@@ -6262,45 +6241,36 @@ void mm_opt_destroy(mm_opt_t *o)
  * @fn mm_opt_init
  */
 static _force_inline
-mm_opt_t *mm_opt_init(void)
+mm_opt_t *mm_opt_init(char const *const *argv)
 {
+	kvec_t(char) b = { 0 };
+	char const *const *p = argv - 1;
+	while(*++p) {
+		char const *q = *p - 1;
+		while(*++q) { kv_push(char, b, *q); }
+		kv_push(char, b, ' ');
+	}
+	b.a[--b.n] = '\0';
+
 	mm_opt_t *o = calloc(1, sizeof(mm_opt_t));
 	*o = (mm_opt_t){
 		/* global */
-		.nth = 1,
-		.flag = 0,
-		/* input configurations */
-		.base_rid = 0, .base_qid = 0,
-		.min_len = 1,
+		.nth = 1, .arg_line = b.a,
 		/* indexing params */
 		.k = 15, .w = 16, .b = 14,		/* w will be overwritten later */
-		.n_frq = 3,
-		.frq = { 0.05, 0.01, 0.001 },
+		.n_frq = 3, .frq = { 0.05, 0.01, 0.001 },
 		/* mapping */
 		.wlen = 7000, .glen = 7000,
 		.p = {
-			.score_matrix = {
-				1, -1, -1, -1,
-				-1, 1, -1, -1,
-				-1, -1, 1, -1,
-				-1, -1, -1, 1
-			},
-			.gi = 1, .ge = 1,
-			.gfa = 0, .gfb = 0,
-			.xdrop = 50
+			.score_matrix = { 1, -1, -1, -1, -1, 1, -1, -1, -1, -1, 1, -1, -1, -1, -1, 1 },
+			.gi = 1, .ge = 1, .gfa = 0, .gfb = 0, .xdrop = 50
 		},
-		.min_score = 50,
-		.min_ratio = 0.3,
+		.min_len = 1, .min_score = 50, .min_ratio = 0.3,
 		/* buffer sizes */
-		.batch_size = 512 * 1024,
-		.outbuf_size = 512 * 1024,
-		/* output options */
-		.format = 0, .tags = { 0 },
+		.batch_size = 512 * 1024, .outbuf_size = 512 * 1024,
 		/* initialized time and loggers */
 		.inittime = realtime(),
-		.verbose = 3,
-		.fp = (void *)stderr,
-		.log = (mm_log_t)mm_log_printer,
+		.verbose = 1, .fp = (void *)stderr, .log = (mm_log_t)mm_log_printer,
 		/* parsers: mapping from option character to functionality */
 		.t = {
 			['x'] = { 2, mm_opt_preset },
@@ -6341,6 +6311,8 @@ mm_opt_t *mm_opt_init(void)
 			['2'] = { 2, mm_opt_outbuf }
 		}
 	};
+	if(mm_opt_parse_argv(o, ++argv)) { free(o); return(NULL); }
+	if(o->w >= 16) { o->w = (int)(2.0/3.0 * o->k + .499); }		/* calc. default window size (proportional to kmer length) if not specified */
 	return(o);
 }
 
@@ -6358,7 +6330,7 @@ void mm_print_help(mm_opt_t const *o)
 
 	_msg(1, "\n"
 			"  minialign - fast and accurate alignment tool for long reads\n"
-			"\n");
+			"");
 	_msg(1, "Usage:\n"
 			"  first trial:\n"
 			"    $ minialign -t4 -xont.r9.1d ref.fa ont_r9.4_1d.fq > mapping.sam\n"
@@ -6381,14 +6353,14 @@ void mm_print_help(mm_opt_t const *o)
 	_msg(1, "  Indexing:");
 	_msg(1, "    -k INT       k-mer size [%d]", o->k);
 	_msg(1, "    -w INT       minimizer window size [{-k}*2/3]");
-	_msg(1, "    -c STR,...   treat specified sequences as circular []");
-	_msg(2, "    -C INT[,INT] set base rid and qid, - to infer from seq. name [%u, %u]", o->base_rid, o->base_qid);
+	_msg(1, "    -c STR,...   circular reference name, `*' to mark all as circular []");
+	_msg(2, "    -C INT[,INT] set base rid and qid, `*' to infer from seq. name [%u, %u]", o->base_rid, o->base_qid);
 	_msg(2, "    -L INT       min seq length; 0 to disable [%u]", o->min_len);
 	_msg(1, "  Mapping:");
 	_msg(2, "    -f FLOAT,... occurrence thresholds [%rf]", o->n_frq, o->frq);
 	_msg(1, "    -a INT       match award [%d]", o->p.score_matrix[0]);
 	_msg(1, "    -b INT       mismatch penalty [%d]", o->p.score_matrix[1]);
-	_msg(1, "    -e INT       score matrix modifier, \"GA+3\" adds 3 to (r,q)=(G,A) pair");
+	_msg(1, "    -e STR,...   score matrix modifier, `GA+3' adds 3 to (r,q)=(G,A) pair");
 	_msg(1, "    -p INT       gap open penalty offset for large indels [%d]", o->p.gi);
 	_msg(1, "    -q INT       per-base penalty for large indels [%d]", o->p.ge);
 	_msg(1, "    -r INT[,INT] per-base penalty for small ins[,del] (0 to disable) [%d,%d]", o->p.gfa, o->p.gfb);
@@ -6396,18 +6368,18 @@ void mm_print_help(mm_opt_t const *o)
 	_msg(1, "    -s INT       minimum score [%d]", o->min_score);
 	_msg(1, "    -m INT       minimum score ratio to max [%1.2f]", o->min_ratio);
 	_msg(1, "  Output:");
-	_msg(1, "    -O STR       output format {sam,maf,blast6,blasr1,blasr4,paf,mhap,falcon} [%s]",
+	_msg(1, "    -O STR       output format {sam,maf,blast6,paf} [%s]",
 		(char const *[]){ "sam", "maf", "blast6", "blasr1", "blasr4", "paf", "mhap", "falcon" }[o->format]);
 	_msg(2, "    -P           omit secondary (repetitive) alignments");
 	_msg(1, "    -Q           include quality string");
-	_msg(1, "    -R STR       read group header line, such as \"@RG\\tID:1\" [%s]", o->rg_line? o->rg_line : "");
+	_msg(1, "    -R STR       read group header line, such as `@RG\\tID:1' [%s]", o->rg_line? o->rg_line : "");
 	_msg(1, "    -T STR,...   optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []");
 	_msg(1, "                   RG is also inferred from `-R'");
 	_msg(1, "                   supp. records are omitted when SA is enabled");
-	_msg(2, "                   tags in the input BAM file will also transferred when specified");
+	_msg(2, "                   tags in the input BAM file will also transferred");
 	_msg(1, "");
 	if(o->verbose < 2) {
-		_msg(0, "  Pass -hVV to show all the options.");
+		_msg(0, "  Pass -hvv to show all the options.");
 		_msg(0, "");
 	}
 
@@ -6557,22 +6529,19 @@ int _export(main)(int argc, char *argv[])
 	liftrlimit();
 
 	/* init option object (init base time) and parse args */
-	mm_opt_t *o = mm_opt_init();
-	o->log(o, 1, __func__, "Version: %s, Build: %s", MM_VERSION, MM_ARCH);		/* always print version at the head */
-	if(mm_opt_parse_argv(o, (char const *const *)argv + 1)) { goto _final; }	/* getopt alternative */
-	if(o->w >= 16) { o->w = (int)(2.0/3.0 * o->k + .499); }		/* calc. default window size (proportional to kmer length) if not specified */
-
+	mm_opt_t *o = mm_opt_init((char const *const *)argv);
+	if(o == NULL) { return(1); }
+	o->log(o, 0, __func__, "Version: %s, Build: %s", MM_VERSION, MM_ARCH);		/* always print version */
 	if(o->help || o->parg.n == 0) {								/* when -h is passed or no input file is given, print help message */
 		if(o->help) { o->fp = stdout; ret = 0; }				/* set logger to stdout when invoked by -h option, also exit status is 0 (not an error) */
 		mm_print_help(o);
-		goto _final;
+		goto _main_final;
 	}
-
 	if((ret = (o->fnw ? main_index : main_align)(o)) == 0) {	/* dispatch tasks and get return code */
 		o->log(o, 1, __func__, "Command: %s", o->arg_line);		/* print log when succeeded */
 		o->log(o, 1, __func__, "Real time: %.3f sec; CPU: %.3f sec", realtime() - o->inittime, cputime());
 	}
-_final:
+_main_final:;
 	mm_opt_destroy(o);
 	return(ret);
 }
