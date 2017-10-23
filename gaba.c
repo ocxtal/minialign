@@ -1272,7 +1272,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 #define _fill_body() { \
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
 	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
-	t = _shuf_n(_load_sb(self->scv), t); \
+	t = _shuf_n(_load_sb(self->scv), t); _print_n(t); \
 	t = _max_n(dh, t); \
 	t = _max_n(dv, t); \
 	ptr->h.mask = _mask_n(_eq_n(t, dv)); \
@@ -1290,7 +1290,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 #define _fill_body() { \
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
 	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
-	t = _shuf_n(_load_sb(self->scv), t); \
+	t = _shuf_n(_load_sb(self->scv), t); _print_n(t); \
 	t = _max_n(de, t); \
 	t = _max_n(df, t); \
 	ptr->h.mask = _mask_n(_eq_n(t, de)); \
@@ -2791,6 +2791,7 @@ struct gaba_score_vec_s gaba_init_score_vector(
 {
 	v16i8_t scv = _loadu_v16i8(p->score_matrix);
 	int8_t ge = -p->ge, gi = -p->gi;
+	scv = _add_v16i8(scv, _set_v16i8(-2 * (ge + gi)));
 	struct gaba_score_vec_s sc __attribute__(( aligned(MEM_ALIGN_SIZE) ));
 
 	/* score matrices */
