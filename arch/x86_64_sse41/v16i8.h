@@ -165,15 +165,15 @@ typedef struct v16i8_s {
 
 /* horizontal max */
 #define _hmax_v16i8(a) ({ \
-	__m128i _vmax = _mm_max_epi16((a).v1, \
+	__m128i _vmax = _mm_max_epi8((a).v1, \
 		_mm_srli_si128((a).v1, 8)); \
-	_vmax = _mm_max_epi16(_vmax, \
+	_vmax = _mm_max_epi8(_vmax, \
 		_mm_srli_si128(_vmax, 4)); \
-	_vmax = _mm_max_epi16(_vmax, \
+	_vmax = _mm_max_epi8(_vmax, \
 		_mm_srli_si128(_vmax, 2)); \
-	_vmax = _mm_max_epi16(_vmax, \
+	_vmax = _mm_max_epi8(_vmax, \
 		_mm_srli_si128(_vmax, 1)); \
-	(int8_t)_mm_extract_epi16(_vmax, 0); \
+	(int8_t)_mm_extract_epi8(_vmax, 0); \
 })
 
 /* debug print */
