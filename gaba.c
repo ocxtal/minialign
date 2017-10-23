@@ -2791,7 +2791,6 @@ struct gaba_score_vec_s gaba_init_score_vector(
 {
 	v16i8_t scv = _loadu_v16i8(p->score_matrix);
 	int8_t ge = -p->ge, gi = -p->gi;
-	scv = _add_v16i8(scv, _set_v16i8(-2 * (ge + gi)));
 	struct gaba_score_vec_s sc __attribute__(( aligned(MEM_ALIGN_SIZE) ));
 
 	/* score matrices */
@@ -2799,9 +2798,8 @@ struct gaba_score_vec_s gaba_init_score_vector(
 		int8_t m = _hmax_v16i8(scv);
 		int8_t x = _hmax_v16i8(_sub_v16i8(_zero_v16i8(), scv));
 		scv = _add_v16i8(_bsl_v16i8(_set_v16i8(m + x), 1), _set_v16i8(-x));
-		_store_sb(sc, scv);
 	#endif
-	_store_sb(sc, scv);
+	_store_sb(sc, _add_v16i8(scv, _set_v16i8(-2 * (ge + gi))));
 
 	/* gap penalties */
 	#if MODEL == LINEAR
