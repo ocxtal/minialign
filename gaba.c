@@ -192,7 +192,7 @@ _static_assert(sizeof(nvec_masku_t) == BW / 8);
  * @brief calculate scores
  */
 #define _max_match(_p)				( _hmax_v16i8(_loadu_v16i8((_p)->score_matrix)) )
-#define _max_match_base(_p)			( 0 )
+#define _max_match_base(_p)			( 0x01 )
 #if MODEL == LINEAR
 #define _gap_h(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
 #define _gap_v(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
@@ -1232,8 +1232,9 @@ struct gaba_joint_tail_s *fill_create_tail(
 	/* load delta vectors */ \
 	register nvec_t delta = _zero_n(); \
 	register nvec_t drop = _load_n(self->w.r.xd.drop); \
-	_print_w(_add_w(_cvt_n_w(delta), _load_w(&self->w.r.md))); \
-	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(self->w.r.tail->offset)))); \
+	_print_n(drop); \
+	_print_w(_add_w(_load_w(&self->w.r.md), _add_w(_cvt_n_w(delta), _set_w(self->w.r.tail->offset + self->w.r.ofsd - 128)))); \
+	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(self->w.r.tail->offset + self->w.r.ofsd)))); \
 	/* load direction determiner */ \
 	struct gaba_dir_s dir = _dir_init((_blk) - 1);
 #else	/* AFFINE and COMBINED */
@@ -1257,7 +1258,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	register nvec_t delta = _zero_n(); \
 	register nvec_t drop = _load_n(self->w.r.xd.drop); \
 	_print_n(drop); \
-	_print_w(_add_w(_load_w(&self->w.r.md), _add_w(_cvt_n_w(delta), _set_w(self->w.r.ofsd)))); \
+	_print_w(_add_w(_load_w(&self->w.r.md), _add_w(_cvt_n_w(delta), _set_w(self->w.r.tail->offset + self->w.r.ofsd - 128)))); \
 	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(self->w.r.tail->offset + self->w.r.ofsd)))); \
 	/* load direction determiner */ \
 	struct gaba_dir_s dir = _dir_init((_blk) - 1);
@@ -1281,9 +1282,9 @@ struct gaba_joint_tail_s *fill_create_tail(
 	nvec_t _dv = _sub_n(t, dh); \
 	dh = _sub_n(t, dv); \
 	dv = _dv; \
-	/*_print_n(drop);*/ \
-	/*_print_n(_add_n(dh, _load_ofsh(self->scv)));*/ \
-	/*_print_n(_add_n(dv, _load_ofsv(self->scv)));*/ \
+	_print_n(drop); \
+	_print_n(_add_n(dh, _load_ofsh(self->scv))); \
+	_print_n(_add_n(dv, _load_ofsv(self->scv))); \
 }
 #elif MODEL == AFFINE
 #define _fill_body() { \
@@ -1354,7 +1355,8 @@ struct gaba_joint_tail_s *fill_create_tail(
 	delta = _op_add(delta, _t); \
 	drop = _op_subs(drop, _t); \
 	_dir_update(dir, _vector, _sign); \
-	_print_w(_add_w(_load_w(&self->w.r.md), _add_w(_cvt_n_w(delta), _set_w(self->w.r.ofsd)))); \
+	_print_n(drop); \
+	_print_w(_add_w(_load_w(&self->w.r.md), _add_w(_cvt_n_w(delta), _set_w(self->w.r.tail->offset + self->w.r.ofsd - 128)))); \
 	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(self->w.r.tail->offset + self->w.r.ofsd)))); \
 }
 
