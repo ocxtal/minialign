@@ -193,7 +193,7 @@ typedef struct v64i16_s {
 		(a).v4 = _i_v64i8(insert)((a).v4, (val), (imm) - 3 * _V64I16_N); \
 	} else if((imm) < 5 * _V64I16_N) { \
 		(a).v5 = _i_v64i8(insert)((a).v5, (val), (imm) - 4 * _V64I16_N); \
-	} else if((imm) < 6 * sizeof(__m128) / sizeof(int16_t)) { \
+	} else if((imm) < 6 * _V64I16_N) { \
 		(a).v6 = _i_v64i8(insert)((a).v6, (val), (imm) - 5 * _V64I16_N); \
 	} else if((imm) < 7 * _V64I16_N) { \
 		(a).v7 = _i_v64i8(insert)((a).v7, (val), (imm) - 6 * _V64I16_N); \

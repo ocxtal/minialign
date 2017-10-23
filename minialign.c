@@ -17,12 +17,6 @@
 #endif
 
 /**
- * @macro STRICT_STREAM_ORDERING
- * @brief set non-zero value to ensure the order of output records
- */
-#define STRICT_STREAM_ORDERING		( 1 )
-
-/**
  * @macro MAX_THREADS
  * @brief max #threads, set larger value if needed
  */
@@ -227,6 +221,12 @@ static uint8_t const decar[16] = { [A] = 'T', [C] = 'G', [G] = 'C', [T] = 'A' };
 static uint8_t const idxaf[256] = { ['A'] = 1, ['C'] = 2, ['G'] = 3, ['T'] = 4, ['U'] = 4 };
 
 /**
+ * @macro mm_encode_tag
+ * @brief map SAM tag string to 16-bit int
+ */
+#define mm_encode_tag(_p)		( (uint16_t)(_p)[0] | ((uint16_t)(_p)[1]<<8) )
+
+/**
  * @type read_t, write_t
  * @brief abstract I/O function types
  */
@@ -275,8 +275,8 @@ char *mm_strndup(char const *p, uint64_t l)
 static _force_inline
 char *mm_strdup(char const *p)
 {
-	kvec_t(char) b = { 0 };
-	do { kv_push(char, b, *p); } while(*p++);
+	kvec_t(char) b = { 0 }; p--;
+	while(*++p) { kv_push(char, b, *p); }
 	return(b.a);
 }
 static _force_inline
@@ -622,7 +622,7 @@ uint64_t *kh_get_ptr(kh_t const *h, uint64_t key)
 
 /**
  * @struct kh_str_t
- * @brief string hashset
+ * @brief string -> string hashmap
  */
 typedef struct {
 	uint8_v s;
@@ -636,24 +636,28 @@ typedef struct {
 #define kh_str_destroy(_h)				{ kh_str_destroy(_h); free(_h); }
 
 /**
- * @fn kh_str_put, kh_str_test
+ * @fn kh_str_put, kh_str_get
  */
 static _force_inline
-void kh_str_put(kh_str_t *h, char const *s, uint64_t l)
+void kh_str_put(kh_str_t *h, char const *k, uint64_t klen, char const *v, uint64_t vlen)
 {
-	if(l == UINT64_MAX) { l = strlen(s); }
-	kh_put(&h->h, mm_shashn(s, l), (kv_size(h->s)<<32) | l);
-	kv_pushm(uint8_t, h->s, s, l);
+	if(klen == UINT64_MAX) { klen = strlen(k); }
+	if(vlen == UINT64_MAX) { vlen = strlen(v); }
+	kh_put(&h->h, mm_shashn(s, klen), (kv_size(h->s)<<32) | klen);
+	kv_pushm(uint8_t, h->s, k, klen);
+	kv_push(uint8_t, h->s, '\0');
+	kv_pushm(uint8_t, h->s, v, vlen);
 	kv_push(uint8_t, h->s, '\0');
 	return;
 }
 static _force_inline
-uint64_t kh_str_test(kh_str_t const *h, char const *s, uint64_t l)
+char const *kh_str_get(kh_str_t const *h, char const *k, uint64_t klen)
 {
-	if(l == UINT64_MAX) { l = strlen(s); }
+	if(klen == UINT64_MAX) { klen = strlen(k); }
 	uint64_t const *p = kh_get_ptr(&h->h, mm_shashn(s, l));
-	if(p == NULL || (uint32_t)(*p) != l) { return(0); }		/* not found or length differs */
-	return(strncmp((char const *)&h->s.a[*p>>32], s, l) == 0);
+	if(p == NULL || (uint32_t)(*p) != klen) { return(0); }		/* not found or length differs */
+	char const *q = (char const *)&h->s.a[*p>>32];
+	return(strncmp(q, k, klen) == 0 ? q + klen + 1 : NULL);
 }
 
 unittest( .name = "kh.base" ) {
@@ -948,9 +952,7 @@ pt_t *pt_init(uint32_t nth)
  * @brief update worker function and argument pointers
  */
 static _force_inline
-int pt_set_worker(
-	pt_t *pt,
-	pt_worker_t wfp, void **warg)
+int pt_set_worker(pt_t *pt, void *arg, pt_worker_t wfp)
 {
 	void *item;
 
@@ -962,8 +964,7 @@ int pt_set_worker(
 
 	/* update pointers */
 	for(uint64_t i = 0; i < pt->nth; i++) {
-		pt->c[i].wfp = wfp;
-		pt->c[i].warg = warg ? warg[i] : NULL;
+		pt->c[i].wfp = wfp; pt->c[i].warg = warg;
 	}
 
 	/* syncronize */
@@ -976,20 +977,16 @@ int pt_set_worker(
  * @brief multithreaded stream, source and drain are always called in the parent thread
  */
 static _force_inline
-int pt_stream(
-	pt_t *pt,
-	pt_source_t sfp, void *sarg,
-	pt_worker_t wfp, void **warg,
-	pt_drain_t dfp, void *darg)
+int pt_stream(pt_t *pt, void *arg, pt_source_t sfp, pt_worker_t wfp, pt_drain_t dfp)
 {
-	if(pt_set_worker(pt, wfp, warg)) { return(-1); }
+	if(pt_set_worker(pt, wfp, arg)) { return(-1); }
 
 	/* keep balancer between [lb, ub) */
 	uint64_t const lb = 2 * pt->nth, ub = 4 * pt->nth;
 	uint64_t bal = 0;
 	void *item;
 
-	while((item = sfp(pt->c->tid, sarg)) != NULL) {
+	while((item = sfp(pt->c->tid, arg)) != NULL) {
 		pt_enq(pt->c->in, pt->c->tid, item);
 		if(++bal < ub) { continue; }
 
@@ -997,20 +994,20 @@ int pt_stream(
 			/* flush to drain (note: while loop is better?) */
 			if((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) {
 				bal--;
-				dfp(pt->c->tid, darg, item);
+				dfp(pt->c->tid, arg, item);
 			}
 
 			/* process one in the master (parent) thread */
 			if((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
 				bal--;
-				dfp(pt->c->tid, darg, wfp(pt->c->tid, warg ? *warg : NULL, item));
+				dfp(pt->c->tid, arg, wfp(pt->c->tid, arg, item));
 			}
 		}
 	}
 
 	/* source depleted, process remainings */
 	while((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
-		pt_enq(pt->c->out, pt->c->tid, wfp(pt->c->tid, warg ? *warg : NULL, item));
+		pt_enq(pt->c->out, pt->c->tid, wfp(pt->c->tid, arg, item));
 	}
 
 	/* flush results */
@@ -1027,22 +1024,19 @@ int pt_stream(
  * @fn pt_parallel
  */
 static _force_inline
-int pt_parallel(
-	pt_t *pt,
-	pt_worker_t wfp, void **warg,
-	void **item)
+int pt_parallel(pt_t *pt, void *arg, pt_worker_t wfp)
 {
 	/* fails when unprocessed element exists */
-	if(pt_set_worker(pt, wfp, warg)) { return(-1); }
+	if(pt_set_worker(pt, wfp, arg)) { return(-1); }
 
 	/* push items */
 	for(uint64_t i = 1; i < pt->nth; i++) {
-		pt_enq(pt->c->in, pt->c->tid, item? item[i] : NULL);
+		pt_enq(pt->c->in, pt->c->tid, NULL);
 	}
 	debug("pushed items");
 
 	/* process the first one in the master (parent) thread */
-	wfp(pt->c->tid, warg? warg[0] : NULL, item? item[0] : NULL);
+	wfp(pt->c->tid, arg, NULL);
 	debug("finished master");
 
 	/* wait for the children done */
@@ -1530,6 +1524,43 @@ unittest( .name = "pg.multi" ) {
 }
 #endif
 /* end of queue.c */
+/* bseq.h */
+/**
+ * @struct bseq_params_t
+ */
+typedef struct {
+	uint64_t batch_size;					/* buffer (block) size */
+	uint32_t keep_qual, min_len;			/* 1 to keep quality string, minimum length cutoff (to filter out short seqs) */
+	uint32_t n_tag;
+	uint16_t const *tag;					/* tags to be preserved (bam), "CO" to comment in fasta */
+} bseq_params_t;
+
+/**
+ * @struct bseq_seq_t
+ * @brief record container
+ */
+typedef struct {
+	uint32_t l_seq;							/* sequence length */
+	uint16_t l_name, n_tag;					/* name length, #tags */
+	char *name;								/* pointers */
+	uint8_t *seq, *qual, *tag;
+	union { void *reg; uint64_t n; } u;		/* reserved for alignment result */
+} bseq_seq_t;
+_static_assert(sizeof(bseq_seq_t) == 48);
+
+/**
+ * @struct bseq_t
+ */
+typedef struct {
+	uint64_t unused64[3];					/* open for any use */
+	uint32_t unused32, n_seq;				/* #sequences */
+	void *base;								/* sequence memory base pointer */
+	uint64_t size;							/* sequence memory size */
+	bseq_seq_t seq[];						/* array of sequence objects follows */
+} bseq_t;
+_static_assert(sizeof(bseq_t) == sizeof(bseq_seq_t));
+typedef struct { size_t n, m; bseq_seq_t *a; } bseq_seq_v;
+/* bseq.h */
 
 /* bamlite.c in bwa */
 
@@ -1641,19 +1672,8 @@ _bam_read_header_fail:
 }
 
 /* end of bamlite.c */
-
 /* bseq.c */
 #define BSEQ_MGN			( 64 )			/* buffer margin length */
-
-/**
- * @struct bseq_params_t
- */
-typedef struct {
-	uint64_t batch_size;					/* buffer (block) size */
-	uint32_t keep_qual, min_len;			/* 1 to keep quality string, minimum length cutoff (to filter out short seqs) */
-	uint32_t n_tag;
-	uint16_t const *tag;					/* tags to be preserved (bam), "CO" to comment in fasta */
-} bseq_params_t;
 
 /**
  * @struct bseq_file_t
@@ -1680,32 +1700,6 @@ typedef struct {
 	uint8_t flag;							/* 1 if only if contained in primary */
 	uint8_t data[];
 } bseq_tag_t;
-
-/**
- * @struct bseq_seq_t
- * @brief record container
- */
-typedef struct {
-	uint32_t l_seq;							/* sequence length */
-	uint16_t l_name, n_tag;					/* name length, #tags */
-	char *name;								/* pointers */
-	uint8_t *seq, *qual, *tag;
-	union { void *reg; uint64_t n; } u;		/* reserved for alignment result */
-} bseq_seq_t;
-_static_assert(sizeof(bseq_seq_t) == 48);
-
-/**
- * @struct bseq_t
- */
-typedef struct {
-	uint64_t unused64[3];					/* open for any use */
-	uint32_t unused32, n_seq;				/* #sequences */
-	void *base;								/* sequence memory base pointer */
-	uint64_t size;							/* sequence memory size */
-	bseq_seq_t seq[];						/* array of sequence objects follows */
-} bseq_t;
-_static_assert(sizeof(bseq_t) == sizeof(bseq_seq_t));
-typedef struct { size_t n, m; bseq_seq_t *a; } bseq_seq_v;
 
 /**
  * @fn bseq_search_tag
@@ -2306,22 +2300,41 @@ unittest( .name = "bseq.fastq.skip" ) {
 #define hash64(k0, k1, mask)		( (_mm_crc32_u64((k0), (k0)) ^ (k1)) & (mask) )
 
 /**
+ * @struct mm_sketch_t
+ * @brief minimizer window context, can be carried over (connected to) the next segment.
+ */
+typedef struct {
+	uint8_t w, k, i;
+	uint64_t u;						/* UINT64_MAX */
+	uint64_t r[32];					/* UINT64_MAX */
+} mm_sketch_t;
+
+static _force_inline
+void mm_sketch_init_static(mm_sketch_t *sk, uint32_t w, uint32_t k)
+{
+	sk->w = w; sk->k = k;
+	sk->u = UINT64_MAX;
+	_memset_blk_u(sk->r, 0xff, sizeof(uint64_t) * 32);	/* fill UINT64_MAX */
+	return;
+}
+
+/**
  * @fn mm_sketch
  * @brief calclulate (w,k)-minimizer sketch for seq.
  * minimizers are stored in uint64_t array, where upper 56bit holds actual hash value (minimizer),
  * and lower 8bit contains local index of the length-w bin. direction is encoded in the 7-th bit.
  */
 static _force_inline
-void mm_sketch(uint8_t const *seq, uint32_t len, uint32_t w, uint32_t k, uint64_v *b)
+void mm_sketch(mm_sketch_t *sk, uint8_t const *seq, uint32_t len, uint64_v *b)
 {
 	uint64_t const kk = k - 1, shift1 = 2*kk, mask = (1ULL<<2*k) - 1;
 	#define _loop_core() { \
 		uint64_t c = *p++, h, v; \
 		k0 = (k0 << 2 | c) & mask; k1 = (k1 >> 2) | ((3ULL^c) << shift1); \
 		uint64_t km = k0 < k1? k0 : k1, kx = k0 < k1? k1 : k0, m = k0 < k1? 0 : 0x80; \
-		h = hash64(km, kx, mask)<<8 | i | m; f = MIN2(f, h); v = MIN2(f, r[i + 1]); \
+		h = hash64(km, kx, mask)<<8 | i | m; f = MIN2(f, h); v = MIN2(f, sk->r[i + 1]); \
 		if((v == h) | (v != u)) { *q++ = v; } \
-		u = v; r[i] = h; \
+		u = v; sk->r[i] = h; \
 	}
 
 	/* reserve buffer for minimizers, expected number will be 2 * len / w */
@@ -2330,8 +2343,7 @@ void mm_sketch(uint8_t const *seq, uint32_t len, uint32_t w, uint32_t k, uint64_
 	uint8_t const *p = seq, *t = &seq[len];
 
 	/* initialize working buffers */
-	uint64_t k0 = 0, k1 = 0, r[32], u = UINT64_MAX;	/* forward and backward k-mers, min buffer (w < 32 must be guaranteed) */
-	_memset_blk_u(r, 0xff, sizeof(uint64_t) * 32);	/* fill UINT64_MAX */
+	uint64_t k0 = 0, k1 = 0, u = sk->u;				/* forward and backward k-mers, min buffer (w < 32 must be guaranteed) */
 	while(t - p > w) {
 		/* calculate hash values for the current block */
 		for(uint64_t i = 0, f = UINT64_MAX; i < w; i++) { _loop_core(); }
@@ -2339,29 +2351,60 @@ void mm_sketch(uint8_t const *seq, uint32_t len, uint32_t w, uint32_t k, uint64_
 		for(uint64_t i = 1; i < w - 1; i++) { r[w-i-1] = MIN2(r[w-i-1], r[w-i]); }
 	}
 	for(uint64_t i = 0, f = UINT64_MAX; p < t; i++) { _loop_core(); }
-	b->n = q - b->a;
+	sk->u = u; b->n = q - b->a;
 	#undef _loop_core
 	return;
 }
 /* end of sketch.c */
 
 /* index.h */
-
 /**
  * @struct mm_idx_params_t
  */
 typedef struct {
-	uint64_t mask;					/* (internal) must be (1<<b) - 1 */
-	uint8_t b, w, k, n_occ;			/* bucket size (in bits), window and k-mer size, circular flag */
-	union { uint32_t occ; float frq; } u[MAX_FRQ_CNT];	/* occurrence array */
+	uint8_t b, w, k, n_frq;			/* bucket size (in bits), window and k-mer size */
+	float frq[MAX_FRQ_CNT];			/* occurrence array */
+	kh_str_t circ;					/* circular ref names */
 } mm_idx_params_t;
 
+/**
+ * @struct mm_idx_seq_t
+ * @brief reference-side sequence container
+ */
+typedef struct {
+	uint8_t *seq, *name;
+	uint32_t l_seq;
+	uint16_t l_name, circular;		/* backward offset of name from seq head */
+} mm_idx_seq_t;
+_static_assert(sizeof(mm_idx_seq_t) == 24);
+
+/**
+ * @struct mm_idx_t
+ */
+typedef struct {
+	mm_idx_bucket_t *bkt;			/* array of 2nd stage hash table is the 1st stage hash table */
+	uint64_t mask;					/* (internal) must be (1<<b) - 1 */
+	uint8_t b, w, k, n_occ;			/* bucket size (in bits), window and k-mer size */
+	uint32_t occ[MAX_FRQ_CNT];		/* occurrence array */
+	uint32_t n_seq, mono;			/* (internal) sequence buckets and monolithic flag */
+	mm_idx_seq_t *s;				/* sequence array */
+} mm_idx_t;
 /* end of index.h */
 
 /* map.h */
+/* flags */
+#define MM_AVA			( 0x01ULL )
+#define MM_CIRCULAR		( 0x04ULL )
+#define MM_OMIT_REP		( 0x08ULL )			/* omit secondary records */
+#define MM_COMP 		( 0x10ULL )
+
+/* forward declaration of mm_align_t */
+typedef struct mm_align_s mm_align_t;
+typedef struct mm_reg_s mm_reg_t;
 
 /**
- * @struct mm_map_params_t, mm_align_params_t
+ * @struct mm_map_params_t
+ * @brief chain and overlap detection parameters
  */
 typedef struct {
 	uint32_t flag;
@@ -2370,15 +2413,37 @@ typedef struct {
 	uint32_t min_score;
 	uint32_t base_rid, base_qid;			/* will be updated */
 } mm_map_params_t;
+
+/**
+ * @struct mm_tbuf_params_t
+ */
 typedef struct {
-	mm_map_params_t m;
-	kh_str_t circ;							/* circular ref names */
+	mm_idx_t mi;							/* (immutable) index object */
+	uint32_t org, thresh;					/* ava filter constants, calculated from opt->base_rid and opt->base_qid */
+	uint32_t flag;
+	int32_t wlen, glen;						/* chainable window edge length, linkable gap length */
+	float min_ratio;
+	uint32_t min_score;
+	uint32_t base_rid, base_qid;
+	gaba_t *ctx;
+	gaba_alloc_t alloc;						/* lmm contained */
+} mm_tbuf_params_t;
+
+/**
+ * @struct mm_align_params_t
+ * @brief DP-based alignment calculation parameters
+ */
+typedef struct {
+	uint32_t flag;
+	int32_t wlen, glen;						/* chainable window edge length, linkable gap length */
+	float min_ratio;
+	uint32_t min_score;
+	uint32_t base_rid, base_qid;			/* will be updated */
 	gaba_params_t p;						/* extension */
 } mm_align_params_t;
 /* end of map.h */
 
-/* map.h, options */
-
+/* printer.h */
 /* tags */
 /* sam tags */
 #define MM_RG			( 0 )				/* Z: read group */
@@ -2391,12 +2456,6 @@ typedef struct {
 #define MM_SA			( 7 )				/* Z: supplementary records */
 #define MM_MD			( 8 )				/* Z: mismatch positions */
 
-/* flags */
-#define MM_AVA			( 0x01ULL )
-#define MM_CIRCULAR		( 0x04ULL )
-#define MM_OMIT_REP		( 0x08ULL )			/* omit secondary records */
-#define MM_COMP 		( 0x10ULL )
-
 /* formats */
 #define MM_MAF			( 0x01ULL )
 #define MM_BLAST6		( 0x02ULL )
@@ -2406,8 +2465,12 @@ typedef struct {
 #define MM_MHAP 		( 0x06ULL )
 #define MM_FALCON		( 0x07ULL )
 
+/* forward decls */
+typedef struct mm_print_s mm_print_t;
+void mm_print_mapped(mm_print_t *b, mm_idx_seq_t const *ref, bseq_seq_t const *t, mm_reg_t const *reg);
+
 /**
- * @struct mm_printer_params_t
+ * @struct mm_print_params_t
  */
 typedef struct {
 	uint64_t outbuf_size;			/* buffer sizes */
@@ -2416,8 +2479,10 @@ typedef struct {
 	uint16_t const *tag;
 	char *arg_line;
 	char *rg_line, *rg_id;
-} mm_printer_params_t;
+} mm_print_params_t;
+/* end of printer.h */
 
+/* opt.h */
 /**
  * @struct mm_opt_parser_t
  * @brief option parser function prototype
@@ -2427,7 +2492,6 @@ typedef struct {
 	uint8_t type;							/* 1 for boolean, 2 for option mandatory */
 	void (*fn)(mm_opt_t *o, char const *arg);
 } mm_opt_parser_t;
-
 /**
  * @struct mm_opt_t
  * @brief parameter, logger, and parser container
@@ -2440,7 +2504,7 @@ struct mm_opt_s {
 	bseq_params_t b;
 	mm_idx_params_t c;						/* index params */
 	mm_align_params_t a;					/* chain and align params */
-	mm_printer_params_t r;
+	mm_print_params_t r;
 
 	pt_t *pt;
 	double inittime;
@@ -2449,13 +2513,11 @@ struct mm_opt_s {
 	void *fp;
 	mm_opt_parser_t t[256];					/* parser functions */
 };
-
 /**
  * @type mm_fprintf_t
  * @brief log printer
  */
 typedef int (*mm_log_t)(mm_opt_t const *o, char level, char const *func, char const *fmt, ...);
-
 /**
  * @fn mm_log_printer
  * @brief 0, 1, 2,... for normal message, 8, 9, 10,... for message with timestamp, 16, 17, 18, ... for without header.
@@ -2493,17 +2555,7 @@ int mm_log_printer(
 	va_end(l);
 	return(r);
 }
-
-/**
- * @struct mm_printer_t
- * @brief alignment result (record) printer interface
- */
-typedef struct {
-	void (*mapped)(void *, mm_idx_t const *, bseq_seq_t const *, mm_reg_t const *);	/* nreg contains #regs in lower 32bit, #uniq in higher 32bit */
-} mm_printer_t;
-
-/* end of map.h, options */
-
+/* end of opt.h */
 /* index.c */
 /**
  * @struct mm_mini_t
@@ -2515,20 +2567,6 @@ typedef struct {
 } mm_mini_t;
 _static_assert(sizeof(mm_mini_t) == sizeof(v4u32_t));
 typedef struct { size_t n, m; mm_mini_t *a; } mm_mini_v;
-
-/**
- * @struct mm_idx_seq_t
- * @brief reference-side sequence container
- */
-typedef struct {
-	uint8_t *seq;
-	uint32_t l_seq;
-	uint16_t l_name, bofs_name;					/* backward offset of name from seq head */
-} mm_idx_seq_t;
-_static_assert(sizeof(mm_idx_seq_t) == 16);
-#define _name(_x)			( (_x)->seq - (_x)->bofs_name )
-#define _l_name(_x)			( (_x)->l_name & 0x7fff )
-#define _is_circular(_x)	( (_x)->l_name & 0x8000 )
 
 /**
  * @struct mm_idx_bucket_t
@@ -2546,24 +2584,12 @@ _static_assert(sizeof(mm_idx_bucket_t) == 32);
 typedef struct { uint64_t size; void *base; } mm_idx_mem_t;
 
 /**
- * @struct mm_idx_t
- * @brief root context container
- */
-typedef struct {
-	mm_idx_bucket_t *bkt;			/* array of 2nd stage hash table is the 1st stage hash table */
-	mm_idx_params_t c;
-	uint32_t n_seq, n_mem;			/* (internal) sequence buckets */
-	mm_idx_seq_t *s;				/* sequence array */
-} mm_idx_t;
-_static_assert(sizeof(mm_idx_t) % sizeof(mm_idx_mem_t) == 0);
-
-/**
  * @fn mm_idx_destroy
  */
 static _force_inline
 void mm_idx_destroy(mm_idx_t *mi)
 {
-	if(mi == NULL || mi->n_mem == 0) { free(mi); return; }
+	if(mi == NULL || mi->mono == 1) { free(mi); return; }	/* loaded by mm_idx_load */
 
 	/* hash table buckets */
 	for(uint64_t i = 0; i < 1ULL<<mi->c.b; i++) {
@@ -2572,9 +2598,12 @@ void mm_idx_destroy(mm_idx_t *mi)
 	}
 	free(mi->bkt);
 
-	mm_idx_mem_t *mem = (mm_idx_mem_t *)(mi + 1);
-	for(uint64_t i = 0; i < mi->n_mem; i++) { free(mem[i].base); }
-	free(mi->s); free(mi);
+	/* sequence containers */
+	mm_idx_intl_t *mii = (mm_idx_intl_t *)mi;
+	for(uint64_t i = 0; i < mii->mvec.n; i++) { free(mii->mvec.a[i].base); }
+	free(mii->mvec.a);
+	free(mii->svec.a);
+	free(mi);
 	return;
 }
 
@@ -2610,20 +2639,19 @@ v2u32_t const *mm_idx_get(
  ******************/
 
 /**
- * @struct mm_idx_pipeline_t
+ * @struct mm_idx_intl_t
  * @brief multithreaded index construction pipeline context container
  */
 typedef struct {
-	uint32_t icnt, ocnt;
+	mm_idx_t mi;
+	uint32_t nth, icnt, ocnt;
 	bseq_file_t *fp;
 	uint32_t call, ctest;
-	kh_str_t const *circ;
-	mm_idx_bucket_t *bkt;			/* array of 2nd stage hash table is the 1st stage hash table */
-	mm_idx_params_t c;
-	kvec_t(mm_idx_seq_t) s;
-	kvec_t(mm_idx_mem_t) mem;
+	kvec_t(mm_idx_seq_t) svec;
+	kvec_t(mm_idx_mem_t) mvec;
 	kvec_t(v4u32_t) hq;
-} mm_idx_pipeline_t;
+	uint32_v *cnt;					/* jagged array, counting minimizer occurrences */
+} mm_idx_intl_t;
 
 /**
  * @struct mm_idx_step_t
@@ -2635,27 +2663,18 @@ typedef struct {
 _static_assert(offsetof(mm_idx_step_t, id) == offsetof(bseq_t, unused32));
 
 /**
- * @struct mm_idx_post_t
- * @brief bucket sorter context
- */
-typedef struct {
-	uint32_v cnt;
-	mm_idx_bucket_t *b;
-} mm_idx_post_t;
-
-/**
  * @fn mm_idx_source
  * @brief sequence reader (source) of the index construction pipeline
  */
 static 
 void *mm_idx_source(uint32_t tid, void *arg)
 {
-	mm_idx_pipeline_t *q = (mm_idx_pipeline_t *)arg;
+	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
 	bseq_t *r = bseq_read(q->fp);			/* fetch sequence block */
 	if(r == NULL) { return(NULL); }
 
 	mm_idx_step_t *s = (mm_idx_step_t *)r;	/* create packet, use unused block at the head (see bseq_t) */
-	kv_reserve(uint64_t, s->a, 4 * r->size / q->c.w);
+	kv_reserve(uint64_t, s->a, 4 * r->size / mii->mi.w);
 	s->id = q->icnt++;						/* assign block id */
 	return(s);								/* pass to minimizer calculation stage */
 }
@@ -2667,76 +2686,69 @@ void *mm_idx_source(uint32_t tid, void *arg)
 static
 void *mm_idx_worker(uint32_t tid, void *arg, void *item)
 {
-	mm_idx_pipeline_t *q = (mm_idx_pipeline_t *)arg;
+	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
 	mm_idx_step_t *s = (mm_idx_step_t *)item;
 	bseq_t *r = (bseq_t *)s;				/* overlaps */
 	for(uint64_t i = 0; i < r->n_seq; i++) {
-		mm_sketch(r->seq[i].seq, r->seq[i].l_seq, q->c.w, q->c.k, &s->a);
-		r->seq[i].u.n = s->a.n;
+		mm_sketch(r->seq[i].seq, r->seq[i].l_seq, mii->mi.w, mii->mi.k, &s->a);
+		r->seq[i].u.n = s->a.n;				/* record #minimizers */
 	}
 	return(s);
 }
 
 /**
- * @fn mm_idx_drain_intl
+ * @fn mm_idx_drain
+ * @brief push minimizers to bins
  */
 static _force_inline
-void mm_idx_drain_intl(mm_idx_pipeline_t *q, mm_idx_step_t *s)
+void mm_idx_drain_intl(mm_idx_intl_t *mii, mm_idx_step_t *s)
 {
 	debug("drain, n(%zu)", s->a.n);
 
 	/* save memory block pointers */
 	bseq_t const *r = (bseq_t const *)s;	/* overlaps with mm_idx_step_t */
-	kv_push(mm_idx_mem_t, q->mem, ((mm_idx_mem_t){ .size = r->size, .base = r->base }));	/* register fetched block */
+	kv_push(mm_idx_mem_t, mii->mvec, ((mm_idx_mem_t){ .size = r->size, .base = r->base }));	/* register fetched block */
 
 	/* copy sequence objects, prepare src and dst */
 	bseq_seq_t const *src = r->seq;
-	kv_reserve(mm_idx_seq_t, q->s, q->s.n + r->n_seq);
+	kv_reserve(mm_idx_seq_t, mii->svec, mii->s.n + r->n_seq);
 
-	mm_idx_bucket_t *bkt = q->bkt;
-	uint64_t mask = q->c.mask, w = q->c.w, b = q->c.b;
+	mm_idx_bucket_t *bkt = mii->bkt;
+	uint64_t mask = mii->mi.mask, w = mii->mi.w, b = mii->mi.b;
 	for(uint64_t i = 0, *p = s->a.a; i < r->n_seq; i++) {
 		/* push sequence object */
-		q->s.a[q->s.n] = (mm_idx_seq_t){
+		mii->svec.a[mii->svec.n] = (mm_idx_seq_t){
 			.seq = src->seq, .l_seq = src->l_seq,
-			.bofs_name = (ptrdiff_t)(src->seq - (uint8_t const *)src->name),				/* always seq comes after name */
-			.l_name = src->l_name | ((q->call | (q->ctest || kh_str_test(q->circ, src->name, src->l_name)))<<16)
+			.name = src->name, .l_name = src->l_name,
+			.circular = mii->call | (mii->ctest && kh_str_get(mii->circ, src->name, src->l_name) != NULL)
 		};
 		/* push minimizers */
-		uint64_t pos = -w, v = 0;
+		uint64_t fpos = -w, rpos = 0, v = 0;
 		for(uint64_t *t = p + src->u.n; p < t; p++) {
-			uint64_t u = *p & 0x7f, h = *p>>8, d = (*p & 0x80) ? UINT32_MAX : 0;
-			pos += u - v + (u <= v ? w : 0); v = u;
-			kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){ .hrem = h>>b, .pos = pos ^ d, .rid = q->s.n }));
+			uint64_t u = *p & 0x7f, h = *p>>8, d = u - v + (u <= v ? w : 0);
+			fpos += d; rpos -= d; v = u;
+			kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
+				.hrem = h>>b, .pos = (*p & 0x80) ? rpos : fpos, .rid = mii->s.n
+			}));
 		}
-		src++; q->s.n++;					/* update src and dst pointers (update rid) */
+		src++; mii->svec.n++;				/* update src and dst pointers (update rid) */
 	}
 	free(s->a.a);
 	free(s);
 	return;
 }
-
-/**
- * @fn mm_idx_drain
- */
 static
 void mm_idx_drain(uint32_t tid, void *arg, void *item)
 {
-	mm_idx_pipeline_t *q = (mm_idx_pipeline_t *)arg;
+	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
 	mm_idx_step_t *s = (mm_idx_step_t *)item;
-
-	#if STRICT_STREAM_ORDERING != 0
-		/* sorted pipeline (for debugging) */
-		kv_hq_push(v4u32_t, incq_comp, q->hq, ((v4u32_t){.u64 = {s->id, (uintptr_t)s}}));
-		while(q->hq.n > 1 && q->hq.a[1].u64[0] == q->ocnt) {
-			q->ocnt++;
-			s = (mm_idx_step_t *)kv_hq_pop(v4u32_t, incq_comp, q->hq).u64[1];
-			mm_idx_drain_intl(q, s);
-		}
-	#else
-		/* unsorted pipeline (this may change the results of seed chaining) */
-		mm_idx_drain_intl(q, s);
-	#endif
+	/* sorted pipeline (for debugging) */
+	kv_hq_push(v4u32_t, incq_comp, mii->hq, ((v4u32_t){.u64 = {s->id, (uintptr_t)s}}));
+	while(mii->hq.n > 1 && mii->hq.a[1].u64[0] == mii->ocnt) {
+		mii->ocnt++;
+		s = (mm_idx_step_t *)kv_hq_pop(v4u32_t, incq_comp, mii->hq).u64[1];
+		mm_idx_drain_intl(mii, s);
+	}
 	return;
 }
 
@@ -2747,8 +2759,11 @@ void mm_idx_drain(uint32_t tid, void *arg, void *item)
 static
 void *mm_idx_count_occ(uint32_t tid, void *arg, void *item)
 {
-	mm_idx_post_t *s = (mm_idx_post_t *)item;
-	for(mm_idx_bucket_t *b = s->b, *bt = s[1].b; b < bt; b++) {
+	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
+	mm_idx_bucket_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  tid      / mii->nth] - 1;
+	mm_idx_bucket_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (tid + 1) / mii->nth];
+	uint32_v *cnt = &mii->cnt[tid];
+	while(++b < t) {
 		uint64_t n_arr = b->w.a.n;
 		if(n_arr == 0) { _memset_blk_u(b, 0, sizeof(mm_idx_bucket_t)); continue; }
 
@@ -2756,8 +2771,8 @@ void *mm_idx_count_occ(uint32_t tid, void *arg, void *item)
 		mm_mini_t *arr = b->w.a.a;
 		radix_sort_128x((v4u32_t *)arr, n_arr);
 
-		kv_reserve(uint32_t, s->cnt, s->cnt.n + n_arr);
-		uint32_t *u = &s->cnt.a[s->cnt.n];
+		kv_reserve(uint32_t, *cnt, cnt->n + n_arr);
+		uint32_t *u = &cnt->a[cnt->n];
 
 		/* iterate over minimizers to count #keys */
 		uint64_t n_keys = 0, n_single = 0, n = 1, ph = arr[0].hrem;
@@ -2766,7 +2781,7 @@ void *mm_idx_count_occ(uint32_t tid, void *arg, void *item)
 		}
 		b->v.n.single = n_single + (n == 1);
 		b->v.n.keys = n_keys + 1;
-		*u++ = n; s->cnt.n = u - s->cnt.a;
+		*u++ = n; cnt->n = u - cnt->a;
 	}
 	return(NULL);
 }
@@ -2777,8 +2792,10 @@ void *mm_idx_count_occ(uint32_t tid, void *arg, void *item)
 static
 void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 {
-	mm_idx_post_t *s = (mm_idx_post_t *)item;
-	for(mm_idx_bucket_t *b = s->b, *bt = s[1].b; b < bt; b++) {
+	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
+	mm_idx_bucket_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  tid      / mii->nth] - 1;
+	mm_idx_bucket_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (tid + 1) / mii->nth];
+	while(++b < t) {
 		uint64_t n_arr = b->w.a.n;
 		if(n_arr == 0) { continue; }
 
@@ -2793,7 +2810,7 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 			kh_put(&b->w.h, key, val); \
 		}
 		kh_init_static(&b->w.h, b->v.n.keys / KH_THRESH);		/* make the hash table occupancy equal to (or slightly smaller than) KH_THRESH */
-		uint64_t max_cnt = s->cnt.n, sp = 0, *r = (uint64_t *)arr;	/* reuse minimizer array */
+		uint64_t max_cnt = mii->mi.occ[mii->mi.n_occ], sp = 0, *r = (uint64_t *)arr;	/* reuse minimizer array */
 		mm_mini_t *p = arr, *q = p, *t = &arr[n_arr];
 		for(uint64_t ph = p++->hrem; p < t; q = p, ph = p++->hrem) {
 			if(ph != p->hrem && p - q <= max_cnt) { _fill_body(); }	/* skip if occurs more than the max_cnt threshold */
@@ -2804,6 +2821,7 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 		/* shrink table */
 		r[0] = n_arr - b->v.n.single;							/* table size saved at p[0] (for use in index serialization) */
 		b->v.p = realloc(r, sizeof(uint64_t) * (n_arr - b->v.n.single + 1));	/* shrink array (is this an overhead?) */
+		// b->v.p = r;
 	}
 	return(NULL);
 }
@@ -2813,66 +2831,48 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
  * @brief root function of the index construction pipeline
  */
 static _force_inline
-mm_idx_t *mm_idx_gen(mm_opt_t const *o, bseq_file_t *fp)
+mm_idx_t *mm_idx_gen(mm_idx_params_t const *o, bseq_file_t *fp, pt_t *pt)
 {
-	pt_t *pt = NULL;
-	if(fp == NULL || (pt = pt_init(o->nth)) == NULL) { return(NULL); }		/* fp must be instanciated */
-
-	void *w[o->nth];						/* pointer array passed to workers */
-	mm_idx_params_t c = o->c;
-	c.b = MIN2(c.k * 2, c.b);			/* clip bucket size */
-	c.mask = (1ULL<<c.b) - 1;			/* calc mask */
-	mm_idx_pipeline_t pl = {				/* init pipeline context */
-		.icnt = 0, .ocnt = 0, .fp = fp,
-		.circ = &o->a.circ,
-		.call = (o->a.m.flag & MM_CIRCULAR) && kh_str_size(&o->a.circ) == 0,		/* mark all sequences as circular if array is instanciated but no entry found */
-		.ctest = (o->a.m.flag & MM_CIRCULAR) && kh_str_size(&o->a.circ) > 0,
-		.c = c, .bkt = malloc(sizeof(mm_idx_bucket_t) * (1ULL<<c.b))
+	uint8_t b = MIN2(o->k * 2, o->b);		/* clip bucket size */
+	mm_idx_intl_t *mmi = calloc(sizeof(mm_idx_intl_t));
+	*mmi = {								/* init pipeline context */
+		.mi = (mm_idx_t){
+			.bkt = malloc(sizeof(mm_idx_bucket_t) * (1ULL<<c.b)),
+			.mask = (1ULL<<b) - 1, .b = b, .w = o->w, .k = o->k, .occ = o->n_frq
+		},
+		.fp = fp, .circ = &o->circ,
+		.call = kh_str_ptr(o->circ) && kh_str_size(&o->circ) == 0,		/* mark all sequences as circular if array is instanciated but no entry found */
+		.ctest = kh_str_ptr(o->circ) && kh_str_size(&o->circ) > 0,
+		.cnt = calloc(sizeof(uint32_v) * pt_nth(pt))
 	};
-	kv_reserve(mm_idx_mem_t, pl.mem, sizeof(mm_idx_t) / sizeof(mm_idx_mem_t));
-	pl.mem.n = sizeof(mm_idx_t) / sizeof(mm_idx_mem_t);
 
 	/* read sequence and collect minimizers */
-	kv_hq_init(pl.hq);						/* initialize heapqueue for packet sorting */
-	for(uint64_t i = 0; i < o->nth; i++) { w[i] = (void **)&pl; }
-	pt_stream(pt, mm_idx_source, &pl, mm_idx_worker, w, mm_idx_drain, &pl);
-	kv_hq_destroy(pl.hq);
-	o->log(o, 9, __func__, "collected minimizers");
+	kv_hq_init(mmi->hq);					/* initialize heapqueue for packet sorting */
+	pt_stream(pt, mmi, mm_idx_source, mm_idx_worker, mm_idx_drain);
+	kv_hq_destroy(mmi->hq);
 
-	/* sort minimizers */
-	mm_idx_post_t q[o->nth + 1];
-	for(uint64_t i = 0; i < o->nth + 1; i++) {
-		q[i].b = (void *)&pl.bkt[(1ULL<<c.b) * i / o->nth];
-		q[i].cnt = (uint32_v){ 0 };
-		w[i] = &q[i];						/* invalid for i == o->nth */
+	/* sort minimizers then concatenate occurrence arrays */
+	pt_parallel(pt, mmi, mm_idx_count_occ);
+	for(uint64_t i = 1; i < pt_nth(pt); i++) {
+		kv_pushm(uint32_t, mmi->cnt[0], mmi->cnt[i].a, mmi->cnt[i].n);
+		free(mmi->cnt[i].a);
 	}
-	pt_parallel(pt, mm_idx_count_occ, NULL, w);
-
-	/* concatenate occurrence arrays */
-	uint64_t n = 0;
-	for(uint64_t i = 0; i < o->nth; i++) { n += q[i].cnt.n; }
-	kv_reserve(uint32_t, q[0].cnt, n);
-	uint32_t *u = &q[0].cnt.a[q[0].cnt.n]; q[0].cnt.n = n;
-	for(uint64_t i = 1; i < o->nth; i++) { kv_foreach(uint32_t, q[i].cnt, { *u++ = *p; }); }
 
 	/* calculate occurrence thresholds */
-	for(uint64_t i = 0; i < pl.c.n_occ; i++) {
-		pl.c.u[i].occ = (pl.c.u[i].frq <= 0.0
+	for(uint64_t i = 0; i < o->n_frq; i++) {
+		mi->occ[i] = (o->frq[i] <= 0.0
 			? UINT32_MAX
-			: (ks_ksmall_uint32_t(n, q[0].cnt.a, (uint32_t)((1.0 - pl.c.u[i].frq) * n)) + 1)
+			: (ks_ksmall_uint32_t(n, mmi->cnt[0].a, (uint32_t)((1.0 - o->frq[i]) * mmi->cnt[0].n)) + 1)
 		);
 	}
-	for(uint64_t i = 0; i < o->nth; i++) { q[i].cnt.n = pl.c.u[pl.c.n_occ-1].occ; free(q[0].cnt.a); }
+	free(mmi->cnt[i].a);
 
 	/* build hash table */
-	pt_parallel(pt, mm_idx_build_hash, NULL, w);
-	o->log(o, 9, __func__, "sorted minimizers");
+	pt_parallel(pt, mmi, mm_idx_build_hash);
 
-	pt_destroy(pt);
-	/* write back constants and save pointers */
-	mm_idx_t *mi = (mm_idx_t *)pl.mem.a;
-	*mi = (mm_idx_t){ .bkt = pl.bkt, .c = pl.c, .s = pl.s.a, .n_seq = pl.s.n, .n_mem = pl.mem.n - sizeof(mm_idx_t) / sizeof(mm_idx_mem_t) };
-	return(mi);
+	/* finish */
+	mmi->mi.n_seq = mmi->svec.n;
+	return((mm_idx_t *)mi);
 }
 
 #if 0
@@ -3011,6 +3011,7 @@ mm_idx_t const *mm_idx_load(void *fp, read_t rfp)
 	if(_reada(uint32_t) != MM_IDX_MAGIC) { fprintf(stderr, "magic not correct\n"); goto _mm_idx_load_fail; }
 	uint64_t size = _reada(uint64_t);		/* read index size */
 	mi = malloc(size); _readp(mi, size);	/* malloc mem and read all FIXME: can be mapped to hugepages to improve performance */
+	mi->mono = 1;
 
 	/* restore pointers from offsets */
 	#define _rst(_p, _b)	{ (_p) = (void *)((uintptr_t)(_b) + (ptrdiff_t)(_p)); }
@@ -3030,22 +3031,6 @@ _mm_idx_load_fail:
 /* end of index.c */
 
 /* map.c */
-
-/* forward declaration of mm_align_t */
-typedef struct mm_align_s mm_align_t;
-typedef struct mm_reg_s mm_reg_t;
-
-/**
- * @struct mm_tbuf_params_t
- */
-typedef struct {
-	mm_idx_t mi;					/* (immutable) index object */
-	uint32_t org, thresh;			/* ava filter constants, calculated from opt->base_rid and opt->base_qid */
-	mm_map_params_t m;				/* copied from opt */
-	union { gaba_t *ctx; gaba_dp_t *dp; } g;
-	gaba_alloc_t alloc;				/* lmm contained */
-} mm_tbuf_params_t;
-
 /**
  * @struct mm_resc_t
  * @brief rescued seed (pos, occ) container, alias to v4u32_t
@@ -3062,7 +3047,8 @@ _static_assert(sizeof(mm_resc_t) == sizeof(v4u32_t));
  * @brief seed position container, alias to v4u32_t
  */
 typedef struct {
-	uint32_t upos, rid, apos, bpos;
+	// uint32_t upos, rid, apos, bpos;
+	uint32_t upos, rid, vpos, mid;		/* 2x - y, ref id, x - 2y, seed -> chain mapping id */
 } mm_seed_t;
 typedef struct { size_t n, m; mm_seed_t *a; } mm_seed_v;
 _static_assert(sizeof(mm_seed_t) == sizeof(v4u32_t));
@@ -3113,13 +3099,11 @@ _static_assert(sizeof(mm_bin_t) % sizeof(void *) == 0);
  * @struct mm_alnset_t
  */
 typedef struct {
-	// uint32_t score;
 	uint32_t rid, mapq;				/* reference id and mapq */
 	uint32_t n_aln, b_aln;			/* #alns, base index of reg->bin */
 } mm_alnset_t;
 
 typedef struct {
-	// uint32_t score;
 	uint32_t aid, mapq;				/* alignment id and mapq */
 	gaba_alignment_t const a[];
 } mm_aln_t;
@@ -3133,65 +3117,43 @@ struct mm_reg_s {
 };
 
 /**
- * @struct mm_align_step_t
- * @brief batch object, placed in the unused space at the head of bseq_t
+ * @struct mm_lctx_s
+ * @brief thread-local context (working buffers)
  */
-typedef struct {
-	uint32_t id, base_qid;
-	lmm_t *lmm;						/* alignment result container (local memory allocator) */
-} mm_align_step_t;
-
-/**
- * @struct mm_tbuf_s
- * @brief per-thread buffer (working context)
- */
-typedef struct mm_tbuf_s {
-	mm_tbuf_params_t u;				/* initialized (copied) in mm_tbuf_init */
+typedef struct mm_lctx_s {
+	mm_idx_t mi;					/* (immutable) index object */
+	int32_t twlen, tglen;			/* leaned chainable window edge length, linkable gap length; converted from wlen and glen */
+	float min_ratio;
+	uint32_t min_score;
+	gaba_dp_t *dp;
+	gaba_alloc_t alloc;				/* lmm contained */
 
 	/* initialized in mm_init_query */
-	uint32_t adj;					/* qlen + mi->k */
-	uint32_t rid, qid;				/* raw qid (used in ava filter) */
+	uint32_t rid, qid;				/* raw qid (used in ava filter; ava switching flag is embedded in qid sign bit) */
 
 	/* query and reference sections (initialized in mm_init_query) */
-	uint8_t tail[96];				/* zeros */
+	uint8_t tail[96];				/* zeros or 0x80s which does not match to any bases */
 	gaba_section_t r[2];			/* [0]: rf, [1]: rr */
 	gaba_section_t q[3];			/* [0]: qf, [1]: qr, [2]: qf */
 	gaba_section_t t[1];			/* tail section info */
 	gaba_section_t *rtp, *qtp;		/* tail section pointers, &r[0] or &t[0] */
 
 	/* working buffers */
-	mm_resc_v resc;					/* rescued seed array, also used as query minimizer vector */
+	mm_resc_v resc;					/* rescued seed array */
 	mm_resc_t *presc;				/* rescued array pointer */
 	mm_seed_v seed;					/* seed array */
-	mm_map_v map;					/* (seed -> chain id, seed->rid) map */
-	mm_chain_v chain;				/* intervals (chains) on sorted coef, (sid, _ofs(plen)) */
-	uint32_t n_res, _pad2;			/* #alignments collected */
+	uint32_v map;					/* seed -> chain map */
+	mm_chain_v chain;				/* intervals (chains) on sorted coef, (sid, _ofs(plen)), also used as query minimizer vector */
+	uint32_t n_res;					/* #alignments collected */
 	ptr_v bin;						/* gaba_alignment_t* array */
 	kh_t pos;						/* alignment dedup hash */
-	gaba_dp_t *dp;					/* alignment work */
-	gaba_alloc_t alloc;				/* lmm contained */
 } mm_tbuf_t;
-
-/**
- * @struct mm_align_s
- * @brief alignment pipeline context
- */
-struct mm_align_s {
-	bseq_file_t *fp;				/* input, set at the head of mm_align_file */
-	mm_tbuf_params_t u;				/* mapper */
-	mm_printer_t *p;				/* output */
-	/* streaming */
-	uint32_t icnt, ocnt;
-	kvec_t(v4u32_t) hq;
-	pt_t *pt;
-	mm_tbuf_t *t[];					/* mm_tbuf_t* array at the tail */
-};
 
 /**
  * @macro _s, _m
  * @brief extract sign, calc inv
  */
-#define _sign(x)		( (x)<0?-1:1 )
+#define _sign(x)		( (x) < 0 ? -1 : 1 )
 #define _smask(x)		( ((int32_t)(x))>>31 )
 #define _umask(x)		( 0x7fffffff & (x) )
 #define _mabs(x)		( _smask(x)^(x) )
@@ -3199,15 +3161,23 @@ struct mm_align_s {
 // #define _u(x, y)		( (((x)<<1) | 0x40000000) - (y) )
 // #define _v(x, y)		( ((x) | 0x40000000) - ((y)<<1) )
 
-#define _u(x, y)		( ((x)<<1) - (y) + ((y) & 0x80000000) + 0x40000000 )
-#define _v(x, y)		( (x) - ((y)<<1) + ((y) & 0x80000000) + 0x40000000 )
-
+#define _u(x, y)		( ((x)<<1) - (y) + ((y) & 0x80000000) + _ofs(0) )
+#define _v(x, y)		( (x) - ((y)<<1) + ((y) & 0x80000000) + _ofs(0) )
 #define _ud(x, y)		( ((x)<<1) - (y) )
 #define _vd(x, y)		( (x) - ((y)<<1) )
+
+#define _bare(_x)		( (_x) - _ofs(0) - ((x) & 0x80000000) )
+#define _as(_ptr)		( _bare((_ptr)->upos) - (_bare((_ptr)->vpos)>>1) )
+#define _bs(_ptr)		( (_bare((_ptr)->upos)>>1) - _bare((_ptr)->vpos) )
+#define _ps(_ptr)		( (_ptr)->upos - (_ptr)->vpos )
+#define _qs(_ptr)		( (((_ptr)->upos + (_ptr)->vpos) + 0x80000000) / 3 )
+
 #define _p(_ptr)		( ((int32_t const *)(_ptr))[0] + ((int32_t const *)(_ptr))[1] )
 #define _q(_ptr)		( ((int32_t const *)(_ptr))[1] - ((int32_t const *)(_ptr))[0] )
 #define _inside(_lb, _x, _ub)		( (uint32_t)((_x) - (_lb)) <= (uint32_t)((_ub) - (_lb)) )
 #define _key(x, y)		( (x) ^ ((x)>>29) ^ (y) ^ _swap_u64(y) )
+_static_assert(_ud(1000, -5) == _vd(-5, 1000));	/* invariant condition */
+_static_assert(_ud(1000, 10) == _vd(10, 1000));	/* invariant condition */
 
 /**
  * @fn mm_expand
@@ -3228,16 +3198,16 @@ void mm_expand(
 	/* iterate over all the collected minimizers */
 	for(uint64_t i = 0; i < n; i++) {
 		uint32_t rid = r[i].u32[1];
-		if(self->u.org + rid - self->qid < self->u.thresh) {
+		if(rid - self->qid >= 0x80000000) {		/* all-versus-all flag, base_rid, and base_qid are embedded in qid */
 			continue;							/* skip if seed is in the lower triangle (all-versus-all) */
 		}
 
 		int32_t rs = r[i].u32[0];				/* load reference pos */
 		uint32_t rmask = _smask(rs), _rs = rs ^ rmask, _qs = qs ^ rmask;
 		self->seed.a[self->seed.n++] = (mm_seed_t){
-			.upos = _u(_rs, _qs),				/* coef */
-			.rid = rid,							/* rid */
-			.apos = _rs, .bpos = _qs			/* rs always positive */
+			.upos = _u(_rs, _qs),				/* coefficients */
+			.vpos = _v(_rs, _qs),
+			.rid = rid, .mid = 0				/* first mid is initialized with zero */
 		};
 		// debug("pos(%d, %d)", _rs, _qs);
 	}
@@ -3266,17 +3236,17 @@ void mm_collect_seed(
 	uint32_t const resc_occ = self->u.mi.c.u[0].occ;
 
 	/* iterate over all the collected minimizers (seeds) on the query */
-	uint64_t w = self->u.mi.c.w, pos = -w, t = 0;
+	uint64_t w = self->u.mi.c.w, fpos = -w, rpos = 0, t = 0;
 	kv_foreach(uint64_t, self->chain, ({
 		/* first calculate pos for the current one */
-		uint64_t s = *p & 0x7f, h = *p>>8;
-		pos += s - t + (s <= t ? w : 0); t = s;
+		uint64_t s = *p & 0x7f, h = *p>>8, d = s - t + (s <= t ? w : 0);
+		fpos += d; rpos -= d; t = s;
 		/* get minimizer matched on the ref at the current query pos */
 		uint32_t n;
 		v2u32_t const *r = mm_idx_get(&self->u.mi, h, &n);
 		if(n > max_occ) { continue; }			/* skip if exceeds repetitive threshold */
 		if(n > resc_occ) {						/* save if less than max but exceeds current threshold */
-			*u++ = (mm_resc_t){ .p = r, .qs = pos, .n = n };
+			*u++ = (mm_resc_t){ .p = r, .qs = (*p & 0x80) ? rpos : fpos, .n = n };
 			continue;
 		}
 		mm_expand(self, n, r, pos);				/* append to seed array */
@@ -3308,38 +3278,38 @@ uint64_t mm_seed(
 		while(p < t && p->n <= self->u.mi.c.u[cnt].occ) { mm_expand(self, p->n, p->p, p->qs); p++; }
 		self->presc = p;						/* write back resc pointer */
 	}
-	if(self->seed.n == 0) { return(0); }
+	if(self->seed.n == 0) { return(0); }		/* seed not found for this round */
 
 	/* sort seed array */
 	debug("sort seed, n(%zu)", self->seed.n);
 	radix_sort_128x((v4u32_t *)self->seed.a, self->seed.n);
-	return(self->seed.n);
+	return(self->seed.n);						/* report #seeds found */
 }
 
 /**
  * @fn mm_chain_core
- * @brief starting from q, link the nearest seed iteratively, open a bin for the chain
+ * @brief starting from q, link the nearest seed iteratively, and open a bin for the chain; returns the next search base pointer
  */
 static _force_inline
 mm_seed_t *mm_chain_core(
 	mm_tbuf_t *self,
-	mm_seed_t *p)
+	mm_seed_t *p,
+	uint32_t cnt_mask)
 {
 	/* q is the current front, np holds the first unlinked seed */
 	mm_seed_t *q = p, *t = self->seed.a + self->seed.n, *np = p + 1;	/* FIXME: update np in the loop for better performance */
 
 	/* save rid, allocate chain bin and map bin */
-	uint64_t key = _loadu_u64(&q->upos);
-	uint32_t mid = ~self->map.n++;	/* must be NOT (but NEG) to avoid collision at zero */
+	uint64_t key = _loadu_u64(&q->upos);		/* key is a (rid, pos) pair of the root */
+	uint32_t mid = ++self->map.n;				/* open new map (leave zero unused) */
 
 	/* loop: link seeds which belong to the same (rid, qid) pair */
 	do {
 		/* load window boundaries */
-		uint32_t ubase = _v(q->apos, q->bpos);
-		uint32_t uub = q->upos + _ud(self->u.m.wlen, 0);
-		uint32_t vub = _v(q->apos, q->bpos);
-		uint32_t vlb = vub + _vd(0, self->u.m.wlen);
-		int32_t pd = _p(&q->apos) + 2*self->u.m.wlen;
+		uint32_t ubase = q->vpos, vub = q->vpos;
+		uint32_t uub = q->upos + self->twlen;	/* _ud(wlen, 0) */
+		uint32_t vlb = vub + self->twlen;		/* _vd(0, wlen) */
+		int32_t pd = _p(&q->apos) + 2*self->u.m.wlen;	/* FIXME */
 
 		debug("uub(%d), vlb(%d), vub(%d)", uub, vlb, vub);
 
@@ -3349,64 +3319,91 @@ mm_seed_t *mm_chain_core(
 			debug("test seed at i(%llu), rid(%u), (%d, %d), u(%d), v(%d), uub(%d), ubase(%d, %d), np(%ld)",
 				r - self->seed.a, r->rid, (int32_t)r->apos, r->bpos, r->upos, _v(r->apos, r->bpos), uub, ubase, ubase + _p(&r->apos), np - self->seed.a);
 
-			// if((int32_t)(r->rid - rid) >= 0) { np = MIN2(np, r);}
+			// if((int32_t)(r->rid - rid) >= 0) { np = MIN2(np, r); }
 
-			/* terminate if rid changed */
-			if(((int64_t)(_loadu_u64(&r->upos) - key)>>30) > 0) {
+			/* terminate if rid or sign (direction) changed */
+			if(_loadu_u64(&r->upos) - key >= _ofs(0)) {
 				debug("rid changed, (%llx, %llx)", _loadu_u64(&r->upos), key);
 				break;
 			}
 
 			/* test if r is inside the window */
-			if(!_inside(vlb, _v(r->apos, r->bpos), vub)) {
+			if(!_inside(vlb, r->vpos, vub)) {
 				/*np = MIN2(np, r);*/ continue;
 			}
 
 			/* update min */
-			debug("test pd(%d, %d)", pd, _p(&r->apos));
-			if(_p(&r->apos) < pd) {
+			debug("test pd(%d, %d)", pd, _ps(r));
+			if(_ps(r) < pd) {
 				nq = r;
-				pd = _p(&r->apos);
+				pd = _ps(r);
 			}
 
 			/* FIXME: update uub (this seems correct but needs further verified) */
-			uub = MIN2(uub, ubase + _p(&r->apos));
+			uub = MIN2(uub, ubase + _ps(r));
 			debug("updated uub(%d)", uub);
 		}
 
 		/* mark q as chained (is the root for the first itr), update q for the next itr */
-		q->rid = mid;							/* store mid, distinguished by its sign */
-		if(_unlikely(nq == t)) {
+		if(_unlikely(nq == t)) {				/* _unlikely to move the following block behind the execution path of the do-while loop */
+			q->mid = mid | cnt_mask;			/* tail seed is distinguished by its sign */
 			/* linkable seed not found, open a new bin for the chain */
 			uint32_t cid = self->chain.n++;
 			self->chain.a[cid] = (mm_chain_t){
-				.plen = _ofs(_p(&q->apos) - _p(&p->apos)),
-				.sid = ((int32_t)q->apos < 0 ? p : q) - self->seed.a
+				.plen = _ofs(_p(q) - _p(p)),
+				.sid = q - self->seed.a
 			};
 			debug("linkable seed not found, cid(%u), plen(%d), sid(%u)", cid, _ofs(self->chain.a[cid].plen), self->chain.a[cid].sid);
 
 			/* save rid and cid to map */
-			self->map.a[~mid] = (mm_map_t){
-				.rid = key>>32, .cid = cid
-			};
+			self->map.a[mid] = cid;
 			return(np);
 		}
 		debug("chain seed at i(%ld), rid(%u), (%d, %d), u(%d), v(%d), uub(%d)", nq - self->seed.a, nq->rid, nq->apos, nq->bpos, nq->upos, _v(nq->apos, nq->bpos), uub);
-		q = nq;
-	} while(((_loadu_u64(&q->upos) - key)>>30) == 0);
-
-	/* hit at the middle of the existing chain, shrink chain array by one */
-	uint32_t cid = self->map.a[~q->rid].cid;	/* load chain id */
-	self->map.a[~mid] = (mm_map_t){
-		.rid = key>>32, .cid = cid
-	};
+		q->mid = mid; q = nq;					/* a linkable seed found; save mid; nq holds the next seed */
+	} while(_loadu_u64(&q->upos) - key < _ofs(0) && _umask(q->mid) == 0);	/* retire if the next seed is the middle of an existing chain */
+	uint32_t cid = self->map.a[q->mid];			/* load chain id */
+	self->map.a[mid] = cid;						/* copy to the current bin */
 	debug("chain recorded, cid(%u), rid(%llu)", cid, key>>32);
 
-	/* update plen */
 	q = &self->seed.a[self->chain.a[cid].sid];	/* load tail of the joined chain */
-	uint32_t plen = _ofs(_p(&q->apos) - _p(&p->apos));
+	uint32_t plen = _ofs(_p(q) - _p(p));		/* update plen */
 	self->chain.a[cid].plen = MIN2(self->chain.a[cid].plen, plen);
 	return(np);
+}
+static _force_inline
+uint64_t mm_chain(
+	mm_tbuf_t *self)
+{
+	mm_seed_t *s = self->seed.a;
+	uint64_t cid = 0, n = self->seed.n, r = 0, nr;
+	do {
+		nr = n;
+		uint64_t p = r, np, key = _loadu_u64(&s[p].upos) + _ofs(0);
+		self->chain.a[++cid].len = 0;			/* long enough since used to collect minimizers */
+
+		if(_as(&s[p]) < self->twlen) { kv_push(margin, p); }
+		for(uint64_t q = p; q > 0 && s[q - 1].upos >= ulb; q--) {
+			if(_inside(vlb, s[q - 1].vpos, vub)) { cid--; break; }			/* branch at the middle of an existing chain */
+		}
+		do {
+			np = n;
+			uint32_t ulb = s[p].upos - self->twlen, vlb = s[p].vpos - self->twlen, vub = s[p].vpos, pd = UINT32_MAX;
+			uint32_t uub = s[p].upos + self->twlen, sid = p;
+			vlb = s[p].vpos; vub = s[p].vpos + self->twlen;
+			for(uint64_t q = p + 1; q < n && s[q].upos < uub; q++) {
+				if(_loadu_u64(&s[q].upos) >= key) { break; }				/* section changed */
+				if(s[q].prev == sid) { continue; }
+				if(!_inside(vlb, s[q].vpos, vub)) { nr = MIN2(nr, q); continue; }
+				if(_ps(&s[q]) < pd) { pd = _ps(&s[q]); np = q; }
+				s[q].prev = sid;
+			}
+			if(self->chain.a[cid].len < pd - _ps(&s[p])) {
+				self->chain.a[cid] = (mm_chain_t){ .sid = p, .len = pd - _ps(&s[p]) };
+			}
+		} while((p = np) < n);
+	} while((r = nr) < n);
+	return(cid + 1);
 }
 
 /**
@@ -3418,7 +3415,10 @@ void mm_circularize(
 	mm_tbuf_t *self)
 {
 	for(uint64_t i = 0; i < self->chain.n; i++) {
-		;
+		mm_seed_t *p = self->seed.a[self->chain.a[i].sid];
+
+
+
 	}
 	return;
 }
@@ -3429,25 +3429,27 @@ void mm_circularize(
  */
 static _force_inline
 uint64_t mm_chain(
-	mm_tbuf_t *self)
+	mm_tbuf_t *self,
+	uint64_t cnt)
 {
 	/* reserve space for map and chain */
 	kv_reserve(mm_map_t, self->map, self->map.n + self->seed.n);
 	kv_reserve(mm_chain_t, self->chain, self->chain.n + self->seed.n);
 
 	/* iterate over sorted seed array */
+	uint32_t const cnt_mask = (cnt + 1)<<24, cnt_base = 1<<24;
 	mm_seed_t *p = self->seed.a, *t = self->seed.a + self->seed.n;
 	while(p < t) {
 		/* pick up root at p, skip chained */
-		if((int32_t)p->rid < 0) { p++; continue; }
+		if(p->mid - cnt_base > cnt_mask) { p++; continue; }	/* mid == 0 || tail that is created in the previous iter */
 		debug("root seed at i(%ld), rid(%u), (%d, %d), u(%d), v(%d)", p - self->seed.a, p->rid, p->apos, p->bpos, p->upos, _v(p->apos, p->bpos));
 
-		p = mm_chain_core(self, p);
+		p = mm_chain_core(self, p, cnt_mask);
 	}
 	if(self->chain.n == 0) { return(0); }
 
 	/* connect chains over boundaries for circular references */
-	if(self->u.m.flag & MM_CIRCULAR) { mm_circularize(self); }
+	if(self->qid > 0x40000000) { mm_circularize(self); }
 
 	/* sort chain by length */
 	radix_sort_64x((v2u32_t *)self->chain.a, self->chain.n);
@@ -3467,37 +3469,28 @@ gaba_pos_pair_t mm_next(
 {
 	/* load seed array pointers */
 	mm_seed_t *p = *pp, *h = self->seed.a;
-	uint32_t const cid = self->map.a[~p->rid].cid;
-	uint32_t const rid = self->map.a[~p->rid].rid;
+	uint32_t const rid = p->rid, cid = self->map.a[p->mid];
 	uint32_t const ub = _u(cp.apos, cp.bpos);
 
 	/* skip covered, FIXME: use binary search for better performance */
-	while(--p >= h && p->upos > ub && self->map.a[~p->rid].rid == rid) {}
+	while(--p >= h && p->upos > ub && p->rid == rid) {}
 
 	debug("search start i(%ld)", p - h);
 
 	/* test uncovered */
-	while(p >= h && _p(&p->apos) >= ppos && self->map.a[~p->rid].rid == rid) {
-		debug("test i(%ld), cid(%u, %u), (%d, %d), u(%d)", p - h, self->map.a[~p->rid].cid, cid, p->apos, p->bpos, p->upos);
-		if(self->map.a[~p->rid].cid != cid) { p--; continue; }
+	while(p >= h && _p(&p->apos) >= ppos && p->rid == rid) {
+		debug("test i(%ld), cid(%u, %u), (%d, %d), u(%d)", p - h, self->map.a[p->mid], cid, p->apos, p->bpos, p->upos);
+		if(self->map.a[p->mid] != cid) { p--; continue; }
 
 		/* hit */
 		debug("found next seed at i(%ld), (%d, %d), (%d, %d), u(%d)", p - h, p->apos, p->bpos, p->apos, p->bpos + (_smask(p->bpos) & self->adj), p->upos);
 		*pp = p;				/* write back pointer */
-
-		int32_t rev = _smask(p->bpos);
-		return((gaba_pos_pair_t){
-			.apos = p->apos,
-			.bpos = p->bpos + (rev & self->adj)
-		});
+		return((gaba_pos_pair_t){ .apos = _as(p), .bpos = _bs(p) });
 	}
 
 	/* not found */
 	debug("not found");
-	return((gaba_pos_pair_t){
-		.apos = INT32_MIN,
-		.bpos = INT32_MIN
-	});
+	return((gaba_pos_pair_t){ .apos = INT32_MIN, .bpos = INT32_MIN });
 }
 
 /**
@@ -3637,7 +3630,7 @@ gaba_fill_t const *mm_extend_core(
 			goto _mm_extend_core_abort;
 		}
 		debug("fill, max(%lld, %lld), status(%x)", f->max, m->max, f->stat);
-		m = (f->max > m->max)? f : m;
+		m = f->max > m->max ? f : m;
 	}
 	return(m);									/* never be null */
 
@@ -3651,7 +3644,8 @@ _mm_extend_core_abort:							/* out-of-memory in libgaba */
  */
 static _force_inline
 uint64_t mm_extend(
-	mm_tbuf_t *self)
+	mm_tbuf_t *self,
+	uint64_t i)
 {
 	uint8_t const *lim = (uint8_t const *)0x800000000000;
 
@@ -3662,23 +3656,16 @@ uint64_t mm_extend(
 		int32_t plen = _ofs(self->chain.a[k].plen);
 		if(plen /* self->m*/ < self->u.m.min_score) { continue; }
 
-		int32_t rev = _smask(p->bpos);
-		gaba_pos_pair_t cp = {
-			.apos = p->apos,
-			.bpos = p->bpos + (rev & self->adj)
-		};
-		// qs = rev ? (int32_t)(qf->len - (qs ^ rev) + k - 1) : qs;
-		// qs = rev ? (int32_t)(qf->len + qs + k) : qs;
+		gaba_pos_pair_t cp = { .apos = _as(p), .bpos = _bs(p) };
+		int32_t rev = _smask(cp.bpos);
 
 		/* load ref */
-		uint32_t rid = self->map.a[~p->rid].rid;
-		mm_idx_seq_t const *ref = &self->u.mi.s[rid];
-		self->rid = rid;
-		self->r[0] = _sec_fw(rid, ref->seq, ref->l_seq);
-		self->r[1] = _sec_rv(rid, ref->seq, ref->l_seq);
-		self->rtp = _is_circular(ref) ? self->r : self->t;
-
-		debug("chain(%llu), cid(%u), rev(%d), plen(%d), (%u, %u), (%d, %d), (%d, %d)", k, self->map.a[~p->rid].cid, rev, plen, self->rid, self->qid, p->apos, p->bpos, cp.apos, cp.bpos);
+		mm_idx_seq_t const *ref = &self->u.mi.s[p->rid];
+		self->rid = p->rid;
+		self->r[0] = _sec_fw(p->rid, ref->seq, ref->l_seq);
+		self->r[1] = _sec_rv(p->rid, ref->seq, ref->l_seq);
+		self->rtp = ref->circular ? self->r : self->t;
+		debug("chain(%llu), cid(%u), rev(%d), plen(%d), (%u, %u), (%d, %d), (%d, %d)", k, self->map.a[p->mid], rev, plen, self->rid, self->qid, p->apos, p->bpos, cp.apos, cp.bpos);
 
 		/* open result bin */
 		uint32_t bid = kv_pushm(void *, self->bin, (void **)&((mm_bin_t){ .lb = UINT32_MAX }), MM_BIN_N);
@@ -3724,7 +3711,7 @@ uint64_t mm_extend(
 					.bpos = self->q[0].len - tp.bpos - 1
 				})
 			);
-			if(t->max < self->u.m.min_score) {		/* max == 0 indicates alignment was not found */
+			if(t->max < self->u.m.min_score) {	/* max == 0 indicates alignment was not found */
 				mm_mark_pos(self, tp);			/* mark evaluated but not found */
 				continue;
 			}
@@ -3986,13 +3973,12 @@ void mm_init_query(
 	self->resc.n = 0;
 	self->seed.n = 0;
 	self->map.n = 0;
-	self->chain.n = 0;
+	self->chain.n = 0; /* self->chain.a[0] = 0; */	/* left unused */
 	self->bin.n = 0;
 	kh_clear(&self->pos);
 	self->n_res = 0;
 
 	/* set query seq info */
-	self->adj = l_seq + self->u.mi.c.k - 1;
 	self->qid = qid;
 	self->q[0] = _sec_fw(qid, seq, l_seq);
 	self->q[1] = _sec_rv(qid, seq, l_seq);
@@ -4027,8 +4013,8 @@ mm_reg_t const *mm_align_seq(
 	debug("n_occ(%u)", self->u.mi.c.n_occ);
 	for(uint64_t i = 0; i < self->u.mi.c.n_occ; i++) {
 		if(mm_seed(self, i) == 0) { continue; }	/* seed not found */
-		if(mm_chain(self) == 0) { continue; }	/* chain not found */
-		if(mm_extend(self) > 0) { break; }		/* at least one full-length alignment found */
+		if(mm_chain(self, i) == 0) { continue; }/* chain not found */
+		if(mm_extend(self, i) > 0) { break; }	/* at least one full-length alignment found */
 	}
 	if(self->n_res == 0) { return(NULL); }		/* unmapped */
 
@@ -4058,6 +4044,77 @@ mm_reg_t const *mm_align_seq(
 	/* allocate reg array from memory arena */
 	return(mm_pack_reg(self, n_all, n_uniq));
 }
+
+/**
+ * @fn mm_tbuf_destroy
+ * @brief destroy thread-local buffer
+ */
+static _force_inline
+void mm_tbuf_destroy(mm_tbuf_t *t)
+{
+	if(t == NULL) { return; }
+	free(t->resc.a);
+	free(t->seed.a);
+	free(t->map.a);
+	free(t->chain.a);
+	free(t->bin.a);
+	kh_destroy_static(&t->pos);
+	gaba_dp_clean(t->u.g.dp);
+	free(t);
+}
+
+/**
+ * @fn mm_tbuf_init
+ * @brief create thread-local working buffer
+ */
+static _force_inline
+mm_tbuf_t *mm_tbuf_init(mm_tbuf_params_t *u)
+{
+	mm_tbuf_t *t = (mm_tbuf_t *)calloc(1, sizeof(mm_tbuf_t));
+	uint8_t const *lim = (uint8_t const *)0x800000000000;
+
+	/* init dp context and copy constants */
+	*t = (mm_tbuf_t){
+		.u = *u,
+		.t[0] = _sec_fw(0xfffffffe, t->tail, 32)			/* tail section */
+	};
+	t->u.g.dp = gaba_dp_init(u->g.ctx, lim, lim);
+	if(t->u.g.dp == NULL) { goto _fail; }
+
+	/* miscellaneous */
+	memset(t->tail, N, 96);									/* tail seq array */
+	t->qtp = &t->q[1];										/* query tail section info pointer */
+	kh_init_static(&t->pos, 128);							/* init hash */
+	return(t);
+_fail:
+	mm_tbuf_destroy(t);
+	return(NULL);
+}
+/* end of map.c */
+/* mtmap.c */
+/**
+ * @struct mm_align_step_t
+ * @brief batch object, placed in the unused space at the head of bseq_t
+ */
+typedef struct {
+	uint32_t id, base_qid;
+	lmm_t *lmm;						/* alignment result container (local memory allocator) */
+} mm_align_step_t;
+
+/**
+ * @struct mm_align_s
+ * @brief alignment pipeline context
+ */
+struct mm_align_s {
+	bseq_file_t *fp;				/* input, set at the head of mm_align_file */
+	mm_tbuf_params_t u;				/* mapper */
+	mm_print_t *pr;					/* output */
+	/* streaming */
+	uint32_t icnt, ocnt;
+	kvec_t(v4u32_t) hq;
+	pt_t *pt;
+	mm_tbuf_t *t[];					/* mm_tbuf_t* array at the tail */
+};
 
 /**
  * @fn mm_align_source
@@ -4109,7 +4166,7 @@ void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 	bseq_t *r = (bseq_t *)s;
 	for(uint64_t i = 0; i < r->n_seq; i++) {
 		mm_reg_t *reg = (mm_reg_t *)r->seq[i].u.reg;
-		b->p->mapped(b->p, b->u.mi.s, &r->seq[i], reg);	/* mapped */
+		mm_print_mapped(b->pr, b->u.mi.s, &r->seq[i], reg);	/* mapped */
 		lmm_free(s->lmm, reg);					/* FIXME: gaba_alignment_t objects must be freed by gaba_dp_res_free */
 	}
 	free(r->base);
@@ -4128,63 +4185,13 @@ void mm_align_drain(uint32_t tid, void *arg, void *item)
 	mm_align_t *b = (mm_align_t *)arg;
 	mm_align_step_t *s = (mm_align_step_t*)item;
 
-	#if STRICT_STREAM_ORDERING != 0
-		kv_hq_push(v4u32_t, incq_comp, b->hq, ((v4u32_t){.u64 = {s->id, (uintptr_t)s}}));
-		while(b->hq.n > 1 && b->hq.a[1].u64[0] == b->ocnt) {
-			b->ocnt++;
-			s = (mm_align_step_t*)kv_hq_pop(v4u32_t, incq_comp, b->hq).u64[1];
-			mm_align_drain_intl(b, s);
-		}
-	#else
+	kv_hq_push(v4u32_t, incq_comp, b->hq, ((v4u32_t){.u64 = {s->id, (uintptr_t)s}}));
+	while(b->hq.n > 1 && b->hq.a[1].u64[0] == b->ocnt) {
+		b->ocnt++;
+		s = (mm_align_step_t*)kv_hq_pop(v4u32_t, incq_comp, b->hq).u64[1];
 		mm_align_drain_intl(b, s);
-	#endif
+	}
 	return;
-}
-
-/**
- * @fn mm_tbuf_destroy
- * @brief destroy thread-local buffer
- */
-static _force_inline
-void mm_tbuf_destroy(mm_tbuf_t *t)
-{
-	if(t == NULL) { return; }
-	free(t->resc.a);
-	free(t->seed.a);
-	free(t->map.a);
-	free(t->chain.a);
-	free(t->bin.a);
-	kh_destroy_static(&t->pos);
-	gaba_dp_clean(t->u.g.dp);
-	free(t);
-}
-
-/**
- * @fn mm_tbuf_init
- * @brief create thread-local working buffer
- */
-static _force_inline
-mm_tbuf_t *mm_tbuf_init(mm_tbuf_params_t *u)
-{
-	mm_tbuf_t *t = (mm_tbuf_t *)calloc(1, sizeof(mm_tbuf_t));
-	uint8_t const *lim = (uint8_t const *)0x800000000000;
-
-	/* init dp context and copy constants */
-	*t = (mm_tbuf_t){
-		.u = *u,
-		.t[0] = _sec_fw(0xfffffffe, t->tail, 32)			/* tail section */
-	};
-	t->u.g.dp = gaba_dp_init(u->g.ctx, lim, lim);
-	if(t->u.g.dp == NULL) { goto _fail; }
-
-	/* miscellaneous */
-	memset(t->tail, N, 96);									/* tail seq array */
-	t->qtp = &t->q[1];										/* query tail section info pointer */
-	kh_init_static(&t->pos, 128);							/* init hash */
-	return(t);
-_fail:
-	mm_tbuf_destroy(t);
-	return(NULL);
 }
 
 /**
@@ -4197,7 +4204,7 @@ void mm_align_destroy(mm_align_t *b)
 	if(b == NULL) { return; }
 
 	/* destroy threads */
-	for(void **p = b->t; *p; p++) { mm_tbuf_destroy((mm_tbuf_t *)*p); }
+	for(mm_tbuf_t **p = (mm_tbuf_t **)b->t; *p; p++) { mm_tbuf_destroy(*p); }
 
 	/* destroy contexts */
 	kv_hq_destroy(b->hq);
@@ -4241,7 +4248,7 @@ mm_align_t *mm_align_init(mm_align_params_t const *a, mm_idx_t const *mi, pt_t *
 
 	/* initialize threads */
 	for(uint64_t i = 0; i < pt_nth(pt); i++) {
-		if((b->t[i] = (void *)mm_tbuf_init(b)) == 0) { goto _fail; }
+		if((b->t[i] = (void *)mm_tbuf_init(&b->u)) == 0) { goto _fail; }
 	}
 	return(b);
 _fail:
@@ -4254,42 +4261,40 @@ _fail:
  * @brief multithreaded alignment high-level interface
  */
 static _force_inline
-int mm_align_file(mm_align_t *b, bseq_file_t *fp, mm_printer_t *printer)
+int mm_align_file(mm_align_t *b, bseq_file_t *fp, mm_print_t *pr)
 {
-	if(fp == NULL || printer == NULL) { return(-1); }
-	b->fp = fp;					/* input */
-	b->printer = printer;		/* output */
-	/* multithreaded mapping */
-	return(pt_stream(b->pt,
+	if(fp == NULL || pr == NULL) { return(-1); }
+	b->fp = fp; b->pr = pr;		/* input and output */
+	mm_print_header(pr, b->s);
+	return(pt_stream(b->pt,		/* multithreaded mapping */
 		mm_align_source, b,
 		mm_align_worker, (void **)b->t,
 		mm_align_drain, b)
 	);
 }
-/* end of map.c */
+/* end of mtmap.c */
 
 /* printer.c */
-
+/**
+ * @struct mm_print_t
+ */
+struct mm_print_s {
+	uint8_t *base, *tail, *p;
+	uint8_t conv[40];				/* binary -> string conv table */
+	void (*mapped)(mm_print_t *, mm_idx_seq_t const *, bseq_seq_t const *, mm_reg_t const *);	/* nreg contains #regs in lower 32bit, #uniq in higher 32bit */
+	uint64_t tags;					/* sam optional tags */
+	char *arg_line;
+	char *rg_line, *rg_id;
+};
 
 /**
- * @fn mm_printer_destroy
+ * @struct mm_print_fn_t
+ * @brief alignment result (record) printer interface
  */
-static _force_inline
-void mm_printer_destroy(
-	mm_printer_t *e)
-{
-	return;
-}
-
-/**
- * @fn mm_printer_init
- */
-static _force_inline
-mm_printer_t *mm_printer_init(
-	mm_opt_t const *o)
-{
-	;
-}
+typedef struct {
+	void (*header)(mm_print_t *, mm_print_params_t *);
+	void (*mapped)(mm_print_t *, mm_idx_t const *, bseq_seq_t const *, mm_reg_t const *);	/* nreg contains #regs in lower 32bit, #uniq in higher 32bit */
+} mm_print_fn_t;
 
 /**
  * @struct mm_tmpbuf_t
@@ -4541,7 +4546,7 @@ typedef struct {
 static
 int mm_cigar_printer(void *_b, int64_t len, char c)
 {
-	mm_align_t *b = (mm_align_t *)_b;
+	mm_print_t *b = (mm_print_t *)_b;
 	if(len < 41) {
 		_flush(b, 16);
 		*b->p++ = (b->conv[len-1]&0x0f) + '0';
@@ -4560,7 +4565,7 @@ int mm_cigar_printer(void *_b, int64_t len, char c)
  */
 static _force_inline
 uint64_t mm_print_sam_num(
-	mm_align_t *b,
+	mm_print_t *b,
 	uint8_t type,
 	uint8_t const *p)
 {
@@ -4589,7 +4594,7 @@ uint64_t mm_print_sam_num(
  */
 static _force_inline
 void mm_restore_sam_tags(
-	mm_align_t *b,
+	mm_print_t *b,
 	bseq_seq_t const *t)
 {
 	static uint8_t const tag_size[32] = {
@@ -4633,8 +4638,7 @@ void mm_restore_sam_tags(
  * @brief print sam header
  */
 static
-void mm_print_sam_header(
-	mm_align_t *b)
+void mm_print_sam_header(mm_print_t *b, mm_print_params_t *p)
 {
 	mm_idx_t const *mi = &b->a.mi;
 	/* header */
@@ -4670,28 +4674,18 @@ void mm_print_sam_header(
  */
 static
 void mm_print_sam_unmapped(
-	mm_align_t *b,
+	mm_print_t *b,
 	bseq_seq_t const *t)
 {
-	/* print name */
-	_putsn(b, t->name, t->l_name);
-
-	/* unmapped fixed string */
-	_putsk(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");
-
-	/* sequence */
-	_putsnt(b, t->seq, t->l_seq, decaf);
-	_t(b);
-
-	/* quality if available */
-	if(t->qual[0] != '\0') {
+	_putsn(b, t->name, t->l_name);					/* print name */
+	_putsk(b, "\t4\t*\t0\t0\t*\t*\t0\t0\t");		/* unmapped fixed string */
+	_putsnt(b, t->seq, t->l_seq, decaf); _t(b);		/* sequence */
+	if(t->qual[0] != '\0') {						/* quality if available */
 		_putsn(b, t->qual, t->l_seq);
 	} else {
 		_put(b, '*');
 	}
-
-	/* tags */
-	mm_restore_sam_tags(b, t); _cr(b);
+	mm_restore_sam_tags(b, t); _cr(b);				/* tags */
 	return;
 }
 
@@ -4700,7 +4694,7 @@ void mm_print_sam_unmapped(
  */
 static _force_inline
 void mm_print_sam_mapped_core(
-	mm_align_t *b,
+	mm_print_t *b,
 	mm_idx_seq_t const *r,
 	bseq_seq_t const *t,
 	mm_aln_t const *a,
@@ -4759,7 +4753,7 @@ void mm_print_sam_mapped_core(
  */
 static _force_inline
 void mm_print_sam_supp(
-	mm_align_t *b,
+	mm_print_t *b,
 	mm_idx_seq_t const *r,
 	bseq_seq_t const *t,
 	mm_aln_t const *a)
@@ -4791,7 +4785,7 @@ void mm_print_sam_supp(
  */
 static _force_inline
 void mm_print_sam_md(
-	mm_align_t *b,
+	mm_print_t *b,
 	mm_idx_seq_t const *r,
 	bseq_seq_t const *t,
 	mm_aln_t const *a)
@@ -4885,7 +4879,7 @@ void mm_print_sam_md(
  */
 static _force_inline
 void mm_print_sam_general_tags(
-	mm_align_t *b,
+	mm_print_t *b,
 	mm_aln_t const *a,
 	uint32_t n_reg,
 	uint64_t j)
@@ -4926,7 +4920,8 @@ void mm_print_sam_general_tags(
  */
 static _force_inline
 uint64_t mm_print_sam_primary_tags(
-	mm_align_t *b,
+	mm_print_t *b,
+	mm_idx_seq_t const *ref,
 	bseq_seq_t const *t,				/* query sequence */
 	mm_reg_t const *reg)			/* alignments, 1..n_uniq is printed in SA */
 {
@@ -4948,7 +4943,7 @@ uint64_t mm_print_sam_primary_tags(
 		for(uint64_t i = 1; i < reg->n_uniq; i++) {
 			mm_aln_t const *a = reg->aln[i];
 			uint32_t rid = a->a->seg->aid>>1;
-			mm_idx_seq_t const *r = &mi->s[rid];
+			mm_idx_seq_t const *r = &ref[rid];
 
 			mm_print_sam_supp(b, r, t, a);
 		}
@@ -4965,10 +4960,12 @@ uint64_t mm_print_sam_primary_tags(
  */
 static
 void mm_print_sam_mapped(
-	mm_align_t *b,
+	mm_print_t *b,
+	mm_idx_seq_t const *ref,
 	bseq_seq_t const *t,
 	mm_reg_t const *reg)
 {
+	if(reg == NULL) { mm_print_sam_unmapped(b, t); }
 	mm_idx_t const *mi = &b->a.mi;
 
 	/* iterate over alignment sets */
@@ -4980,7 +4977,7 @@ void mm_print_sam_mapped(
 
 		mm_aln_t const *a = reg->aln[i];
 		uint32_t rid = a->a->seg->aid>>1;
-		mm_idx_seq_t const *r = &mi->s[rid];
+		mm_idx_seq_t const *r = &ref[rid];
 
 		/* print body */
 		mm_print_sam_mapped_core(b, r, t, a, flag);
@@ -5008,7 +5005,7 @@ void mm_print_sam_mapped(
  */
 static _force_inline
 void mm_print_maf_mapped_ref(
-	mm_align_t *b,
+	mm_print_t *b,
 	mm_aln_t const *a,
 	uint8_t const *rp)
 {
@@ -5044,7 +5041,7 @@ void mm_print_maf_mapped_ref(
  */
 static _force_inline
 void mm_print_maf_query_forward(
-	mm_align_t *b,
+	mm_print_t *b,
 	mm_aln_t const *a,
 	uint8_t const *qp)
 {
@@ -5081,7 +5078,7 @@ void mm_print_maf_query_forward(
  */
 static _force_inline
 void mm_print_maf_query_reverse(
-	mm_align_t *b,
+	mm_print_t *b,
 	mm_aln_t const *a,
 	uint8_t const *qp)
 {
@@ -5118,7 +5115,7 @@ void mm_print_maf_query_reverse(
  */
 static _force_inline
 void mm_print_maf_mapped_core(
-	mm_align_t *b,
+	mm_print_t *b,
 	mm_idx_seq_t const *r,
 	bseq_seq_t const *t,
 	mm_aln_t const *a)
@@ -5174,7 +5171,8 @@ void mm_print_maf_mapped_core(
  */
 static
 void mm_print_maf_mapped(
-	mm_align_t *b,
+	mm_print_t *b,
+	mm_idx_seq_t const *ref,
 	bseq_seq_t const *t,
 	mm_reg_t const *reg)
 {
@@ -5183,7 +5181,7 @@ void mm_print_maf_mapped(
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
 		uint32_t rid = a->a->seg->aid>>1;
-		mm_idx_seq_t const *r = &mi->s[rid];
+		mm_idx_seq_t const *r = &ref[rid];
 
 		mm_print_maf_mapped_core(b, r, t, a);
 	}
@@ -5197,7 +5195,8 @@ void mm_print_maf_mapped(
  */
 static
 void mm_print_blast6_mapped(
-	mm_align_t *b,
+	mm_print_t *b,
+	mm_idx_seq_t const *ref,
 	bseq_seq_t const *t,
 	mm_reg_t const *reg)
 {
@@ -5206,7 +5205,7 @@ void mm_print_blast6_mapped(
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
 		const gaba_path_section_t *s = &a->a->seg[0];
-		mm_idx_seq_t const *r = &mi->s[s->aid>>1];
+		mm_idx_seq_t const *r = &ref[s->aid>>1];
 
 		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
 		int32_t mid = 100000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
@@ -5239,113 +5238,14 @@ void mm_print_blast6_mapped(
 }
 
 /**
- * @fn mm_print_blasr1_mapped
- * @brief blasr.m1 format
- * qname rname qd rd score idt rs re rl qs qe ql #cells
- */
-static
-void mm_print_blasr1_mapped(
-	mm_align_t *b,
-	bseq_seq_t const *t,
-	mm_reg_t const *reg)
-{
-	mm_idx_t const *mi = &b->a.mi;
-	uint64_t const n = (b->a.m.flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
-	for(uint64_t i = 0; i < n; i++) {
-		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->seg[0];
-		mm_idx_seq_t const *r = &mi->s[s->aid>>1];
-
-		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
-		int32_t mid = 1000000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
-		// uint32_t rs = s->bid & 0x01 ? r->l_seq - s->apos - s->alen : s->apos, re = rs + s->alen;
-		uint32_t rs = s->apos, re = s->apos + s->alen;
-		uint32_t qs = s->bid & 0x01 ? t->l_seq - s->bpos - s->blen : s->bpos, qe = qs + s->blen;
-
-		/* sequence names */
-		_putsn(b, t->name, t->l_name); _sp(b);
-		_putsn(b, _name(r), _l_name(r)); _sp(b);
-
-		/* directions */
-		_put(b, '0'); _sp(b);
-		_putdn(b, s->bid); _sp(b);
-
-		/* score in negative, identity */
-		_put(b, '-'); _putn(b, a->a->score); _sp(b);
-		_putfi(int32_t, b, mid, 4); _sp(b);
-
-		/* positions and lengths */
-		_putn(b, rs); _sp(b);
-		_putn(b, re); _sp(b);
-		_putn(b, r->l_seq); _sp(b);
-		_putn(b, qs); _sp(b);
-		_putn(b, qe); _sp(b);
-		_putn(b, t->l_seq); _sp(b);
-
-		/* #cells, always zero */
-		_put(b, '0'); _cr(b);
-	}
-	return;
-}
-
-/**
- * @fn mm_print_blasr4_mapped
- * @brief blasr.m4 format
- * qname rname score idt qd qs qe ql rd rs re rl mapq
- */
-static
-void mm_print_blasr4_mapped(
-	mm_align_t *b,
-	bseq_seq_t const *t,
-	mm_reg_t const *reg)
-{
-	mm_idx_t const *mi = &b->a.mi;
-	uint64_t const n = (b->a.m.flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
-	for(uint64_t i = 0; i < n; i++) {
-		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->seg[0];
-		mm_idx_seq_t const *r = &mi->s[s->aid>>1];
-
-		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
-		int32_t mid = 1000000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
-		// uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
-		uint32_t rs = s->apos, re = s->apos + s->alen;
-		uint32_t qs = s->bid & 0x01 ? t->l_seq - s->bpos - s->blen : s->bpos, qe = qs + s->blen;
-
-		/* sequence names */
-		_putsn(b, t->name, t->l_name); _sp(b);
-		_putsn(b, _name(r), _l_name(r)); _sp(b);
-
-		/* score in negative, identity */
-		_put(b, '-'); _putn(b, a->a->score); _sp(b);
-		_putfi(int32_t, b, mid, 4); _sp(b);
-
-		/* query-side */
-		_put(b, '0'); _sp(b);
-		_putn(b, qs); _sp(b);
-		_putn(b, qe); _sp(b);
-		_putn(b, t->l_seq); _sp(b);
-
-		/* reference-side */
-		_putdn(b, s->bid); _sp(b);
-		_putn(b, rs); _sp(b);
-		_putn(b, re); _sp(b);
-		_putn(b, r->l_seq); _sp(b);
-
-		/* mapping quality */
-		_putn(b, (a->mapq>>(MAPQ_DEC - 2)) + ((a->mapq>>(MAPQ_DEC + 2)) & ~0x01)); _cr(b);
-	}
-	return;
-}
-
-/**
  * @fn mm_print_paf_mapped
  * @brief minimap paf format
  * qname ql qs qe qd rname rl rs re #m block_len mapq
  */
 static
 void mm_print_paf_mapped(
-	mm_align_t *b,
+	mm_print_t *b,
+	mm_idx_seq_t const *ref,
 	bseq_seq_t const *t,
 	mm_reg_t const *reg)
 {
@@ -5354,7 +5254,7 @@ void mm_print_paf_mapped(
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
 		const gaba_path_section_t *s = &a->a->seg[0];
-		mm_idx_seq_t const *r = &mi->s[s->aid>>1];
+		mm_idx_seq_t const *r = &ref[s->aid>>1];
 
 		uint32_t dcnt = (a->a->plen - a->a->gecnt)>>1;			/* #matches + #mismatches */
 		uint32_t rs = s->apos, re = s->apos + s->alen;
@@ -5386,100 +5286,6 @@ void mm_print_paf_mapped(
 	}
 	return;
 }
-
-/**
- * @fn mm_print_mhap_mapped
- * @brief MHAP format
- * qname rname 1-idt score qd qs qe ql rd rs rd rl
- */
-static
-void mm_print_mhap_mapped(
-	mm_align_t *b,
-	bseq_seq_t const *t,
-	mm_reg_t const *reg)
-{
-	mm_idx_t const *mi = &b->a.mi;
-	uint64_t const n = (b->a.m.flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
-	for(uint64_t i = 0; i < n; i++) {
-		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->seg[0];
-		mm_idx_seq_t const *r = &mi->s[s->aid>>1];
-
-		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
-		int32_t merr = 10000.0 * (1.0 - (double)(dcnt - a->a->xcnt) / (double)slen);	/* error rate */
-		// uint32_t rs = s->bid&0x01? r->l_seq-s->apos-s->alen : s->apos, re = rs+s->alen;
-		uint32_t rs = s->apos, re = s->apos + s->alen;
-		uint32_t qs = s->bid & 0x01 ? t->l_seq - s->bpos - s->blen : s->bpos, qe = qs + s->blen;
-
-		_putsn(b, t->name, t->l_name); _sp(b);			/* qname */
-		_putsn(b, _name(r), _l_name(r)); _sp(b);		/* rname */
-		_putfi(int32_t, b, merr, 4); _sp(b);			/* identity */
-		_putn(b, a->a->score); _sp(b);					/* score */
-
-		/* query-side pos and direction */
-		_put(b, '0'); _sp(b);
-		_putn(b, qs); _sp(b);
-		_putn(b, qe); _sp(b);
-		_putn(b, t->l_seq); _sp(b);
-
-		/* reference-side pos and direction */
-		_putdn(b, s->bid); _sp(b);
-		_putn(b, rs); _sp(b);
-		_putn(b, re); _sp(b);
-		_putn(b, r->l_seq); _cr(b);
-	}
-	return;
-}
-
-/**
- * @fn mm_print_falcon_mapped
- * @brief falcon_sense input format
- */
-static
-void mm_print_falcon_mapped(
-	mm_align_t *b,
-	bseq_seq_t const *t,
-	mm_reg_t const *reg)
-{
-	/* print header line (name seq) */
-	_putsn(b, t->name, t->l_name); _sp(b);
-	_putsnt(b, t->seq, t->l_seq, decaf); _cr(b);
-	
-	/* print alignment lines */
-	mm_idx_t const *mi = &b->a.mi;
-	uint64_t const n = (b->a.m.flag & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
-	for(uint64_t i = 0; i < n; i++) {
-		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->seg[0];
-		mm_idx_seq_t const *r = &mi->s[s->aid>>1];
-
-		// uint32_t qs = r->l_seq-s->apos-s->alen, qe = r->l_seq-s->apos;
-		uint32_t qs = s->apos, qe = s->apos + s->alen;
-
-		/* name seq */
-		_putsn(b, _name(r), _l_name(r)); _sp(b);
-		if(s->bid & 0x01) {
-			_putsntr(b, &r->seq[r->l_seq-qe], qe-qs, decar);
-		} else {
-			_putsnt(b, &r->seq[qs], qe-qs, decaf);
-		}
-		_cr(b);
-	}
-	_put(b, '+'); _sp(b); _put(b, '+'); _cr(b);
-	return;
-}
-
-/**
- * @fn mm_print_falcon_footer
- */
-static
-void mm_print_falcon_footer(
-	mm_align_t *b)
-{
-	_put(b, '-'); _sp(b); _put(b, '-'); _cr(b);
-	return;
-}
-
 #undef _d
 #undef _t
 #undef _c
@@ -5487,6 +5293,76 @@ void mm_print_falcon_footer(
 #undef _sp
 #undef _aln
 
+/**
+ * @fn mm_print_tag2flag
+ */
+static _force_inline
+uint64_t mm_print_tag2flag(
+	uint64_t n_tag,
+	uint16_t const *tag)
+{
+	uint64_t f = 0;
+	#define _t(_str)		{ if(mm_encode_tag(#_str) == *p) { f |= 0x01ULL<<MM_##_str; } }
+	for(uint16_t *p = tag, *t = &tag[n_tag]; p < t; p++) {
+		_t(RG) _t(CO) _t(NH) _t(IH) _t(AS) _t(XS) _t(NM) _t(SA) _t(MD)
+	}
+	return(f);
+	#undef _t
+}
+
+/**
+ * @fn mm_print_destroy
+ */
+static _force_inline
+void mm_print_destroy(
+	mm_print_t *pr)
+{
+	fwrite(pr->base, sizeof(uint8_t), pr->p - pr->base, stdout);
+	free(pr->base); free(pr);
+	return;
+}
+
+/**
+ * @fn mm_print_init
+ */
+static _force_inline
+mm_print_t *mm_print_init(
+	mm_print_params_t const *r)
+{
+	static const mm_print_fn_t printer[] = {
+		[MM_SAM] = { .header = mm_print_sam_header, .mapped = mm_print_sam_mapped },
+		[MM_MAF] = { .mapped = mm_print_maf_mapped },
+		[MM_PAF] = { .mapped = mm_print_paf_mapped },
+		[MM_BLAST6] = { .mapped = mm_print_blast6_mapped }
+	};
+	mm_print_t *pr = calloc(1, sizeof(mm_print_t));
+	void *p = malloc(sizeof(uint8_t) * r->outbuf_size);
+	*pr = {
+		.p = p; .base = p; .tail = p + r->outbuf_size;
+		.tags = mm_print_tag2flag(r->n_tag, r->tag),
+		.fn = printer[r->format],
+		.arg_line = mm_strdup(r->arg_line),
+		.rg_line = mm_strdup(r->rg_line),
+		.rg_id = mm_strdup(r->rg_id)
+	};
+	for(uint64_t i = 0; i < 9; ++i) { pr->conv[i] = (i + 1) % 10; }
+	for(uint64_t i = 9; i < 40; ++i) { pr->conv[i] = (((i + 1) % 10)<<4) + (i + 1) / 10; }
+	return(pr);
+}
+
+/* function dispatchers */
+static _force_inline
+void mm_print_header(mm_print_t *b, mm_idx_seq_t const *ref)
+{
+	if(b->fn.header) { b->fn.header(b, ref); }
+	return;
+}
+static _force_inline
+void mm_print_mapped(mm_print_t *b, mm_idx_seq_t const *ref, bseq_seq_t const *t, mm_reg_t const *reg)
+{
+	b->fn.mapped(b, ref, t, reg);
+	return;
+}
 /* end of printer.c */
 
 /* main.c */
@@ -5508,9 +5384,9 @@ void liftrlimit()
 
 /**
  * @macro mm_split_foreach
- * @brief split string and pass to _body.
+ * @brief split string into tokens and pass each to _body.
  * p, len, and i are reserved for pointer, length, and #parsed.
- * break and continue can be used to terminate / skip the current element.
+ * break / continue can be used in the _body to terminate / skip the current element.
  */
 #define mm_split_foreach(_ptr, _delims, _body) { \
 	char const *_q = (_ptr); \
@@ -5533,33 +5409,6 @@ void liftrlimit()
  */
 #define oassert(_o, _cond, ...) { \
 	if(!(_cond)) { (_o)->log(_o, 'E', __func__, __VA_ARGS__); o->ecnt++; } \
-}
-/**
- * @macro mm_encode_tag
- * @brief map tag string to 16-bit int
- */
-#define mm_encode_tag(p)		( (uint16_t)p[0] | ((uint16_t)p[1]<<8) )
-
-/**
- * @fn mm_opt_tag2flag
- */
-static _force_inline
-uint64_t mm_opt_tag2flag(
-	mm_opt_t *o,
-	uint16_t t)
-{
-	#define _test(_str) ( mm_encode_tag(_str) == t )
-	if(_test("RG")) { return(0x01ULL<<MM_RG); }
-	if(_test("CO")) { return(0x01ULL<<MM_CO); }
-	if(_test("NH")) { return(0x01ULL<<MM_NH); }
-	if(_test("IH")) { return(0x01ULL<<MM_IH); }
-	if(_test("AS")) { return(0x01ULL<<MM_AS); }
-	if(_test("XS")) { return(0x01ULL<<MM_XS); }
-	if(_test("NM")) { return(0x01ULL<<MM_NM); }
-	if(_test("SA")) { return(0x01ULL<<MM_SA); }
-	if(_test("MD")) { return(0x01ULL<<MM_MD); }
-	return(0);
-	#undef _test
 }
 
 /**
@@ -5636,7 +5485,7 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 				_pre("2d", "", NULL)
 			)
 		),
-		_pre("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50, -s30 -r0.05", NULL),
+		_pre("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05", NULL),
 		NULL
 	};
 	#undef _pre
@@ -5744,7 +5593,7 @@ static void mm_opt_base_id(mm_opt_t *o, char const *arg) {
 static void mm_opt_circular(mm_opt_t *o, char const *arg) {
 	if(kh_str_ptr(o->a.circ) == NULL) { kh_str_init_static(&o->a.circ, 128); }
 	o->a.m.flag |= MM_CIRCULAR;
-	mm_split_foreach(arg, ",;:/*", { kh_str_put(&o->a.circ, p, l); });	/* FIXME: '*' should be treated in separete */
+	mm_split_foreach(arg, ",;:/*", { kh_str_put(&o->a.circ, p, l, "", 0); });	/* FIXME: '*' should be treated in separete */
 }
 
 /* indexing */
@@ -6086,7 +5935,7 @@ int main_align(mm_opt_t *o)
 	pg_t *pg = NULL;
 	mm_idx_t *mi = NULL;
 	mm_align_t *aln = NULL;
-	mm_printer_t *pr = NULL;
+	mm_print_t *pr = NULL;
 
 	/* first test if prebuilt index is available, then instanciate pg reader. pg != NULL indicates prebuilt index is available for this batch */
 	if(mm_endswith(*o->parg.a, ".mai") && (pg = pg_init(fopen(*o->parg.a, "rb"), o->pt)) == NULL) {
@@ -6125,7 +5974,6 @@ int main_align(mm_opt_t *o)
 
 	bseq_params_t br = o->b, bq = o->b;
 	br->keep_qual = 0; br->n_tag = 0;
-	pr = mm_printer_init(o->r);
 
 	/* iterate over index *blocks* */
 	char const *const *r = (char const *const *)o->parg.a;
@@ -6140,20 +5988,19 @@ int main_align(mm_opt_t *o)
 		/* iterate over queries */
 		for(char const *const *q = (char const *const *)&o->parg.a[qh]; *q; q++) {
 			bseq_file_t *fp = _bseq_open_wrap(bq, *q);
-			mm_align_file(aln, fp, pr);
+			mm_align_file(aln, fp);
 			bseq_close(fp);
 			o->log(o, 9, __func__, "finished mapping `%s' onto `%s'.", *q, *r);
 		}
 		mm_align_destroy(aln);
 		mm_idx_destroy(mi);
 	}
-	mm_printer_destroy(pr);
 	return(0);
 
 _main_align_fail:;
 	pg_destroy(pg);
 	mm_idx_destroy(mi);
-	mm_printer_destroy(pr);
+	mm_print_destroy(pr);
 	mm_align_destroy(aln);
 	return(1);
 }

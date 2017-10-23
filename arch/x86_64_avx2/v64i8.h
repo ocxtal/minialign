@@ -135,7 +135,7 @@ typedef struct v64i8_s {
 	(int8_t)(((imm) < sizeof(__m256i)) ? ( \
 		_i_v64i8(extract)((a).v1, (imm)) \
 	) : ( \
-		_i_v64i8(extract)((a).v1, (imm)) \
+		_i_v64i8(extract)((a).v1, (imm) - sizeof(__m256i)) \
 	)) \
 )
 
