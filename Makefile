@@ -2,7 +2,7 @@ CC = gcc
 GIT = git
 VERSION = $(shell $(GIT) describe --tags || grep "define MM_VERSION" minialign.c | grep -o '".*"' | sed 's/"//g')
 ARCHFLAGS = -march=native
-CFLAGS = -O3 -Wall -Wno-unused-function -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
+CFLAGS = -O3 -Wall -Wno-unused-function -Wno-unused-label -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
 LDFLAGS = -lm -lz -lpthread
 PREFIX = /usr/local
 TARGET = minialign
