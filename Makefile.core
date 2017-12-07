@@ -14,3 +14,4 @@ $(GABA_OBJS): gaba.c
 
 gaba.c: gaba.h log.h unittest.h sassert.h
 minialign.c: kvec.h ksort.h gaba_wrap.h gaba.h lmm.h unittest.h sassert.h
+gaba_wrap.h: gaba.h log.h unittest.h sassert.h

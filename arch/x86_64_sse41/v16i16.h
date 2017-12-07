@@ -113,7 +113,7 @@ typedef struct v16i16_s {
 #define _shuf_v16i16(...)	_a_v16i16(shuffle, _e_vv, __VA_ARGS__)
 
 /* blend */
-#define _sel_v16i16(...)	_a_v16i16(blendv, _e_vvv, __VA_ARGS__)
+// #define _sel_v16i16(...)	_a_v16i16(blendv, _e_vvv, __VA_ARGS__)
 
 /* compare */
 #define _eq_v16i16(...)		_a_v16i16(cmpeq, _e_vv, __VA_ARGS__)

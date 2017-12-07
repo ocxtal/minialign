@@ -35,11 +35,10 @@
  */
 enum gaba_status {
 	GABA_CONT 		= 0,		/* continue, call again the function with the same args (but rarely occurrs) */
-	GABA_UPDATE		= 0x100,	/* update either or both of the section(s) */
-	GABA_UPDATE_A 	= 0x0f,		/* update required on section a (always combined with GABA_UPDATE) */
-	GABA_UPDATE_B 	= 0xf0,		/* update required on section b (always combined with GABA_UPDATE) */
-	GABA_TERM		= 0x200,	/* extension terminated by X-drop */
-	GABA_OOM		= 0x400		/* out of memory (indicates malloc returned NULL) */
+	GABA_UPDATE_A 	= 0x000f,	/* update required on section a (always combined with GABA_UPDATE) */
+	GABA_UPDATE_B 	= 0x00f0,	/* update required on section b (always combined with GABA_UPDATE) */
+	GABA_TERM		= 0x8000,	/* extension terminated by X-drop */
+	GABA_OOM		= 0x0400	/* out of memory (indicates malloc returned NULL) */
 };
 
 /**
@@ -52,6 +51,12 @@ typedef void (*gaba_lfree_t)(void *opaque, void *ptr);
 /**
  * @struct gaba_alloc_s
  * @brief optional memory allocator, malloc and free pair must not be NULL.
+ * memory block must be freed when size == 0:
+ *
+ *	void *alloc(void *opaque, void *ptr, size_t size) {
+ *		if(size == 0) { free(ptr); }
+ *		return(realloc(ptr, size));
+ *	}
  */
 struct gaba_alloc_s {
 	void *opaque;				/** local memory arena */
@@ -146,10 +151,13 @@ typedef struct gaba_dp_context_s gaba_dp_t;
  * @struct gaba_fill_s
  */
 struct gaba_fill_s {
+	uint32_t aid, bid;			/** (8) the last-filled section ids */
+	uint32_t ascnt, bscnt;		/** (8) aligned section counts */
+	uint64_t apos, bpos;		/** (16) #fetched bases from the head (ppos = apos + bpos) */
 	int64_t max;				/** (8) max score in the entire band */
 	uint32_t stat;				/** (4) status (section update flags) */
-	uint32_t scnt;				/** (4) expected section count (== band-segment depth) */
-	int64_t ppos;				/** (8) #vectors from the head */
+	// int32_t ppos;				/** (8) #vectors from the head (FIXME: should be 64bit int) */
+	uint32_t reserved[5];
 };
 typedef struct gaba_fill_s gaba_fill_t;
 
@@ -226,9 +234,7 @@ gaba_dp_t *gaba_dp_init(
  */
 GABA_EXPORT_LEVEL
 void gaba_dp_flush(
-	gaba_dp_t *dp,
-	uint8_t const *alim,
-	uint8_t const *blim);
+	gaba_dp_t *dp);
 
 /**
  * @fn gaba_dp_save_stack
@@ -261,7 +267,8 @@ gaba_fill_t *gaba_dp_fill_root(
 	gaba_section_t const *a,
 	uint32_t apos,
 	gaba_section_t const *b,
-	uint32_t bpos);
+	uint32_t bpos,
+	uint32_t pridx);
 
 /**
  * @fn gaba_dp_fill
@@ -272,7 +279,21 @@ gaba_fill_t *gaba_dp_fill(
 	gaba_dp_t *dp,
 	gaba_fill_t const *prev_sec,
 	gaba_section_t const *a,
-	gaba_section_t const *b);
+	gaba_section_t const *b,
+	uint32_t pridx);
+
+/**
+ * @fn gaba_dp_merge
+ * @brief merge multiple sections. all the vectors (tail objects) must be aligned on the same ppos,
+ * and qofs are the q-distance of the two fill objects.
+ */
+#define MAX_MERGE_COUNT				( 14 )
+GABA_EXPORT_LEVEL
+gaba_fill_t *gaba_dp_merge(
+	gaba_dp_t *dp,
+	gaba_fill_t const *const *sec,
+	uint8_t const *qofs,
+	uint32_t cnt);
 
 /**
  * @fn gaba_dp_search_max

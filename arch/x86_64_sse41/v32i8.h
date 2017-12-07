@@ -110,7 +110,7 @@ typedef struct v32i8_s {
 #define _shuf_v32i8(...)	_a_v32i8(shuffle, _e_vv, __VA_ARGS__)
 
 /* blend */
-// #define _sel_v32i8(...)		_a_v32i8(blendv, _e_vvv, __VA_ARGS__)
+#define _sel_v32i8(...)		_a_v32i8(blendv, _e_vvv, __VA_ARGS__)
 
 /* compare */
 #define _eq_v32i8(...)		_a_v32i8(cmpeq, _e_vv, __VA_ARGS__)
@@ -175,6 +175,14 @@ typedef struct v32i8_s {
 	(v32_mask_t) { \
 		.m1 = _i_v32i8(movemask)((a).v1), \
 		.m2 = _i_v32i8(movemask)((a).v2) \
+	} \
+)
+
+/* convert */
+#define _cvt_v32i16_v32i8(a) ( \
+	(v32i8_t) { \
+		_mm_packs_epi16((a).v1, (a).v2), \
+		_mm_packs_epi16((a).v3, (a).v4) \
 	} \
 )
 

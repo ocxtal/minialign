@@ -141,7 +141,7 @@ typedef struct v64i8_s {
 #define _shuf_v64i8(...)	_a_v64i8(shuffle, _e_vv, __VA_ARGS__)
 
 /* blend */
-// #define _sel_v64i8(...)		_a_v64i8(blendv, _e_vvv, __VA_ARGS__)
+#define _sel_v64i8(...)		_a_v64i8(blendv, _e_vvv, __VA_ARGS__)
 
 /* compare */
 #define _eq_v64i8(...)		_a_v64i8(cmpeq, _e_vv, __VA_ARGS__)
@@ -228,6 +228,16 @@ typedef struct v64i8_s {
 		.m2 = _i_v64i8(movemask)((a).v2), \
 		.m3 = _i_v64i8(movemask)((a).v3), \
 		.m4 = _i_v64i8(movemask)((a).v4) \
+	} \
+)
+
+/* convert */
+#define _cvt_v64i16_v64i8(a) ( \
+	(v64i8_t) { \
+		_mm_packs_epi16((a).v1, (a).v2), \
+		_mm_packs_epi16((a).v3, (a).v4), \
+		_mm_packs_epi16((a).v5, (a).v6), \
+		_mm_packs_epi16((a).v7, (a).v8) \
 	} \
 )
 

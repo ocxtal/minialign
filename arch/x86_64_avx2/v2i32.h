@@ -89,7 +89,7 @@ typedef struct v2i32_s {
 )
 #define _swap_v2i32(x) ( \
 	(v2i32_t) { \
-		_mm_shuffle_epi32((x).v1, 0x01) \
+		_mm_shuffle_epi32((x).v1, 0xe1) \
 	} \
 )
 
@@ -162,6 +162,17 @@ typedef uint64_t v2i8_t;
 )
 #define _cvt_v2i32_v2i8(a) ( \
 	(uint16_t)_mm_cvtsi128_si64(_mm_shuffle_epi8((a).v1, _mm_cvtsi64_si128(0x0400))) \
+)
+#define _cvt_u64_v2i32(a) ( \
+	(v2i32_t){ _mm_cvtsi64_si128(a) } \
+)
+#define _cvt_v2i32_u64(a) ( \
+	(uint64_t)_mm_cvtsi128_si64((a).v1) \
+)
+#define _cvt_v2i64_v2i32(a) ( \
+	(v2i32_t) { \
+		_mm_shuffle_epi32((a).v1, 0xd8) \
+	} \
 )
 
 /* transpose */

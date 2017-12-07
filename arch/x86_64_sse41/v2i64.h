@@ -76,8 +76,8 @@ typedef struct v2i64_s {
 #define _zero_v2i64()		_a_v2i64x(setzero, _e_x, _unused)
 #define _seta_v2i64(x, y)	( (v2i64_t) { _mm_set_epi64x(x, y) } )
 #define _swap_v2i64(x) ( \
-	(v2i32_t) { \
-		_mm_shuffle_epi32((x).v1, 0x1b) \
+	(v2i64_t) { \
+		_mm_shuffle_epi32((x).v1, 0x4e) \
 	} \
 )
 
@@ -121,6 +121,14 @@ typedef struct v2i64_s {
 	(int64_t)_i_v2i64(extract)((a).v1, (imm)) \
 )
 
+/* shift */
+#define _shlv_v2i64(a, n) ( \
+	(v2i64_t) {_i_v2i64(sll)((a).v1, (n).v1)} \
+)
+#define _shrv_v2i64(a, n) ( \
+	(v2i64_t) {_i_v2i64(srl)((a).v1, (n).v1)} \
+)
+
 /* mask */
 #define _mask_v2i64(a) ( \
 	(uint32_t) (_mm_movemask_epi8((a).v1)) \
@@ -152,7 +160,7 @@ typedef struct v2i64_s {
 /* debug print */
 #ifdef _LOG_H_INCLUDED
 #define _print_v2i64(a) { \
-	debug("(v2i64_t) %s(%lld, %lld)", #a, _ext_v2i64(a, 1), _ext_v2i64(a, 0)); \
+	debug("(v2i64_t) %s(%lx, %lx)", #a, _ext_v2i64(a, 1), _ext_v2i64(a, 0)); \
 }
 #else
 #define _print_v2i64(x)		;

@@ -117,7 +117,7 @@
  * @macro _loadu_u64, _storeu_u64
  */
 #define _loadu_u64(p)		({ uint8_t const *_p = (uint8_t const *)(p); *((uint64_t const *)_p); })
-#define _storeu_u64(p, e)	{ *((uint64_t *)(p)) = (e); }
+#define _storeu_u64(p, e)	{ uint8_t *_p = (uint8_t *)(p); *((uint64_t *)(_p)) = (e); }
 
 /**
  * @macro _aligned_block_memcpy
@@ -135,11 +135,11 @@
 #define _memcpy_blk_intl(dst, src, size, _wr, _rd) { \
 	/** duff's device */ \
 	uint8_t *_src = (uint8_t *)(src), *_dst = (uint8_t *)(dst); \
-	int64_t const _nreg = 16;		/** #xmm registers == 16 */ \
-	int64_t const _tcnt = (size) / sizeof(__m128i); \
-	int64_t const _offset = ((_tcnt - 1) & (_nreg - 1)) - (_nreg - 1); \
-	int64_t _jmp = _tcnt & (_nreg - 1); \
-	int64_t _lcnt = (_tcnt + _nreg - 1) / _nreg; \
+	uint64_t const _nreg = 16;		/** #xmm registers == 16 */ \
+	uint64_t const _tcnt = (size) / sizeof(__m128i); \
+	uint64_t const _offset = ((_tcnt - 1) & (_nreg - 1)) - (_nreg - 1); \
+	uint64_t _jmp = _tcnt & (_nreg - 1); \
+	uint64_t _lcnt = (_tcnt + _nreg - 1) / _nreg; \
 	register __m128i xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7; \
 	register __m128i xmm8, xmm9, xmm10, xmm11, xmm12, xmm13, xmm14, xmm15; \
 	_src += _offset * sizeof(__m128i); \
@@ -192,7 +192,7 @@
 #define _memset_blk_intl(dst, a, size, _wr) { \
 	uint8_t *_dst = (uint8_t *)(dst); \
 	__m128i const xmm0 = _mm_set1_epi8((int8_t)a); \
-	int64_t i; \
+	uint64_t i; \
 	for(i = 0; i < size / sizeof(__m128i); i++) { \
 		_wr(_dst, 0); _dst += sizeof(__m128i); \
 	} \

@@ -176,6 +176,13 @@ typedef struct v16i8_s {
 	(int8_t)_mm_extract_epi8(_vmax, 0); \
 })
 
+/* convert */
+#define _cvt_v16i16_v16i8(a) ( \
+	(v16i8_t) { \
+		_mm_packs_epi16(_mm256_castsi256_si128((a).v1), _mm256_extracti128_si256((a).v1, 1)) \
+	} \
+)
+
 /* debug print */
 #ifdef _LOG_H_INCLUDED
 #define _print_v16i8(a) { \

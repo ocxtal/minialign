@@ -137,6 +137,7 @@
 
 /* convert */
 #define _cvt_n_w		_vec_alias_join3(_cvt_, nvec_prefix, wvec_prefix)
+#define _cvt_w_n		_vec_alias_join3(_cvt_, wvec_prefix, nvec_prefix)
 
 /* print */
 #define _print_n		_vec_alias_join2(_print_, nvec_prefix)
