@@ -5522,7 +5522,7 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 	};
 	#define _pre(_k, _v, ...)	&((struct mm_preset_s const){ .key = (_k), .val = (_v), .children = { __VA_ARGS__ } })
 	struct mm_preset_s const *presets[] = {
-		_pre("pacbio", "-k15 -w10 -a2 -b4 -p4 -q1 -Y50 -s50 -r0.3",
+		_pre("pacbio", "-k15 -w10 -a2 -b4 -p4 -q1 -Y50 -s50 -m0.3",
 			_pre("clr", "-q1 -r2,2", NULL),
 			_pre("ccs", "-b3 -p5", NULL)
 		),
