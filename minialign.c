@@ -887,6 +887,7 @@ static _force_inline
 void pt_destroy(pt_t *pt)
 {
 	void *status;
+	if(pt == NULL) { return; }
 
 	/* send termination signal */
 	for(uint64_t i = 1; i < pt->nth; i++) {
@@ -5426,7 +5427,7 @@ int mm_opt_parse_argv(mm_opt_t *o, char const *const *argv)
 			kv_push(void *, o->parg, mm_strdup(q)); continue;	/* positional argument */
 		}
 		while(o->t[_x(*++q)].type == 1) { o->t[_x(*q)].fn(o, NULL); }/* eat boolean options */
-		if(!*q) { continue; }									/* argument option not found */
+		if(!o->t[_x(*q)].fn) { continue; }						/* argument option not found */
 		char const *r = q[1] ? q+1 : (p[1] && _isarg(p[1]) ? *++p : NULL);/* if the option ends without argument, inspect the next element in the jagged array (originally placed after space(s)) */
 		oassert(o, o->t[_x(*q)].type != 2 || r, "missing argument for option `-%c'.", *q);
 		o->t[_x(*q)].fn(o, r);									/* option with argument would be found at the tail */
