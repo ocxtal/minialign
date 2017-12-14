@@ -5415,6 +5415,36 @@ void liftrlimit()
 }
 
 /**
+ * @fn mm_opt_atoi, mm_opt_atof
+ */
+static _force_inline
+int64_t mm_opt_atoi(mm_opt_t *o, char const *arg, uint64_t len)
+{
+	if(arg == NULL) { return(0); }
+	if(len == UINT32_MAX) { len = strlen(arg); }
+	for(char const *p = arg, *t = &arg[len]; p < t && *p != '\0'; p++) {
+		if(!isdigit(*p)) { oassert(o, 0, "unparsable number `%.*s'.", len, arg); return(0); }
+	}
+	return(atoi(arg));
+}
+static _force_inline
+double mm_opt_atof(mm_opt_t *o, char const *arg, uint64_t len)
+{
+	if(arg == NULL) { return(0); }
+	if(len == UINT32_MAX) { len = strlen(arg); }
+	static char const allowed[16] __attribute__(( aligned(16) )) = {
+		'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '-', '.', ',', 'e', 'E'
+	};
+	v16i8_t v = _load_v16i8(allowed);
+	for(char const *p = arg, *t = &arg[len]; p < t && *p != '\0'; p++) {
+		if(((v16i8_masku_t){ .mask = _mask_v16i8(_eq_v16i8(_set_v16i8(*p), v)) }).all == 0) {
+			oassert(o, 0, "unparsable number `%.*s'.", len, arg); return(0);
+		}
+	}
+	return(atof(arg));
+}
+
+/**
  * @fn mm_opt_parse_argv
  * @brief parse (argc, argv)-style option arrays. only argv is required here (MUST be NULL-terminated).
  */
@@ -5576,9 +5606,9 @@ static void mm_opt_keep_qual(mm_opt_t *o, char const *arg) { o->b.keep_qual = 1;
 static void mm_opt_ava(mm_opt_t *o, char const *arg) { o->a.flag |= MM_AVA; }
 static void mm_opt_comp(mm_opt_t *o, char const *arg) { o->a.flag |= MM_COMP; }
 static void mm_opt_omit_rep(mm_opt_t *o, char const *arg) { o->a.flag |= MM_OMIT_REP; }
-static void mm_opt_verbose(mm_opt_t *o, char const *arg) { o->verbose = arg ? (isdigit(*arg) ? atoi(arg) : strlen(arg)) : 0; }
+static void mm_opt_verbose(mm_opt_t *o, char const *arg) { o->verbose = arg ? (isdigit(*arg) ? mm_opt_atoi(o, arg, UINT32_MAX) : strlen(arg) + 1) : 0; }
 static void mm_opt_threads(mm_opt_t *o, char const *arg) {
-	o->nth = atoi(arg);
+	o->nth = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->nth < MAX_THREADS, "#threads must be less than %d.", MAX_THREADS);
 }
 static void mm_opt_help(mm_opt_t *o, char const *arg) { o->verbose = 1; o->help++; }
@@ -5588,8 +5618,8 @@ static void mm_opt_base_id(mm_opt_t *o, char const *arg) {
 	o->a.base_rid = o->a.base_qid = 0x80000000;	/* first clear ids (= infer-from-name state) */
 	mm_split_foreach(arg, ",;:/*", {			/* FIXME: '*' should be treated in separete */
 		switch(i) {
-			case 0: o->a.base_rid = atoi(p);	/* fall through to set both */
-			case 1: o->a.base_qid = atoi(p);
+			case 0: o->a.base_rid = mm_opt_atoi(o, p, l);	/* fall through to set both */
+			case 1: o->a.base_qid = mm_opt_atoi(o, p, l);
 		}
 	});
 }
@@ -5600,21 +5630,21 @@ static void mm_opt_circular(mm_opt_t *o, char const *arg) {
 
 /* indexing */
 static void mm_opt_kmer(mm_opt_t *o, char const *arg) {
-	o->c.k = atoi(arg);
+	o->c.k = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->c.k > 1 && o->c.k < 32, "k must be inside [1,32).");
 }
 static void mm_opt_window(mm_opt_t *o, char const *arg) {
-	o->c.w = atoi(arg);
+	o->c.w = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->c.w > 1 && o->c.w < 32, "w must be inside [1,32).");
 }
 static void mm_opt_bin(mm_opt_t *o, char const *arg) {
-	o->c.b = atoi(arg);
+	o->c.b = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->c.b > 1 && o->c.b < 32, "b must be inside [1,32).");
 }
 static void mm_opt_frq(mm_opt_t *o, char const *arg) {
 	o->c.n_frq = 0;			/* clear counter */
 	mm_split_foreach(arg, ",;:/", {
-		float f = o->c.frq[o->c.n_frq++] = atof(p);
+		float f = o->c.frq[o->c.n_frq++] = mm_opt_atof(o, p, l);
 		oassert(o, i < MAX_FRQ_CNT, "#thresholds must not exceed %d.", MAX_FRQ_CNT);
 		oassert(o, f > 0.0 && f < 1.0, "invalid threshold `%f' parsed from `%.*s'.", f, l, p);
 		oassert(o, i == 0 || (o->c.frq[i-1] > o->c.frq[i]), "frequency thresholds must be descending.");
@@ -5623,22 +5653,22 @@ static void mm_opt_frq(mm_opt_t *o, char const *arg) {
 
 /* mapping */
 static void mm_opt_wlen(mm_opt_t *o, char const *arg) {
-	o->a.wlen = atoi(arg);
+	o->a.wlen = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->a.wlen > 100 || o->a.wlen < 100000, "window edge length must be inside [100,100000).");
 }
 static void mm_opt_glen(mm_opt_t *o, char const *arg) {
-	o->a.glen = atoi(arg);
+	o->a.glen = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->a.glen > 100 || o->a.glen < 10000, "gap chain length must be inside [100,10000).");
 }
 static void mm_opt_match(mm_opt_t *o, char const *arg) {
-	int32_t m = atoi(arg);
+	int32_t m = mm_opt_atoi(o, arg, UINT32_MAX);
 	for(uint64_t i = 0; i < 16; i++) {
 		if((i&0x03) == (i>>2)) { o->a.p.score_matrix[i] = m; }
 	}
 	oassert(o, m > 0 && m < 7, "match award (-a) must be inside [1,7].");
 }
 static void mm_opt_mismatch(mm_opt_t *o, char const *arg) {
-	int32_t x = atoi(arg);
+	int32_t x = mm_opt_atoi(o, arg, UINT32_MAX);
 	for(uint64_t i = 0; i < 16; i++) {
 		if((i&0x03) != (i>>2)) { o->a.p.score_matrix[i] = x; }
 	}
@@ -5652,46 +5682,46 @@ static void mm_opt_mod(mm_opt_t *o, char const *arg) {
 	});
 }
 static void mm_opt_gi(mm_opt_t *o, char const *arg) {
-	int32_t gi = atoi(arg);
+	int32_t gi = mm_opt_atoi(o, arg, UINT32_MAX);
 	o->a.p.gi = gi;
 	oassert(o, gi < 32, "gap open penalty (-p) must be inside [0,32].");
 }
 static void mm_opt_ge(mm_opt_t *o, char const *arg) {
-	int32_t ge = atoi(arg);
+	int32_t ge = mm_opt_atoi(o, arg, UINT32_MAX);
 	o->a.p.ge = ge;
 	oassert(o, ge > 0 && ge < 32, "gap extension penalty (-q) must be inside [1,32].");
 }
 static void mm_opt_gf(mm_opt_t *o, char const *arg) {
 	mm_split_foreach(arg, ",;:/", {
 		switch(i) {
-			case 0: o->a.p.gfa = atoi(p);			/* fall through to set both */
-			case 1: o->a.p.gfb = atoi(p);
+			case 0: o->a.p.gfa = mm_opt_atoi(o, p, l);			/* fall through to set both */
+			case 1: o->a.p.gfb = mm_opt_atoi(o, p, l);
 		}
 	});
 }
 static void mm_opt_xdrop(mm_opt_t *o, char const *arg) {
-	int32_t xdrop = atoi(arg);
+	int32_t xdrop = mm_opt_atoi(o, arg, UINT32_MAX);
 	o->a.p.xdrop = xdrop;
 	oassert(o, xdrop > 10 && xdrop < 128, "X-drop cutoff must be inside [10,128].");
 }
 static void mm_opt_min_len(mm_opt_t *o, char const *arg) {
-	o->b.min_len = atoi(arg);
+	o->b.min_len = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->b.min_len > 0, "minimum sequence length must be > 0.");
 }
 static void mm_opt_min_score(mm_opt_t *o, char const *arg) {
-	o->a.min_score = atoi(arg);
+	o->a.min_score = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->a.min_score > 0, "minimum alignment score must be > 0.");
 }
 static void mm_opt_min_ratio(mm_opt_t *o, char const *arg) {
-	o->a.min_ratio = atof(arg);
+	o->a.min_ratio = mm_opt_atof(o, arg, UINT32_MAX);
 	oassert(o, o->a.min_ratio > 0.0 && o->a.min_ratio < 1.0, "minimum alignment score ratio must be inside [0.0,1.0].");
 }
 static void mm_opt_batch(mm_opt_t *o, char const *arg) {
-	o->b.batch_size = atoi(arg);
+	o->b.batch_size = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->b.batch_size > 64 * 1024, "batch size must be > 64k.");
 }
 static void mm_opt_outbuf(mm_opt_t *o, char const *arg) {
-	o->r.outbuf_size = atoi(arg);
+	o->r.outbuf_size = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->r.outbuf_size > 64 * 1024, "output buffer size must be > 64k.");
 }
 
