@@ -5492,6 +5492,26 @@ static void mm_opt_parse_line(mm_opt_t *o, char const *arg)
 }
 
 /**
+ * @fn mm_opt_load
+ */
+static int mm_opt_load(mm_opt_t *o, char const *arg)
+{
+	FILE *fp = fopen(arg, "r");
+	if(fp == NULL) { return(1); }
+
+	kvec_t(char) str = { 0 };
+	kv_reserve(char, str, 1024);
+	while(1) {
+		if((str.n += fread(str.a, sizeof(char), str.m - str.n, fp)) < str.m) { break; }
+		kv_reserve(char, str, 2 * str.n);
+	}
+	fclose(fp);
+	kv_push(char, str, '\0');
+	mm_opt_parse_line(o, str.a);
+	return(0);
+}
+
+/**
  * @fn mm_opt_preset
  * @brief parse preset line
  */
@@ -5509,14 +5529,12 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 		),
 		_pre("ont", "-k15 -w10 -a2 -b4 -p4 -q1 -r2,2 -Y50 -s50 -m0.3",
 			_pre("r7", "-b2 -p2",
-				_pre("1d", "", NULL),
-				_pre("2d", "", NULL)
+				_pre("1d", "", NULL), _pre("2d", "", NULL)
 			),
 			_pre("r9", "",
-				_pre("1d", "", NULL),
-				_pre("1dsq", "", NULL),
-				_pre("2d", "", NULL)
-			)
+				_pre("1d", "", NULL), _pre("1dsq", "", NULL), _pre("2d", "", NULL)
+			),
+			_pre("1d", "", NULL), _pre("1dsq", "", NULL), _pre("2d", "", NULL)
 		),
 		_pre("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05", NULL),
 		NULL
@@ -5526,8 +5544,8 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 	struct mm_preset_s const *const *c = presets - 1;
 	mm_split_foreach(arg, ".:", {		/* traverse preset param tree along with parsing */
 		while(*++c && (strlen((*c)->key) != l || strncmp(p, (*c)->key, l) != 0)) {}
-		if(!*c) {						/* terminate if not matched */
-			oassert(o, l == 0, "preset params not found for `%.*s'.", l, p);
+		if(!*c) {						/* terminate if not matched, not loaded from file */
+			oassert(o, mm_opt_load(o, p), "no preset params or preser file found for `%.*s'.", l, p);
 			break;
 		}
 		mm_opt_parse_line(o, (*c)->val);/* apply recursively */
