@@ -5391,8 +5391,11 @@ void liftrlimit()
 #define mm_split_foreach(_ptr, _delims, _body) { \
 	char const *_q = (_ptr); \
 	int64_t i = 0; \
-	v16i8_t _dv = _bsl_v16i8(_loadu_v16i8(_delims), 1);		/* push '\0' at the head of the vector */ \
-	uint16_t _mask = (0x01<<(strlen(_delims) + 1)) - 1, _m;	/* inc by one to reserve space for '\0' */ \
+	v16i8_t _dv = _loadu_v16i8(_delims); \
+	uint16_t _m, _mask = 0x02<<tzcnt(((v16i8_masku_t){		/* reserve space for '\0' */ \
+		.mask = _mask_v16i8(_eq_v16i8(_set_v16i8('\0'), _dv)) \
+	}).all); \
+	_dv = _bsl_v16i8(_dv, 1); _mask--;						/* push '\0' at the head of the vector */ \
 	do { \
 		char const *_p = _q; \
 		/* test char one by one until dilimiter found */ \
