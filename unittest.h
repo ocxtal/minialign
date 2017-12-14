@@ -254,15 +254,17 @@ struct ut_s {
  *
  * @brief instanciate a unittest object
  */
+#define UNITTEST_ARG_DECL \
+	void *ctx, \
+	void *gctx, \
+	struct ut_global_config_s const *ut_gconf, \
+	struct ut_s const *ut_info, \
+	struct ut_group_config_s const *ut_config, \
+	struct ut_result_s *ut_result
+#define UNITTEST_ARG_LIST 	ctx, gctx, ut_gconf, ut_info, ut_config, ut_result
 #if UNITTEST != 0
 #define unittest(...) \
-	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)( \
-		void *ctx, \
-		void *gctx, \
-		struct ut_global_config_s const *ut_gconf, \
-		struct ut_s const *ut_info, \
-		struct ut_group_config_s const *ut_config, \
-		struct ut_result_s *ut_result); \
+	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)(UNITTEST_ARG_DECL); \
 	static struct ut_s const ut_build_name(ut_info_, UNITTEST_UNIQUE_ID, __LINE__) = { \
 		.file = __FILE__, \
 		.line = __LINE__, \
@@ -274,24 +276,12 @@ struct ut_s {
 	{ \
 		return(ut_build_name(ut_info_, UNITTEST_UNIQUE_ID, __LINE__)); \
 	} \
-	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)( \
-		void *ctx, \
-		void *gctx, \
-		struct ut_global_config_s const *ut_gconf, \
-		struct ut_s const *ut_info, \
-		struct ut_group_config_s const *ut_config, \
-		struct ut_result_s *ut_result)
+	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)(UNITTEST_ARG_DECL)
 
 #else	/* UNITTEST != 0 */
 
 #define unittest(...) \
-	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)( \
-		void *ctx, \
-		void *gctx, \
-		struct ut_global_config_s const *ut_gconf, \
-		struct ut_s const *ut_info, \
-		struct ut_group_config_s const *ut_config, \
-		struct ut_result_s *ut_result)
+	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)(UNITTEST_ARG_DECL)
 
 
 #endif	/* UNITTEST != 0 */
