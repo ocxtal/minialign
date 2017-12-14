@@ -2,7 +2,7 @@
 
 SUFFIX = $(NAMESPACE:$(NAMESPACE)=.$(NAMESPACE))
 MINIALIGN_OBJS = minialign$(SUFFIX).o
-GABA_OBJS = $(shell echo gaba.{linear,affine,combined}.{16,32,64}$(SUFFIX).o)
+GABA_OBJS = $(shell bash -c "echo gaba.{linear,affine}.{16,32,64}$(SUFFIX).o")
 
 all: $(MINIALIGN_OBJS) $(GABA_OBJS)
 
