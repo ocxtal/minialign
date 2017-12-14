@@ -5491,7 +5491,7 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 
 	struct mm_preset_s const *const *c = presets - 1;
 	mm_split_foreach(arg, ".:", {		/* traverse preset param tree along with parsing */
-		while(*++c && (strlen((*c)->key) != l || strncasecmp(p, (*c)->key, l) != 0)) {}
+		while(*++c && (strlen((*c)->key) != l || strncmp(p, (*c)->key, l) != 0)) {}
 		if(!*c) {						/* terminate if not matched */
 			oassert(o, l == 0, "preset params not found for `%.*s'.", l, p);
 			break;
@@ -5558,8 +5558,8 @@ static void mm_opt_format(mm_opt_t *o, char const *arg)
 		{ "paf",    MM_PAF },
 		{ NULL, 0xff }
 	}, *p = t - 1;
-	while(++p->k && strcasecmp(p->k, arg) != 0) {}
-	o->r.format = p->v;
+	while(++p->k && strcmp(p->k, arg) != 0) {}
+	o->r.format = p < t ? 0xff : p->v;			/* avoid warning */
 	oassert(o, o->r.format != 0xff, "unknown output format `%s'.", arg);
 	return;
 }
@@ -5572,7 +5572,7 @@ static void mm_opt_keep_qual(mm_opt_t *o, char const *arg) { o->b.keep_qual = 1;
 static void mm_opt_ava(mm_opt_t *o, char const *arg) { o->a.flag |= MM_AVA; }
 static void mm_opt_comp(mm_opt_t *o, char const *arg) { o->a.flag |= MM_COMP; }
 static void mm_opt_omit_rep(mm_opt_t *o, char const *arg) { o->a.flag |= MM_OMIT_REP; }
-static void mm_opt_verbose(mm_opt_t *o, char const *arg) { o->verbose = arg ? (isnumber(*arg) ? atoi(arg) : strlen(arg)) : 0; }
+static void mm_opt_verbose(mm_opt_t *o, char const *arg) { o->verbose = arg ? (isdigit(*arg) ? atoi(arg) : strlen(arg)) : 0; }
 static void mm_opt_threads(mm_opt_t *o, char const *arg) {
 	o->nth = atoi(arg);
 	oassert(o, o->nth < MAX_THREADS, "#threads must be less than %d.", MAX_THREADS);
