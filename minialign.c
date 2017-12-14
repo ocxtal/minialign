@@ -5497,7 +5497,7 @@ static void mm_opt_parse_line(mm_opt_t *o, char const *arg)
 static int mm_opt_load(mm_opt_t *o, char const *arg)
 {
 	FILE *fp = fopen(arg, "r");
-	if(fp == NULL) { return(1); }
+	if(fp == NULL) { oassert(o, 0, "failed to find configuration file `%s'.", arg); return(0); }
 
 	kvec_t(char) str = { 0 };
 	kv_reserve(char, str, 1024);
@@ -5505,10 +5505,9 @@ static int mm_opt_load(mm_opt_t *o, char const *arg)
 		if((str.n += fread(str.a, sizeof(char), str.m - str.n, fp)) < str.m) { break; }
 		kv_reserve(char, str, 2 * str.n);
 	}
-	fclose(fp);
-	kv_push(char, str, '\0');
+	fclose(fp); kv_push(char, str, '\0');
 	mm_opt_parse_line(o, str.a);
-	return(0);
+	return(1);
 }
 
 /**
@@ -5545,7 +5544,7 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 	mm_split_foreach(arg, ".:", {		/* traverse preset param tree along with parsing */
 		while(*++c && (strlen((*c)->key) != l || strncmp(p, (*c)->key, l) != 0)) {}
 		if(!*c) {						/* terminate if not matched, not loaded from file */
-			oassert(o, mm_opt_load(o, p), "no preset params or preser file found for `%.*s'.", l, p);
+			oassert(o, mm_opt_load(o, p), "no preset params found for `%.*s'.", l, p);
 			break;
 		}
 		mm_opt_parse_line(o, (*c)->val);/* apply recursively */
