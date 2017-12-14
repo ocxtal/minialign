@@ -5463,7 +5463,7 @@ int mm_opt_parse_argv(mm_opt_t *o, char const *const *argv)
 		if(!o->t[_x(*q)].fn) { continue; }						/* argument option not found */
 		char const *r = q[1] ? q+1 : (p[1] && _isarg(p[1]) ? *++p : NULL);/* if the option ends without argument, inspect the next element in the jagged array (originally placed after space(s)) */
 		oassert(o, o->t[_x(*q)].type != 2 || r, "missing argument for option `-%c'.", *q);
-		o->t[_x(*q)].fn(o, r);									/* option with argument would be found at the tail */
+		if(o->t[_x(*q)].type != 2 || r) { o->t[_x(*q)].fn(o, r); }/* option with argument would be found at the tail */
 	}
 	kv_push(void *, o->parg, NULL); o->parg.n--;				/* always keep NULL-terminated */
 	#undef _isarg
