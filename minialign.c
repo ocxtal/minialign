@@ -5585,15 +5585,15 @@ static void mm_opt_tags(mm_opt_t *o, char const *arg)
  */
 static void mm_opt_format(mm_opt_t *o, char const *arg)
 {
-	struct mm_format_s { char const *k; uint32_t v; } t[] = {
+	static struct mm_format_s { char const *k; uint32_t v; } const t[] = {
 		{ "sam",    MM_SAM },
 		{ "maf",    MM_MAF },
 		{ "blast6", MM_BLAST6 },
 		{ "paf",    MM_PAF },
 		{ NULL, 0xff }
 	}, *p = t - 1;
-	while(++p->k && strcmp(p->k, arg) != 0) {}
-	o->r.format = p < t ? 0xff : p->v;			/* avoid warning */
+	while((++p)->k && strcmp(p->k, arg) != 0) {}
+	o->r.format = p->v;			/* avoid warning */
 	oassert(o, o->r.format != 0xff, "unknown output format `%s'.", arg);
 	return;
 }
