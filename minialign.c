@@ -5005,7 +5005,7 @@ void mm_print_sam_mapped(
 	bseq_seq_t const *t,
 	mm_reg_t const *reg)
 {
-	if(reg == NULL) { mm_print_sam_unmapped(b, t); }
+	if(reg == NULL) { mm_print_sam_unmapped(b, t); return; }
 
 	/* iterate over alignment sets */
 	uint64_t const n = (b->tags & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
