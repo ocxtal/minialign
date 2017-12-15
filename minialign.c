@@ -271,6 +271,7 @@ uint64_t mm_rand64(void)
 static _force_inline
 char *mm_strndup(char const *p, uint64_t l)
 {
+	if(!p) { return(NULL); }
 	char *q = malloc(sizeof(char) * (l + 1));
 	memcpy(q, p, l); q[l] = '\0';
 	return(q);
@@ -278,6 +279,7 @@ char *mm_strndup(char const *p, uint64_t l)
 static _force_inline
 char *mm_strdup(char const *p)
 {
+	if(!p) { return(NULL); }
 	kvec_t(char) b = { 0 }; p--;
 	while(*++p) { kv_push(char, b, *p); }
 	return(b.a);
