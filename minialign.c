@@ -2409,9 +2409,9 @@ _static_assert(sizeof(mm_idx_seq_t) == 24);
 /**
  * @struct mm_idx_t
  */
-typedef struct mm_idx_bucket_s mm_idx_bucket_t;
+typedef struct mm_idx_bkt_s mm_idx_bkt_t;
 typedef struct {
-	mm_idx_bucket_t *bkt;			/* array of 2nd stage hash table is the 1st stage hash table */
+	mm_idx_bkt_t *bkt;			/* array of 2nd stage hash table is the 1st stage hash table */
 	uint64_t mask;					/* (internal) must be (1<<b) - 1 */
 	uint8_t b, w, k, n_occ;			/* bucket size (in bits), window and k-mer size */
 	uint32_t occ[MAX_FRQ_CNT];		/* occurrence array */
@@ -2610,14 +2610,14 @@ typedef struct {
 } mm_idx_intl_t;
 
 /**
- * @struct mm_idx_bucket_t
+ * @struct mm_idx_bkt_t
  * @brief first-stage data container of double hash table
  */
-struct mm_idx_bucket_s {
+struct mm_idx_bkt_s {
 	union { kh_t h; mm_mini_v a;} w;						/* 2nd stage hash table, and minimizer array for sorting */
 	union { uint64_t *p; struct { uint32_t keys, single; } n; } v;	/* last stage table (size in p[0]), #keys and #single-element keys */
 };
-_static_assert(sizeof(mm_idx_bucket_t) == 32);
+_static_assert(sizeof(mm_idx_bkt_t) == 32);
 
 /**
  * @fn mm_idx_destroy
@@ -2653,7 +2653,7 @@ v2u32_t const *mm_idx_get(
 	uint64_t minier,
 	uint32_t *restrict n)
 {
-	mm_idx_bucket_t const *b = &mi->bkt[minier & mi->mask];
+	mm_idx_bkt_t const *b = &mi->bkt[minier & mi->mask];
 	kh_t const *h = &b->w.h;
 	uint64_t const *p;
 
@@ -2739,7 +2739,7 @@ void mm_idx_drain_intl(mm_idx_intl_t *mii, mm_idx_step_t *s)
 	bseq_seq_t const *src = r->seq;
 	kv_reserve(mm_idx_seq_t, mii->svec, mii->svec.n + r->n_seq);
 
-	mm_idx_bucket_t *bkt = mii->mi.bkt;
+	mm_idx_bkt_t *bkt = mii->mi.bkt;
 	uint64_t mask = mii->mi.mask, w = mii->mi.w, b = mii->mi.b;
 	for(uint64_t i = 0, *p = s->a.a; i < r->n_seq; i++) {
 		/* push sequence object */
@@ -2787,13 +2787,13 @@ void *mm_idx_count_occ(uint32_t tid, void *arg, void *item)
 {
 	uint64_t i = (uint64_t)item;
 	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
-	mm_idx_bucket_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  i      / mii->nth] - 1;
-	mm_idx_bucket_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
+	mm_idx_bkt_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  i      / mii->nth] - 1;
+	mm_idx_bkt_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
 
 	uint32_v *cnt = &mii->cnt[tid];
 	while(++b < t) {
 		uint64_t n_arr = b->w.a.n;
-		if(n_arr == 0) { _memset_blk_u(b, 0, sizeof(mm_idx_bucket_t)); continue; }
+		if(n_arr == 0) { _memset_blk_u(b, 0, sizeof(mm_idx_bkt_t)); continue; }
 
 		/* sort by minimizer */
 		mm_mini_t *arr = b->w.a.a;
@@ -2823,8 +2823,8 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 {
 	uint64_t i = (uint64_t)item;
 	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
-	mm_idx_bucket_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  i      / mii->nth] - 1;
-	mm_idx_bucket_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
+	mm_idx_bkt_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  i      / mii->nth] - 1;
+	mm_idx_bkt_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
 
 	debug("i(%lu), (%llu, %llu)", i, (1ULL<<mii->mi.b) * i / mii->nth, (1ULL<<mii->mi.b) * (i+1) / mii->nth);
 	while(++b < t) {
@@ -2870,7 +2870,7 @@ mm_idx_t *mm_idx_gen(mm_idx_params_t const *o, bseq_file_t *fp, pt_t *pt)
 	mm_idx_intl_t *mmi = calloc(1, sizeof(mm_idx_intl_t));
 	*mmi = (mm_idx_intl_t){					/* init pipeline context */
 		.mi = (mm_idx_t){
-			.bkt = malloc(sizeof(mm_idx_bucket_t) * (1ULL<<b)),
+			.bkt = malloc(sizeof(mm_idx_bkt_t) * (1ULL<<b)),
 			.mask = (1ULL<<b) - 1, .b = b, .w = o->w, .k = o->k, .n_occ = o->n_frq
 		},
 		.fp = fp, .nth = pt_nth(pt),
@@ -2919,7 +2919,7 @@ static _force_inline
 void mm_idx_cmp(mm_opt_t const *opt, mm_idx_t const *m1, mm_idx_t const *m2)
 {
 	for(uint64_t i = 0; i < 1ULL<<opt->b; ++i) {
-		mm_idx_bucket_t *bkt1 = &m1->bkt[i], *bkt2 = &m2->bkt[i];
+		mm_idx_bkt_t *bkt1 = &m1->bkt[i], *bkt2 = &m2->bkt[i];
 		if(bkt1 == NULL || bkt2 == NULL) {
 			if(bkt1 == NULL && bkt2 == NULL) continue;
 			if(bkt1) fprintf(stderr, "i(%lu), bkt1 is instanciated but bkt2 is not\n", i);
@@ -2965,56 +2965,66 @@ void mm_idx_cmp(mm_opt_t const *opt, mm_idx_t const *m1, mm_idx_t const *m2)
 #define _up(_x)						( (uintptr_t)(_x) )
 #define _inside_ptr(_a, _b, _c)		( (_up(_b) - _up(_a)) < (_up(_c) - _up(_a)) )
 static _force_inline
-void mm_idx_dump(mm_idx_t const *mi, void *fp, write_t wfp)
+uint64_t mm_idx_dump_calc_size(mm_idx_t const *mi)
 {
-	#define _writep(_b, _l)		{ wfp(fp, _b, _l); }
-	#define _writea(type, _a)	{ type _n = (_a); _writep(&_n, sizeof(type)); }
-
-	/* calc size */
 	uint64_t size = sizeof(mm_idx_t);
-	size += sizeof(mm_idx_bucket_t) * (1ULL<<mi->b);
+	size += sizeof(mm_idx_bkt_t) * (1ULL<<mi->b);
 	size += sizeof(mm_idx_seq_t) * mi->n_seq;
 	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
-		size += sizeof(v4u32_t) * kh_size(&mi->bkt[i].w.h);
-		size += sizeof(uint64_t) * (mi->bkt[i].v.p ? *mi->bkt[i].v.p : 1);
+		mm_idx_bkt_t *b = &mi->bkt[i];
+		if(kh_ptr(&b->w.h) == NULL) { continue; }
+		size += sizeof(v4u32_t) * kh_size(&b->w.h);
+		size += sizeof(uint64_t) * (b->v.p ? *b->v.p + 1 : 0);
 	}
 	mm_idx_intl_t *mmi = (mm_idx_intl_t *)mi;
 	for(uint64_t i = 0; i < mmi->mvec.n; i++) { size += mmi->mvec.a[i].size; }
+	return(size);
+}
+static _force_inline
+void mm_idx_dump(mm_idx_t const *mi, void *fp, write_t wfp)
+{
+	#define _writep(_b, _l)		{ wfp(fp, _b, _l); }
+	#define _writea(type, _a)	{ type _t = (_a); _writep(&(_t), sizeof(type)); }
+
+	/* calc size */
+	uint64_t size = mm_idx_dump_calc_size(mi);
 
 	/* dump header */
 	_writea(uint32_t, MM_IDX_MAGIC); _writea(uint64_t, size);
 
 	/* accumulate offset */
-	#define _acc(_bytes) ({ uintptr_t _s = ofs; ofs += (ptrdiff_t)(_bytes); (void *)_s; })
+	#define _acc(_bytes)	({ uintptr_t _s = ofs; ofs += (ptrdiff_t)(_bytes); (void *)_s; })
+	#define _ofs(_base)		( (ptrdiff_t)((_base) - ofs) )
 	uintptr_t ofs = sizeof(mm_idx_t);
 
 	/* dump idx object */
 	mm_idx_t mib = *mi;
-	mib.bkt = _acc(sizeof(mm_idx_bucket_t) * (1ULL<<mi->b));
+	mib.bkt = _acc(sizeof(mm_idx_bkt_t) * (1ULL<<mi->b));
 	mib.s = _acc(sizeof(mm_idx_seq_t) * mi->n_seq);
 	_writea(mm_idx_t, mib);
 
 	/* dump buckets (= first-stage hash table) */
 	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) {
-		if(kh_ptr(&mi->bkt[i].w.h) == NULL) { continue; }
-		mm_idx_bucket_t b = mi->bkt[i];
-		uint64_t const *p = b.v.p ? b.v.p : ((uint64_t const [1]){ 0 });
-		b.w.h.a = _acc(sizeof(v4u32_t) * kh_size(&mi->bkt[i].w.h));
-		b.v.p = _acc(sizeof(uint64_t) * (*p + 1));
-		_writea(mm_idx_bucket_t, b);
+		mm_idx_bkt_t b = mi->bkt[i];
+		if(kh_ptr(&b.w.h)) {
+			b.w.h.a = _acc(sizeof(v4u32_t) * kh_size(&mi->bkt[i].w.h));
+			b.v.p = _acc(sizeof(uint64_t) * (*b.v.p + 1));
+		}
+		_writea(mm_idx_bkt_t, b);
 	}
 
 	/* dump sequences */
+	mm_idx_intl_t *mmi = (mm_idx_intl_t *)mi;
 	mm_idx_mem_t const *q = mmi->mvec.a;
 	for(mm_idx_seq_t *p = mi->s, *t = &mi->s[mi->n_seq]; p < t; p++) {
 		/* update offset to forward to the next memory block if the sequence does not reside in the current one */
 		if(!_inside_ptr(q->base, p->seq, q->base + q->size)) { ofs += q++->size; }
-		mm_idx_seq_t s = *p; s.seq -= (ptrdiff_t)(q->base - ofs);
+		mm_idx_seq_t s = *p; s.seq -= _ofs(q->base); s.name -= _ofs(q->base);
 		_writea(mm_idx_seq_t, s);
 	}
 
 	/* dump memory blocks */
-	for(mm_idx_bucket_t *b = mi->bkt, *t = &mi->bkt[1ULL<<mi->b]; b < t; b++) {
+	for(mm_idx_bkt_t *b = mi->bkt, *t = &mi->bkt[1ULL<<mi->b]; b < t; b++) {
 		if(kh_ptr(&b->w.h) == NULL) { continue; }
 		uint64_t const *p = b->v.p ? b->v.p : ((uint64_t const [1]){ 0 });
 		_writep(b->w.h.a, sizeof(v4u32_t) * kh_size(&b->w.h));
@@ -3026,6 +3036,8 @@ void mm_idx_dump(mm_idx_t const *mi, void *fp, write_t wfp)
 	return;
 	#undef _writep
 	#undef _writea
+	#undef _acc
+	#undef _ofs
 }
 #undef _up
 #undef _inside_ptr
@@ -3050,8 +3062,14 @@ mm_idx_t *mm_idx_load(void *fp, read_t rfp)
 	/* restore pointers from offsets */
 	#define _rst(_p, _b)	{ (_p) = (void *)((uintptr_t)(_b) + (ptrdiff_t)(_p)); }
 	_rst(mi->bkt, mi); _rst(mi->s, mi);		/* keep mi->mem untouched */
-	for(uint64_t i = 0; i < 1ULL<<mi->b; i++) { _rst(mi->bkt[i].w.h.a, mi); _rst(mi->bkt[i].v.p, mi); }
-	for(uint64_t i = 0; i < mi->n_seq; i++) { _rst(mi->s[i].seq, mi); }
+	for(mm_idx_bkt_t *b = mi->bkt, *t = &mi->bkt[1ULL<<mi->b]; b < t; b++) {
+		if(kh_ptr(&b->w.h) == NULL) { continue; }
+		_rst(b->w.h.a, mi); _rst(b->v.p, mi);
+	}
+	for(uint64_t i = 0; i < mi->n_seq; i++) {
+		_rst(mi->s[i].name, mi);
+		_rst(mi->s[i].seq, mi);
+	}
 	#undef _rst
 	return(mi);
 _mm_idx_load_fail:
