@@ -522,7 +522,7 @@ void kh_extend(kh_t *h)
 {
 	uint64_t prev_size = h->mask + 1, size = 2 * prev_size, mask = size - 1;
 
-	debug("kh_extend called, new_size(%llx), cnt(%u), ub(%u)", size, h->cnt, h->ub);
+	debug("kh_extend called, new_size(%lx), cnt(%u), ub(%u)", size, h->cnt, h->ub);
 
 	/* update size */
 	h->mask = mask;
@@ -583,7 +583,7 @@ uint64_t *kh_put_ptr(kh_t *h, uint64_t key, uint64_t extend)
 {
 	if(extend != 0 && h->cnt >= h->ub) { kh_extend(h); }
 	kh_bidx_t b = kh_allocate(h->a, key, KH_INIT_VAL, h->mask);
-	debug("allocated hash bin (%llu, %llu), (%llx, %llx), dst(%lld)", b.idx, b.n, h->a[b.idx].u64[0], h->a[b.idx].u64[1], (b.idx - key) & h->mask);
+	debug("allocated hash bin (%lu, %lu), (%lx, %lx), dst(%ld)", b.idx, b.n, h->a[b.idx].u64[0], h->a[b.idx].u64[1], (b.idx - key) & h->mask);
 
 	h->cnt += b.n;
 	// h->ub = ((b.idx - key) & h->mask) > KH_DST_MAX ? 0 : h->ub;
@@ -2798,6 +2798,7 @@ void *mm_idx_count_occ(uint32_t tid, void *arg, void *item)
 		}
 		b->v.n.single = n_single + (n == 1);
 		b->v.n.keys = n_keys + 1;
+		// debug("single(%u), keys(%u)", b->v.n.single, b->v.n.keys);
 		*u++ = n; cnt->n = u - cnt->a;
 	}
 	return(NULL);
@@ -2826,6 +2827,7 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 			} \
 			kh_put(&b->w.h, key, val); \
 		}
+		// debug("i(%lu), p(%p), single(%u), keys(%u)", b - mii->mi.bkt, b->v.p, b->v.n.single, b->v.n.keys);
 		kh_init_static(&b->w.h, b->v.n.keys / KH_THRESH);		/* make the hash table occupancy equal to (or slightly smaller than) KH_THRESH */
 		uint64_t max_cnt = mii->mi.occ[mii->mi.n_occ], sp = 0, *r = (uint64_t *)arr;	/* reuse minimizer array */
 		mm_mini_t *p = arr, *q = p, *t = &arr[n_arr];
@@ -3306,7 +3308,7 @@ uint64_t mm_seed(
 	mm_tbuf_t *self,
 	uint64_t cnt)								/* iteration count */
 {
-	debug("seed iteration i(%llu)", cnt);
+	debug("seed iteration i(%lu)", cnt);
 	if(cnt == 0) {
 		mm_collect_seed(self);					/* first collect seeds */
 	} else {
@@ -3532,7 +3534,7 @@ uint64_t mm_record(
 	uint64_t id = _loadu_u64(&self->rid);
 	uint64_t hkey = _key(_loadu_u64(&a->seg->apos), id);
 	uint64_t tkey = _key(_loadu_u64(&a->seg->apos) + _loadu_u64(&a->seg->alen), id);
-	debug("hash key, h(%llx), t(%llx)", hkey, tkey);
+	debug("hash key, h(%lx), t(%lx)", hkey, tkey);
 
 	v2u32_t *h = (v2u32_t *)kh_put_ptr(&self->pos, hkey, 1);
 	v2u32_t *t = (v2u32_t *)kh_put_ptr(&self->pos, tkey, 0);		/* noextend */
@@ -3543,7 +3545,7 @@ uint64_t mm_record(
 	gaba_alignment_t const **b = (gaba_alignment_t const **)&self->bin.a[bid];
 
 	debug("id(%u, %u)", a->seg->aid, a->seg->bid);
-	debug("record h(%llx, %u), t(%llx, %u), bid(%u)", h[-1].u64[0], h->u32[1], t[-1].u64[0], t->u32[1], bid);
+	debug("record h(%lx, %u), t(%lx, %u), bid(%u)", h[-1].u64[0], h->u32[1], t[-1].u64[0], t->u32[1], bid);
 
 	/* update res */
 	res->score -= a->score;
@@ -3560,10 +3562,10 @@ uint64_t mm_record(
 
 	/* update hash */
 	if(b[0]->score > a->score) {
-		debug("discard, a(%lld), b(%lld)", a->score, b[0]->score);
+		debug("discard, a(%ld), b(%ld)", a->score, b[0]->score);
 		*t = (v2u32_t){ .u64[0] = KH_INIT_VAL };	/* re-mark: evaluated but not found */
 	} else {
-		debug("replace, a(%lld), b(%lld)", a->score, b[0]->score);
+		debug("replace, a(%ld), b(%ld)", a->score, b[0]->score);
 		/* replace if the new one is larger than the old one */
 		*b = a;
 		*h = *t = (v2u32_t){
@@ -3607,7 +3609,7 @@ gaba_fill_t const *mm_extend_core(
 	/* fill root */
 	gaba_fill_t const *f = gaba_dp_fill_root(dp, a, s.apos, b, s.bpos, 0);
 	if(_unlikely(f == NULL)) { goto _mm_extend_core_abort; }
-	debug("fill root, max(%lld), status(%x)", f->max, f->stat);
+	debug("fill root, max(%ld), status(%x)", f->max, f->stat);
 
 	gaba_fill_t const *m = f;					/* record max */
 	uint32_t flag = GABA_TERM;
@@ -3623,7 +3625,7 @@ gaba_fill_t const *mm_extend_core(
 		if(_unlikely((f = gaba_dp_fill(dp, f, a, b, 0)) == NULL)) {
 			goto _mm_extend_core_abort;
 		}
-		debug("fill, max(%lld, %lld), status(%x)", f->max, m->max, f->stat);
+		debug("fill, max(%ld, %ld), status(%x)", f->max, m->max, f->stat);
 		m = f->max > m->max ? f : m;
 	}
 	return(m);									/* never be null */
@@ -3668,7 +3670,7 @@ uint64_t mm_extend(
 		gaba_pos_pair_t cp = { .apos = _as(p), .bpos = _bs(p) };
 		int32_t rev = _smask(cp.bpos);
 		mm_extend_load_ref(self, p->rid);
-		debug("chain(%llu), cid(%u), rev(%d), plen(%d), (%u, %u), (%d, %d), (%d, %d)", k, self->map.a[p->mid], rev, plen, self->rid, self->qid, p->apos, p->bpos, cp.apos, cp.bpos);
+		// debug("chain(%lu), cid(%u), rev(%d), plen(%d), (%u, %u), (%d, %d), (%d, %d)", k, self->map.a[p->mid], rev, plen, self->rid, self->qid, p->apos, p->bpos, cp.apos, cp.bpos);
 
 		/* open result bin */
 		uint32_t bid = kv_pushm(void *, self->bin, (void **)&((mm_bin_t){ .lb = UINT32_MAX }), MM_BIN_N);
@@ -3697,7 +3699,7 @@ uint64_t mm_extend(
 
 			/* search pos if extended */
 			if(u->max > 0) { tp = gaba_dp_search_max(&self->dp[narrow], u); }
-			debug("len(%u, %u), score(%lld), (%u, %u) -> (%u, %u)",
+			debug("len(%u, %u), score(%ld), (%u, %u) -> (%u, %u)",
 				self->r[0].len, self->q[0].len, u->max, cp.apos, cp.bpos, tp.apos, tp.bpos);
 
 			/* skip if tail is duplicated */
@@ -3722,10 +3724,10 @@ uint64_t mm_extend(
 			/* generate alignment: coordinates are reversed again, gaps are left-aligned in the resulting path */
 			gaba_alignment_t const *a = gaba_dp_trace(&self->dp[0], t, &self->alloc);		/* lmm is contained in self->trace */
 			if(a == NULL) {
-				debug("failed to generate trace: len(%u, %u), score(%lld), <- (%u, %u)", self->r[0].len, self->q[0].len, t->max, tp.apos, tp.bpos);
+				debug("failed to generate trace: len(%u, %u), score(%ld), <- (%u, %u)", self->r[0].len, self->q[0].len, t->max, tp.apos, tp.bpos);
 				continue;						/* something is wrong... */
 			}
-			debug("len(%u, %u), score(%lld), (%u, %u) <- (%u, %u)",
+			debug("len(%u, %u), score(%ld), (%u, %u) <- (%u, %u)",
 				self->r[0].len, self->q[0].len, t->max, a->seg->apos, a->seg->bpos, tp.apos, tp.bpos);
 
 			/* record alignment, update current head position */
@@ -3813,7 +3815,7 @@ uint64_t mm_collect_supp(
 
 				/* calculate covered length */
 				if(2*(ub - lb) < span) {		/* check if covered by j */
-					debug("mark secondary, i(%llu)", i);
+					debug("mark secondary, i(%lu)", i);
 					q--; _swap_res(i, q); i--;	/* move to tail */
 					goto _loop_tail;
 				}
@@ -3824,7 +3826,7 @@ uint64_t mm_collect_supp(
 		_loop_tail:;
 		}
 		if(max & 0xffffffff) {
-			debug("mark supplementary, i(%llu)", max & 0xffffffff);
+			debug("mark supplementary, i(%lu)", max & 0xffffffff);
 			_swap_res(p, max & 0xffffffff);		/* move to head, mark supplementary */
 		}
 	}
@@ -4039,7 +4041,7 @@ mm_reg_t const *mm_align_seq(
 		debug("n_aln(%u), plen(%u), lb(%u), ub(%u)", bin->n_aln, bin->plen, bin->lb, bin->ub);
 
 		for(uint64_t j = 0; j < bin->n_aln; j++) {
-			debug("j(%llu), aln(%p)", j, bin->aln[j]);
+			debug("j(%lu), aln(%p)", j, bin->aln[j]);
 		}
 
 	}
