@@ -960,7 +960,7 @@ pt_t *pt_init(uint32_t nth)
 
 		pthread_create(&pt->c[i].th, NULL, pt_dispatch, (void *)&pt->c[i]);
 	}
-	return pt;
+	return(pt);
 }
 
 /**
@@ -973,8 +973,8 @@ int pt_set_worker(pt_t *pt, void *arg, pt_worker_t wfp)
 	void *item;
 
 	/* fails when unprocessed object exists in the queue */
-	if((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
-		pt_enq(pt->c->in, pt->c->tid, item);
+	if((item = pt_deq(&pt->in, 0)) != PT_EMPTY) {
+		pt_enq(&pt->in, 0, item);
 		return(-1);
 	}
 
@@ -995,44 +995,30 @@ int pt_set_worker(pt_t *pt, void *arg, pt_worker_t wfp)
 static _force_inline
 int pt_stream(pt_t *pt, void *arg, pt_source_t sfp, pt_worker_t wfp, pt_drain_t dfp)
 {
-	if(pt_set_worker(pt, wfp, arg)) { return(-1); }
+	if(pt_set_worker(pt, arg, wfp)) { return(-1); }
 
 	/* keep balancer between [lb, ub) */
 	uint64_t const lb = 2 * pt->nth, ub = 4 * pt->nth;
 	uint64_t bal = 0;
-	void *item;
+	void *it;
 
-	while((item = sfp(pt->c->tid, arg)) != NULL) {
-		pt_enq(pt->c->in, pt->c->tid, item);
+	while((it = sfp(0, arg)) != NULL) {
+		pt_enq(&pt->in, 0, it);
 		if(++bal < ub) { continue; }
 
 		while(bal > lb) {
 			/* flush to drain (note: while loop is better?) */
-			if((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) {
-				bal--;
-				dfp(pt->c->tid, arg, item);
-			}
-
+			if((it = pt_deq(&pt->out, 0)) != PT_EMPTY) { bal--; dfp(0, arg, it); }
 			/* process one in the master (parent) thread */
-			if((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
-				bal--;
-				dfp(pt->c->tid, arg, wfp(pt->c->tid, arg, item));
-			}
+			if((it = pt_deq(&pt->in, 0)) != PT_EMPTY) { bal--; dfp(0, arg, wfp(0, arg, it)); }
 		}
 	}
 
 	/* source depleted, process remainings */
-	while((item = pt_deq(pt->c->in, pt->c->tid)) != PT_EMPTY) {
-		pt_enq(pt->c->out, pt->c->tid, wfp(pt->c->tid, arg, item));
-	}
+	while((it = pt_deq(&pt->in, 0)) != PT_EMPTY) { pt_enq(&pt->out, 0, wfp(0, arg, it)); }
 
 	/* flush results */
-	while(bal > 0) {
-		if((item = pt_deq(pt->c->out, pt->c->tid)) != PT_EMPTY) {
-			bal--;
-			dfp(pt->c->tid, arg, item);
-		}
-	}
+	while(bal > 0) { if((it = pt_deq(&pt->out, 0)) != PT_EMPTY) { bal--; dfp(0, arg, it); } }
 	return(0);
 }
 
@@ -1043,26 +1029,24 @@ static _force_inline
 int pt_parallel(pt_t *pt, void *arg, pt_worker_t wfp)
 {
 	/* fails when unprocessed element exists */
-	if(pt_set_worker(pt, wfp, arg)) { return(-1); }
+	if(pt_set_worker(pt, arg, wfp)) { return(-1); }
 
 	/* push items */
-	for(uint64_t i = 1; i < pt->nth; i++) {
-		pt_enq(pt->c->in, pt->c->tid, NULL);
-	}
+	for(uint64_t i = 1; i < pt->nth; i++) { pt_enq(&pt->in, 0, (void *)i); }
 	debug("pushed items");
 
 	/* process the first one in the master (parent) thread */
-	wfp(pt->c->tid, arg, NULL);
+	wfp(0, arg, (void *)0);
 	debug("finished master");
 
 	/* wait for the children done */
 	for(uint64_t i = 1; i < pt->nth; i++) {
-		while(pt_deq(pt->c->out, pt->c->tid) == PT_EMPTY) {
+		while(pt_deq(&pt->out, 0) == PT_EMPTY) {
 			struct timespec tv = { .tv_nsec = 512 * 1024 };
 			nanosleep(&tv, NULL);	/* wait for a while */
 			/* sched_yield(); */
 		}
-		debug("joined i(%llu)", i);
+		debug("joined i(%lu)", i);
 	}
 	return 0;
 }
@@ -1277,15 +1261,15 @@ pg_t *pg_init(FILE *fp, pt_t *pt)
 	/* create context */
 	pg_t *pg = calloc(1, sizeof(pg_t) + pt_nth(pt) * sizeof(pg_t *));
 	*pg = (pg_t){
-		.fp = fp,
+		.fp = fp, .pt = pt,
 		.lb = pt_nth(pt), .ub = 3 * pt_nth(pt), .bal = 0, .nth = pt_nth(pt),
 		.block_size = 1024 * 1024
 	};
 	kv_hq_init(pg->hq);
 
 	/* init worker args */
-	for(uint64_t i = 0; i < pt_nth(pt); i++) { pg->c[i] = (void *)pg; }
-	pt_set_worker(pg->pt, pg->c, pg_worker);
+	// for(uint64_t i = 0; i < pt_nth(pt); i++) { pg->c[i] = (void *)pg; }
+	pt_set_worker(pg->pt, pg, pg_worker);
 	return(pg);
 }
 
@@ -1303,15 +1287,14 @@ void pg_freeze(pg_t *pg)
 		if(pg->nth == 1) {
 			pg_write_block(pg, pg_deflate(s, pg->block_size));
 		} else {
-			pg->bal++;
-			pt_enq(pg->pt->c->in, pg->pt->c->tid, s);
+			pg->bal++; pt_enq(&pg->pt->in, 0, s);
 		}
 		pg->s = NULL;
 	}
 
 	/* process remainings */
 	while(pg->bal > 0) {
-		if((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
+		if((t = pt_deq(&pg->pt->out, 0)) == PT_EMPTY) {
 			/* wait for a while(note: nanosleep is better?) */
 			sched_yield(); continue;
 		}
@@ -1350,58 +1333,62 @@ void pg_destroy(pg_t *pg)
  * @fn pgread
  */
 static _force_inline
+pg_block_t *pg_read_single(pg_t *pg)
+{
+	/* single-threaded */
+	pg_block_t *t;
+	if((t = pg_read_block(pg)) == NULL) { pg->eof = 2; return(NULL); }
+	return(pg_inflate(t, pg->block_size));
+}
+static _force_inline
+pg_block_t *pg_read_multi(pg_t *pg)
+{
+	/* multithreaded; read compressed blocks and push them to queue */
+	pg_block_t *t;
+	while(!pg->eof && pg->bal < pg->ub) {
+		if((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
+		pg->bal++;
+		pt_enq(&pg->pt->in, 0, t);
+	}
+
+	/* fetch inflated blocks and push heapqueue to sort */
+	while((t = pt_deq(&pg->pt->out, 0)) != PT_EMPTY) {
+		pg->bal--;
+		kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){.u64 = {t->id, (uintptr_t)t}}));
+	}
+
+	/* check if input depleted */
+	if(pg->ocnt >= pg->icnt) { pg->eof = 2; return(NULL); }
+
+	/* check if inflated block is available */
+	if(pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) {
+		sched_yield(); return(NULL);	/* wait for a while */
+	}
+
+	/* block is available! */
+	pg->ocnt++;
+	return((pg_block_t *)kv_hq_pop(v4u32_t, incq_comp, pg->hq).u64[1]);
+}
+static _force_inline
 uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 {
 	uint64_t rem = len;
 	pg_block_t *s = pg->s, *t;
 	if(pg->eof == 2) return(0);
+	if(pg->pt->c->wfp != pg_worker && pt_set_worker(pg->pt, pg, pg_worker)) {
+		return(0);
+	}
 
+	static pg_block_t *(*const fp[2])(pg_t *) = { pg_read_single, pg_read_multi };
 	while(rem > 0) {
 		/* check and prepare a valid inflated block */
 		while(s == NULL || s->head == s->len) {
-			free(s); s = NULL;
-			if(pg->nth == 1) {
-				/* single-threaded */
-				if((t = pg_read_block(pg)) == NULL) {
-					pg->eof = 2;
-					return(len-rem);
-				}
-				pg->s = s = pg_inflate(t, pg->block_size);
-			} else {
-				/* multithreaded; read compressed blocks and push them to queue */
-				while(!pg->eof && pg->bal < pg->ub) {
-					if((t = pg_read_block(pg)) == NULL) {
-						pg->eof = 1; break;
-					}
-					pg->bal++;
-					pt_enq(pg->pt->c->in, pg->pt->c->tid, t);
-				}
-
-				/* fetch inflated blocks and push heapqueue to sort */
-				while((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) != PT_EMPTY) {
-					pg->bal--;
-					kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){.u64 = {t->id, (uintptr_t)t}}));
-				}
-
-				/* check if input depleted */
-				if(pg->ocnt >= pg->icnt) {
-					pg->eof = 2;
-					return(len-rem);
-				}
-
-				/* check if inflated block is available */
-				if(pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) {
-					sched_yield(); continue;	/* wait for a while */
-				}
-
-				/* block is available! */
-				pg->ocnt++;
-				pg->s = s = (pg_block_t*)kv_hq_pop(v4u32_t, incq_comp, pg->hq).u64[1];
-			}
+			free(s); pg->s = s = fp[pg->nth > 1](pg);
+			if(pg->eof > 1) { return(len - rem); }
 		}
 
 		/* copy to dst buffer */
-		uint64_t adv = MIN2(rem, s->len-s->head);
+		uint64_t adv = MIN2(rem, s->len - s->head);
 		memcpy(dst + len - rem, s->buf + s->head, adv);
 		rem -= adv; s->head += adv;
 	}
@@ -1412,46 +1399,51 @@ uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
  * @fn pgwrite
  */
 static _force_inline
+void pg_write_single(pg_t *pg, pg_block_t *s)
+{
+	/* single-threaded */
+	if(s != NULL) { pg_write_block(pg, pg_deflate(s, pg->block_size)); }
+	return;
+}
+static _force_inline
+void pg_write_multi(pg_t *pg, pg_block_t *s)
+{
+	/* push the current block to deflate queue */
+	if(s != NULL) { pg->bal++; pt_enq(&pg->pt->in, 0, s); }
+
+	/* fetch copressed block and push to heapqueue to sort */
+	pg_block_t *t;
+	while(pg->bal > pg->lb) {
+		if((t = pt_deq(&pg->pt->out, 0)) == PT_EMPTY) {
+			if(pg->bal < pg->ub) { break; }	/* unexpected error */
+			sched_yield(); continue;		/* queue full, wait for a while */
+		}
+		pg->bal--;
+		kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){.u64 = {t->id, (uintptr_t)t}}));
+	}
+
+	/* flush heapqueue */
+	while(pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
+		pg->ocnt++;
+		t = (pg_block_t*)kv_hq_pop(v4u32_t, incq_comp, pg->hq).u64[1];
+		pg_write_block(pg, t);
+	}
+	return;
+}
+static _force_inline
 uint64_t pgwrite(pg_t *pg, const void *src, uint64_t len)
 {
 	uint64_t rem = len;
 	pg_block_t *s = pg->s, *t;
+	if(pg->pt->c->wfp != pg_worker && pt_set_worker(pg->pt, pg, pg_worker)) {
+		return(0);
+	}
+
+	void (*const fp[2])(pg_t *, pg_block_t *) = { pg_write_single, pg_write_multi };
 	while(rem > 0) {
 		/* push the current block to queue and prepare an empty one if the current one is full */
 		if(s == NULL || s->head == s->len) {
-			if(pg->nth == 1) {
-				/* single-threaded */
-				if(s != NULL) {
-					pg_write_block(pg, pg_deflate(s, pg->block_size));
-				}
-			} else {
-				/* multithreaded; fetch copressed block and push to heapqueue to sort */
-				while(pg->bal > pg->lb) {
-					if((t = pt_deq(pg->pt->c->out, pg->pt->c->tid)) == PT_EMPTY) {
-						if(pg->bal >= pg->ub) {
-							sched_yield(); continue;		/* queue full, wait for a while */
-						} else {
-							break;							/* unexpected error */
-						}
-					}
-					pg->bal--;
-					kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){.u64 = {t->id, (uintptr_t)t}}));
-				}
-
-				/* flush heapqueue */
-				while(pg->hq.n > 1 && pg->hq.a[1].u64[0] <= pg->ocnt) {
-					pg->ocnt++;
-					t = (pg_block_t*)kv_hq_pop(v4u32_t, incq_comp, pg->hq).u64[1];
-					pg_write_block(pg, t);
-				}
-
-				/* push the current block to deflate queue */
-				if(s != NULL) {
-					pg->bal++;
-					pt_enq(pg->pt->c->in, pg->pt->c->tid, s);
-				}
-			}
-
+			fp[pg->nth > 1](pg, s);
 			/* create new block */
 			s = malloc(sizeof(pg_block_t) + pg->block_size);
 			s->head = 0;
