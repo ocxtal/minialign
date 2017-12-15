@@ -95,7 +95,10 @@ void oom_abort(
 	struct rusage r;
 	getrusage(RUSAGE_SELF, &r);
 	fprintf(stderr, "[E::%s] Out of memory. (required: %zu MB, maxrss: %ld MB)\n", name, req / 1024, r.ru_maxrss);
-	exit(128);	/* 128 reserved for out of memory */
+	#ifdef DEBUG
+		*((volatile uint8_t *)NULL);	/* segv trap for debugging */
+	#endif
+	exit(128);							/* 128 reserved for out of memory */
 }
 
 /**
