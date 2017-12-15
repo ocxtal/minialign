@@ -3050,7 +3050,7 @@ static _force_inline
 mm_idx_t *mm_idx_load(void *fp, read_t rfp)
 {
 	/* read by _l and test if full length is filled, jump to _fail if not */
-	#define _readp(_b, _l)	{ if(rfp(fp, _b, _l) != _l) { fprintf(stderr, "l(%d), len not match\n", __LINE__); goto _mm_idx_load_fail; } }
+	#define _readp(_b, _l)	{ if(rfp(fp, _b, _l) != _l) { goto _mm_idx_load_fail; } }
 	#define _reada(type)	({ type _n; _readp(&_n, sizeof(type)); _n; })
 
 	mm_idx_t *mi = NULL;
