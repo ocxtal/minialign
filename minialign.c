@@ -283,6 +283,18 @@ char *mm_strdup(char const *p)
 	return(b.a);
 }
 static _force_inline
+char *mm_join(char const *const *p, char c)
+{
+	kvec_t(char) b = { 0 }; p--;
+	while(*++p) {
+		char const *q = *p - 1;
+		while(*++q) { kv_push(char, b, *q); }
+		kv_push(char, b, c);
+	}
+	b.a[--b.n] = '\0';
+	return(b.a);
+}
+static _force_inline
 int mm_startswith(char const *p, char const *prf)
 {
 	uint64_t l = strlen(p), r = strlen(prf);
@@ -5771,23 +5783,12 @@ void mm_opt_destroy(mm_opt_t *o)
 static _force_inline
 mm_opt_t *mm_opt_init(char const *const *argv)
 {
-	kvec_t(char) b = { 0 };
-	char const *const *p = argv - 1;
-	while(*++p) {
-		char const *q = *p - 1;
-		while(*++q) { kv_push(char, b, *q); }
-		kv_push(char, b, ' ');
-	}
-	b.a[--b.n] = '\0';
-
 	mm_opt_t *o = calloc(1, sizeof(mm_opt_t));
 	*o = (mm_opt_t){
 		/* global */
 		.nth = 1,
 		/* input */
-		.b = {
-			.batch_size = 512 * 1024, .min_len = 1,
-		},
+		.b = { .batch_size = 512 * 1024, .min_len = 1, },
 		/* indexing params */
 		.c = {
 			.k = 15, .w = 32, .b = 14,		/* w will be overwritten later */
@@ -5803,9 +5804,7 @@ mm_opt_t *mm_opt_init(char const *const *argv)
 			},
 		},
 		/* output */
-		.r = {
-			.outbuf_size = 512 * 1024, .arg_line = b.a,
-		},
+		.r = { .outbuf_size = 512 * 1024, .arg_line = mm_join(argv, ' '), },
 		/* initialized time and loggers */
 		.inittime = realtime(),
 		.verbose = 1, .fp = (void *)stderr, .log = (mm_log_t)mm_log_printer,
