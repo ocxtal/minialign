@@ -4189,7 +4189,8 @@ void *mm_align_source(uint32_t tid, void *arg)
 static
 void *mm_align_worker(uint32_t tid, void *arg, void *item)
 {
-	mm_tbuf_t *t = (mm_tbuf_t *)arg;
+	mm_align_t *b = (mm_align_t *)arg;
+	mm_tbuf_t *t = (mm_tbuf_t *)b->t[tid];
 	mm_align_step_t *s = (mm_align_step_t *)item;
 	bseq_t *r = (bseq_t *)s;
 	for(uint64_t i = 0; i < r->n_seq; i++) {
