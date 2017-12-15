@@ -2783,9 +2783,11 @@ void mm_idx_drain(uint32_t tid, void *arg, void *item)
 static
 void *mm_idx_count_occ(uint32_t tid, void *arg, void *item)
 {
+	uint64_t i = (uint64_t)item;
 	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
-	mm_idx_bucket_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  tid      / mii->nth] - 1;
-	mm_idx_bucket_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (tid + 1) / mii->nth];
+	mm_idx_bucket_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  i      / mii->nth] - 1;
+	mm_idx_bucket_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
+
 	uint32_v *cnt = &mii->cnt[tid];
 	while(++b < t) {
 		uint64_t n_arr = b->w.a.n;
@@ -2817,9 +2819,12 @@ void *mm_idx_count_occ(uint32_t tid, void *arg, void *item)
 static
 void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 {
+	uint64_t i = (uint64_t)item;
 	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
-	mm_idx_bucket_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  tid      / mii->nth] - 1;
-	mm_idx_bucket_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (tid + 1) / mii->nth];
+	mm_idx_bucket_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  i      / mii->nth] - 1;
+	mm_idx_bucket_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
+
+	debug("i(%lu), (%llu, %llu)", i, (1ULL<<mii->mi.b) * i / mii->nth, (1ULL<<mii->mi.b) * (i+1) / mii->nth);
 	while(++b < t) {
 		uint64_t n_arr = b->w.a.n;
 		if(n_arr == 0) { continue; }
@@ -2866,11 +2871,11 @@ mm_idx_t *mm_idx_gen(mm_idx_params_t const *o, bseq_file_t *fp, pt_t *pt)
 			.bkt = malloc(sizeof(mm_idx_bucket_t) * (1ULL<<b)),
 			.mask = (1ULL<<b) - 1, .b = b, .w = o->w, .k = o->k, .n_occ = o->n_frq
 		},
-		.fp = fp,
+		.fp = fp, .nth = pt_nth(pt),
+		.cnt   = calloc(pt_nth(pt), sizeof(uint32_v)),
 		.circ  = &o->circ,
 		.call  = kh_str_ptr(&o->circ) && kh_str_size(&o->circ) == 0,	/* mark all sequences as circular if array is instanciated but no entry found */
-		.ctest = kh_str_ptr(&o->circ) && kh_str_size(&o->circ) > 0,
-		.cnt   = calloc(pt_nth(pt), sizeof(uint32_v))
+		.ctest = kh_str_ptr(&o->circ) && kh_str_size(&o->circ) > 0
 	};
 
 	/* read sequence and collect minimizers */
@@ -2898,6 +2903,7 @@ mm_idx_t *mm_idx_gen(mm_idx_params_t const *o, bseq_file_t *fp, pt_t *pt)
 	pt_parallel(pt, mmi, mm_idx_build_hash);
 
 	/* finish */
+	mmi->mi.s = mmi->svec.a;
 	mmi->mi.n_seq = mmi->svec.n;
 	return((mm_idx_t *)mmi);
 }
@@ -5841,6 +5847,9 @@ mm_opt_t *mm_opt_init(char const *const *argv)
 	};
 	if(mm_opt_parse_argv(o, ++argv)) { free(o); return(NULL); }
 	if(o->c.w >= 32) { o->c.w = (int)(2.0/3.0 * o->c.k + .499); }		/* calc. default window size (proportional to kmer length) if not specified */
+	if((o->pt = pt_init(o->nth)) == NULL) {
+		mm_opt_destroy(o); return(NULL);
+	}
 	return(o);
 }
 
