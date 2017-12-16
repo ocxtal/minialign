@@ -1375,7 +1375,7 @@ static _force_inline
 uint64_t pgread(pg_t *pg, void *dst, uint64_t len)
 {
 	uint64_t rem = len;
-	pg_block_t *s = pg->s, *t;
+	pg_block_t *s = pg->s;
 	if(pg->eof == 2) return(0);
 	if(pg->pt->c->wfp != pg_worker && pt_set_worker(pg->pt, pg, pg_worker)) {
 		return(0);
@@ -1436,7 +1436,7 @@ static _force_inline
 uint64_t pgwrite(pg_t *pg, const void *src, uint64_t len)
 {
 	uint64_t rem = len;
-	pg_block_t *s = pg->s, *t;
+	pg_block_t *s = pg->s;
 	if(pg->pt->c->wfp != pg_worker && pt_set_worker(pg->pt, pg, pg_worker)) {
 		return(0);
 	}
