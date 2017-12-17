@@ -2756,6 +2756,10 @@ void mm_idx_drain_intl(mm_idx_intl_t *mii, mm_idx_step_t *s)
 			kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
 				.hrem = h>>b, .pos = (*p & 0x80) ? rpos : fpos, .rid = mii->svec.n
 			}));
+			debug("bkt(%lu), i(%lu), (%u, %d, %lx)", h & mask, bkt[h & mask].w.a.n - 1,
+				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].rid,
+				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].pos,
+				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].hrem);
 		}
 		src++; mii->svec.n++;				/* update src and dst pointers (update rid) */
 	}
@@ -2891,6 +2895,7 @@ mm_idx_t *mm_idx_gen(mm_idx_params_t const *o, bseq_file_t *fp, pt_t *pt)
 		kv_pushm(uint32_t, mmi->cnt[0], mmi->cnt[i].a, mmi->cnt[i].n);
 		free(mmi->cnt[i].a);
 	}
+	debug("keys(%lu)", mmi->cnt[0].n);
 
 	/* calculate occurrence thresholds */
 	for(uint64_t i = 0; i < o->n_frq; i++) {
