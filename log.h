@@ -48,6 +48,10 @@
 #undef debug_impl
 #undef dbprintf
 #undef print_lane
+
+#define trap() { \
+	*((volatile uint8_t *)NULL); \
+}
 #define debug(...) { \
 	debug_impl(__VA_ARGS__, ""); \
 }
@@ -113,6 +117,7 @@
 })
 #endif
 #else
+#define trap() {}
 #define debug(...) {}
 #define dbprintf(fmt, ...) {}
 #define print_lane(p1, p2) {}
