@@ -2710,12 +2710,14 @@ void *mm_idx_worker(uint32_t tid, void *arg, void *item)
 
 	mm_sketch_t sk;
 	for(uint64_t i = 0; i < r->n_seq; i++) {
-		uint64_t c = mii->call | (mii->ctest && kh_str_get(mii->circ, r->seq[i].name, r->seq[i].l_name) != NULL);
-
 		mm_sketch_init(&sk, mii->mi.w, mii->mi.k);
 		mm_sketch(&sk, r->seq[i].seq, r->seq[i].l_seq, &s->a);
+
+		/* tail margin for circular sequences */
+		uint64_t c = mii->call | (mii->ctest && kh_str_get(mii->circ, r->seq[i].name, r->seq[i].l_name) != NULL);
 		if(c) { mm_sketch_tail(&sk, r->seq[i].seq, r->seq[i].l_seq, &s->a, 0); }			/* nori-shiro */
 		r->seq[i].u64 = (s->a.n<<1) | c;	/* (#minimizers: 63, circular:1) */
+		debug("c(%lu), n(%lu)", c, s->a.n);
 	}
 	return(s);
 }
