@@ -55,6 +55,10 @@ int main() {
 #define kv_max2(a, b)				( ((a) < (b)) ? (b) : (a) )
 #define kv_min2(a, b)				( ((a) < (b)) ? (a) : (b) )
 
+/* gcc builtin hints */
+#define kv_likely(x)				__builtin_expect(!!(x), 1)
+#define kv_unlikely(x)				__builtin_expect(!!(x), 0)
+
 #define kvec_t(type) struct { size_t n, m; type *a; }
 #define kv_init(v) ((v).n = (v).m = 0, (v).a = 0)
 #define kv_inits(type) ((kvec_t(type)){ .n = 0, .m = 0, .a = 0 })
@@ -73,16 +77,16 @@ int main() {
 	} while (0)
 
 #define kv_reserve(type, v, s) ( \
-	(v).m > (s) ? 0 : ((v).m = kv_max2(2*(v).m, (s)), (v).a = realloc((v).a, sizeof(type) * (v).m), 0) )
+	kv_likely((v).m > (s)) ? 0 : ((v).m = kv_max2(2*(v).m, (s)), (v).a = realloc((v).a, sizeof(type) * (v).m), 0) )
 
 #define kv_copy(type, v1, v0) do {							\
-		if ((v1).m < (v0).n) kv_resize(type, v1, (v0).n);	\
+		if (kv_unlikely((v1).m < (v0).n)) { kv_resize(type, v1, (v0).n); }\
 		(v1).n = (v0).n;									\
 		memcpy((v1).a, (v0).a, sizeof(type) * (v0).n);		\
 	} while (0)												\
 
 #define kv_push(type, v, x) ({										\
-		if ((v).n == (v).m) {										\
+		if (kv_unlikely((v).n == (v).m)) {							\
 			(v).m = (v).m? (v).m<<1 : 2;							\
 			(v).a = (type*)realloc((v).a, sizeof(type) * (v).m);	\
 		}															\
@@ -91,7 +95,7 @@ int main() {
 	})
 
 #define kv_pushp(type, v) ({ \
-		if ((v).n == (v).m) { \
+		if (kv_unlikely((v).n == (v).m)) { \
 			(v).m = (v).m? (v).m<<1 : 2; \
 			(v).a = (type*)realloc((v).a, sizeof(type) * (v).m); \
 		} \
@@ -99,7 +103,7 @@ int main() {
 	})
 
 #define kv_pushm(type, v, arr, size) ({ \
-		if(((v).m - (v).n) < (uint64_t)(size)) { \
+		if(kv_unlikely(((v).m - (v).n) < (uint64_t)(size))) { \
 			(v).m = kv_max2((v).m * 2, (v).n + (size));		\
 			(v).a = (type*)realloc((v).a, sizeof(*(v).a) * (v).m);	\
 		} \
