@@ -2376,7 +2376,7 @@ uint64_t mm_sketch_tail(mm_sketch_t *sk, uint8_t const *seq, uint32_t len, uint6
 {
 	uint64_t l = MIN2(rem + len, sk->w);
 	_loop_init(l); (void)t;			/* t is unused here */
-	for(uint64_t i = rem, f = UINT64_MAX; i < l; i++) { _loop_core(); i++; }
+	for(uint64_t i = rem, f = UINT64_MAX; i < l; i++) { _loop_core(); }
 	b->n = q - b->a;
 	return(l);
 }
