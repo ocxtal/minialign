@@ -82,6 +82,9 @@
 #endif
 /* utils.h */
 
+#include "sassert.h"
+#include "log.h"
+
 /* mm_malloc.c: malloc wrappers */
 /**
  * @fn oom_abort
@@ -95,9 +98,7 @@ void oom_abort(
 	struct rusage r;
 	getrusage(RUSAGE_SELF, &r);
 	fprintf(stderr, "[E::%s] Out of memory. (required: %zu MB, maxrss: %ld MB)\n", name, req / 1024, r.ru_maxrss);
-	#ifdef DEBUG
-		*((volatile uint8_t *)NULL);	/* segv trap for debugging */
-	#endif
+	trap();								/* segv trap for debugging; see log.h */
 	exit(128);							/* 128 reserved for out of memory */
 }
 
@@ -147,9 +148,7 @@ void oom_abort(
 /* miscellaneous macros and types */
 #define UNITTEST_UNIQUE_ID		1
 #include "unittest.h"
-#include "sassert.h"
 #include "lmm.h"
-#include "log.h"
 #include "gaba_wrap.h"
 #include "arch/arch.h"
 #include "kvec.h"
