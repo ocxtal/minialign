@@ -2829,11 +2829,12 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 {
 	uint64_t i = (uint64_t)item;
 	mm_idx_intl_t *mii = (mm_idx_intl_t *)arg;
-	mm_idx_bkt_t *b = &mii->mi.bkt[(1ULL<<mii->mi.b) *  i      / mii->nth] - 1;
-	mm_idx_bkt_t *t = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
+	mm_idx_bkt_t *b  = &mii->mi.bkt[(1ULL<<mii->mi.b) *  i      / mii->nth] - 1;
+	mm_idx_bkt_t *bt = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
 
 	debug("i(%lu), (%llu, %llu)", i, (1ULL<<mii->mi.b) * i / mii->nth, (1ULL<<mii->mi.b) * (i+1) / mii->nth);
-	while(++b < t) {
+	debug("b(%p), t(%p)", b, bt);
+	while(++b < bt) {
 		uint64_t n_arr = b->w.a.n;
 		if(n_arr == 0) { continue; }
 
