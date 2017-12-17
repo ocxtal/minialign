@@ -1989,8 +1989,8 @@ uint64_t bseq_read_fasta(
 			p++;								/* skip '\n' or ' ' after sequence name */
 			s->l_name = _term(q, mem->a, s->name);
 			s->tag = _beg(q, mem->a);			/* prepare room for tag before the third state, to use m before it vanishes */
-			s->n_tag = m & 0x01;				/* set n_tag if comment line found */
-			if((m & 0x01) == 0) { goto _seq_head; }
+			s->n_tag = m & fp->keep_comment;	/* set n_tag if comment line found */
+			if(s->n_tag == 0) { goto _seq_head; }
 		_forward_state(4):						/* spaces between name and comment */
 			_strip(p, t, sv); _cp();
 			*q++ = 'C'; *q++ = 'O'; *q++ = 'Z';
@@ -1998,7 +1998,6 @@ uint64_t bseq_read_fasta(
 			_readline(p, t, q, lv, _id); _cp();	/* refill needed, comment continues */
 			p++;								/* skip '\n' after comment */
 			while(q[-1] == ' ') { q--; }		/* strip spaces at the tail of the comment */
-			if(!fp->keep_comment) { q = mem->a + (uint64_t)s->tag; }
 		_seq_head:
 			_term(q, mem->a, s->tag);
 			s->seq = _beg(q, mem->a);
