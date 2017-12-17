@@ -4654,10 +4654,8 @@ void mm_restore_sam_tags(
 		0, 1, 0xfe, 1,  0, 0, 4, 0,  0xfe, 4, 0, 0,  0, 0, 0, 0,
 		0, 0, 0, 2,     0, 0, 0, 0,  0, 0, 0xff, 0,  0, 0, 0, 0,
 	};
-	// uint8_t const *p = t->tag, *tail = p + t->l_tag;
 	uint8_t const *p = t->tag;
 	uint64_t n_tag = t->n_tag;
-	// while(p < tail) {
 	while(n_tag-- > 0) {
 		/* print tag label */
 		_t(b); _put(b, p[0]); _put(b, p[1]); _put(b, ':'); _put(b, p[2]); _put(b, ':');
