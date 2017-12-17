@@ -2750,16 +2750,18 @@ void mm_idx_drain_intl(mm_idx_intl_t *mii, mm_idx_step_t *s)
 		};
 		/* push minimizers */
 		uint64_t fpos = -w, rpos = 0, v = 0;
-		for(uint64_t *t = p + (src->u64>>1); p < t; p++) {
+		for(uint64_t *t = s->a.a + (src->u64>>1); p < t; p++) {
 			uint64_t u = *p & 0x7f, h = *p>>8, d = u - v + (u <= v ? w : 0);
 			fpos += d; rpos -= d; v = u;
 			kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
 				.hrem = h>>b, .pos = (*p & 0x80) ? rpos : fpos, .rid = mii->svec.n
 			}));
+			/*
 			debug("bkt(%lu), i(%lu), (%u, %d, %lx)", h & mask, bkt[h & mask].w.a.n - 1,
 				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].rid,
 				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].pos,
 				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].hrem);
+			*/
 		}
 		src++; mii->svec.n++;				/* update src and dst pointers (update rid) */
 	}
@@ -2847,7 +2849,7 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 		}
 		// debug("i(%lu), p(%p), single(%u), keys(%u)", b - mii->mi.bkt, b->v.p, b->v.n.single, b->v.n.keys);
 		kh_init_static(&b->w.h, b->v.n.keys / KH_THRESH);		/* make the hash table occupancy equal to (or slightly smaller than) KH_THRESH */
-		uint64_t max_cnt = mii->mi.occ[mii->mi.n_occ], sp = 0, *r = (uint64_t *)arr;	/* reuse minimizer array */
+		uint64_t max_cnt = mii->mi.occ[mii->mi.n_occ - 1], sp = 0, *r = (uint64_t *)arr;	/* reuse minimizer array */
 		mm_mini_t *p = arr, *q = p, *t = &arr[n_arr];
 		for(uint64_t ph = p++->hrem; p < t; q = p, ph = p++->hrem) {
 			if(ph != p->hrem && p - q <= max_cnt) { _fill_body(); }	/* skip if occurs more than the max_cnt threshold */
