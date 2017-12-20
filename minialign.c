@@ -3281,8 +3281,8 @@ typedef struct mm_tbuf_s {
 #define _vd(_x, _y)		( (_x) - ((_y)<<1) )
 
 #define _bare(_x)		( (_x) - _ofs(0) - ((_x) & 0x80000000) )
-#define _as(_ptr)		( _bare((_ptr)->upos) - (_bare((_ptr)->vpos)>>1) )
-#define _bs(_ptr)		( (_bare((_ptr)->upos)>>1) - _bare((_ptr)->vpos) )
+#define _as(_ptr)		( ((_bare((_ptr)->upos)<<1) - _bare((_ptr)->vpos)) / 3 )
+#define _bs(_ptr)		( (_bare((_ptr)->upos) - (_bare((_ptr)->vpos)<<1)) / 3 )
 #define _ps(_ptr)		( (_ptr)->upos - (_ptr)->vpos )
 #define _qs(_ptr)		( (((_ptr)->upos + (_ptr)->vpos) + 0x80000000) / 3 )
 
