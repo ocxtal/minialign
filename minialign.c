@@ -2428,7 +2428,7 @@ _static_assert(sizeof(mm_idx_seq_t) == 24);
  */
 typedef struct mm_idx_bkt_s mm_idx_bkt_t;
 typedef struct {
-	mm_idx_bkt_t *bkt;			/* array of 2nd stage hash table is the 1st stage hash table */
+	mm_idx_bkt_t *bkt;				/* array of 2nd stage hash table is the 1st stage hash table */
 	uint64_t mask;					/* (internal) must be (1<<b) - 1 */
 	uint8_t b, w, k, n_occ;			/* bucket size (in bits), window and k-mer size */
 	uint32_t occ[MAX_FRQ_CNT];		/* occurrence array */
