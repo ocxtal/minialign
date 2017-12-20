@@ -3143,7 +3143,7 @@ typedef struct {
 	uint32_t upos, rid, vpos, prev;	/* 2x - y, ref id, x - 2y, previous seed index */
 } mm_seed_t;
 typedef struct {
-	uint32_t rsid, qid, flag, lsid;	/* flag == 0 */
+	uint32_t rsid, rid, qid, lsid;	/* flag == 0 */
 } mm_leaf_t;
 typedef struct { size_t n, m; mm_seed_t *a; } mm_seed_v;
 _static_assert(sizeof(mm_seed_t) == sizeof(v4u32_t));
@@ -3318,9 +3318,9 @@ void mm_expand(
 		self->seed.a[self->seed.n++] = (mm_seed_t){
 			.upos = _u(_rs, _qs),				/* coefficients */
 			.vpos = _v(_rs, _qs),
-			.rid = rid, .prev = 0				/* first prev node is initialized with zero */
+			.rid = rid, .prev = -1				/* first prev node is initialized with zero */
 		};
-		// debug("pos(%d, %d)", _rs, _qs);
+		debug("abpos(%d, %d), uvpos(%d, %d)", _rs, _qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
 	}
 	return;
 }
@@ -3424,19 +3424,25 @@ uint64_t mm_chain_seeds(
 		uint64_t p = r, np = r;
 
 		/* open chain bin, load initial coordinates */
-		c[cid] = (mm_root_t){ .lid = ~cid, .plen = 0 }; cid++;					/* long enough because used to collect minimizers */
-		s[p].prev = 0;
-		uint32_t ulb = s[p].upos - self->twlen, vlb = s[p].vpos - self->twlen, vub = s[p].vpos;
+		c[cid] = (mm_root_t){ .lid = lid, .plen = _ofs(0) };					/* long enough because used to collect minimizers */
+		_l(s)[lid].rsid = r; s[p].prev = 0;
+
+		uint32_t ulb = s[p].upos, vlb = s[p].vpos - self->twlen, vub = s[p].vpos;
+		debug("open root, cid(%lu), u(%d, %d), v(%d, %d, %d)", cid, _bare(s[p].upos), _bare(ulb), _bare(s[p].vpos), _bare(vlb), _bare(vub));
 
 		/* test branching path */
 		for(uint64_t q = p; q > 0 && s[q - 1].upos >= ulb; q--) {				/* check if the head can be a branching path */
 			if(_inside(vlb, s[q - 1].vpos, vub)) {								/* branch at the middle of an existing chain */
-				cid--; s[p].prev = q - 1; goto _link_branch_break;
+				debug("hit at the middle, pos(%d, %d)", _bare(s[q - 1].upos), _bare(s[q - 1].vpos));
+				_l(s)[lid].rsid = _l(s)[~s[q - 1].rid].rsid;
+				s[p].prev = q - 1;
+				goto _link_branch_break;
 			}
 		}
 
 		/* record marginal seed for circularization */
 		if(_as(&s[p]) < self->mi.s[s[p].rid].circular ? self->twlen : 0) {		/* mark marginal if the reference-side seq is circular and the root is in the margin */
+			debug("mark marginal");
 			kv_push(uint32_t, self->margin, cid);
 		}
 
@@ -3445,31 +3451,59 @@ uint64_t mm_chain_seeds(
 		uint64_t key = _loadu_u64(&s[p].upos) + _ofs(0);
 		do {
 			p = np; np = n;						/* swap */
-			ulb = s[p].upos - self->twlen; vlb = s[p].vpos - self->twlen; vub = s[p].vpos;
+			ulb = s[p].upos; vlb = s[p].vpos - self->twlen; vub = s[p].vpos;
 			uint32_t uub = s[p].upos + self->twlen, sid = p, pd = UINT32_MAX;
-			vlb = s[p].vpos; vub = s[p].vpos + self->twlen;
+			// debug("ub(%d, %d), vb(%d, %d), key(%lx)", ulb, uub, vlb, vub, key);
 			for(uint64_t q = p + 1; q < n && s[q].upos < uub; q++) {			/* search the nearest seed */
-				if(_loadu_u64(&s[q].upos) >= key) { break; }					/* section changed */
-				if(s[q].prev == sid) { continue; }								/* already evaluated */
-				if(!_inside(vlb, s[q].vpos, vub)) { nr = MIN2(nr, q); continue; }	/* unlinkable, possible root */
-				if(_ps(&s[q]) < pd) { pd = _ps(&s[q]); np = q; }				/* update the next front */
+				debug("test q(%lu), pos(%d, %d)", q, _bare(s[q].upos), _bare(s[q].vpos));
+				if(_loadu_u64(&s[q].upos) >= key) {								/* section changed */
+					// debug("section changed, key(%lx, %lx)", _loadu_u64(&s[q].upos), key);
+					break;
+				}
+				#if 0
+				if(s[q].prev != -1) {											/* already evaluated */
+					debug("already evaluated, sid(%u)", sid);
+					continue;
+				}
+				#endif
+				if(!_inside(vlb, s[q].vpos, vub)) {								/* unlinkable, possible root */
+					debug("unlinkable, v(%d, %d, %d)", _bare(vlb), _bare(s[q].vpos), _bare(vub));
+					nr = MIN2(nr, q); continue;
+				}
+				if(s[q].upos - 128 < ulb && s[q].vpos + 128 > vub) {
+					debug("move np forward");
+					np = q + 1;
+				// } else if(_ps(&s[q]) < pd) {
+					// debug("choose the shortest");
+					// pd = _ps(&s[q]); np = q;									/* update the next front */
+				}
+				debug("linked");
 				s[q].prev = sid;				/* collect linkable */
 			}
 		} while(np < n);
 
+		/* open chain bin */
+
 		/* open leaf bin */
-		uint32_t rsid = MIN2(r, _l(c)[c[cid].lid].rsid);
-		_l(c)[lid++] = (mm_leaf_t){				/* record leaf */
-			.rsid = rsid, .lsid = p, .qid = self->qid, .flag = 0	/* qid = self->qid */
+		uint32_t rsid = MIN2(r, _l(s)[c[cid].lid].rsid);
+		_l(s)[lid] = (mm_leaf_t){				/* record leaf */
+			.rsid = rsid, .lsid = p, .rid = key>>32, .qid = self->qid,			/* qid = self->qid */
 		};
+		debug("record leaf, sid(%u, %u), rid(%u), qid(%u)", _l(s)[lid].rsid, _l(s)[lid].lsid, _l(s)[lid].rid, _l(s)[lid].qid);
 
 		/* update root (chain) */
-		uint32_t plen = _ps(&s[p]) - _ps(&s[rsid]);
-		if(c[cid].plen < plen) {				/* choose the longer */
+		uint32_t plen = _ofs(_ps(&s[p]) - _ps(&s[rsid]));
+		debug("test plen, cid(%lu), plen(%u, %u)", cid, _ofs(c[cid].plen), _ofs(plen));
+		if(c[cid].plen > plen) {				/* choose the longer */
 			c[cid] = (mm_root_t){ .lid = lid, .plen = plen };
+			debug("update plen, lid(%lu), rsid(%u), rpos(%d, %d), lsid(%u), lpos(%d, %d), plen(%u)", lid,
+				_l(s)[lid].rsid, _bare(s[_l(s)[lid].rsid].upos), _bare(s[_l(s)[lid].rsid].vpos),
+				_l(s)[lid].lsid, _bare(s[_l(s)[lid].lsid].upos), _bare(s[_l(s)[lid].lsid].vpos), _ofs(plen));
 		}
+		cid++; lid++;
 	} while(nr < n);							/* check if the next root is found */
 	self->seed.n = lid;							/* write back tail index */
+	self->root.n = cid;							/* write back root index */
 	return(cid);								/* #collected chains */
 }
 
@@ -3481,6 +3515,7 @@ static _force_inline
 void mm_circularize(
 	mm_tbuf_t *self)
 {
+	debug("circularize");
 	mm_root_t *c = self->root.a;
 	mm_seed_t *s = self->seed.a;
 	mm_leaf_t const *l = _l(&s[self->n_seed]), *lt = &l[self->seed.n];
@@ -3535,6 +3570,7 @@ uint64_t mm_chain(
 
 	/* sort chain by length */
 	radix_sort_64x((v2u32_t *)self->root.a, self->root.n);
+	debug("sorted seeds, n(%lu)", self->root.n);
 	return(self->root.n);
 }
 
@@ -3557,7 +3593,7 @@ gaba_pos_pair_t mm_next(
 		}
 		/* lid points at a seed, vpos overlaps with flag and vpos never be zero for seeds; FIXME: _l(s)[lid].flag == 0 */
 		do { lid = s[lid].prev; } while(s[lid].vpos > vub || s[lid].upos < ulb);
-	} while(_l(s)[lid].flag == 0);
+	} while((int32_t)_l(s)[lid].rid >= 0);	/* negative for lid in seed_t */
 
 	return((gaba_pos_pair_t){
 		.apos = _as(&s[lid]), .bpos = _bs(&s[lid])
@@ -3743,8 +3779,13 @@ uint64_t mm_extend(
 		/* load seed positions and sequence ids */
 		mm_seed_t const *p = &s[_l(s)[lid].lsid];/* load tail */
 		gaba_pos_pair_t cp = { .apos = _as(p), .bpos = _bs(p) };
+		debug("k(%lu), lid(%u), id(%u, %u), sid(%u, %u), pos(%d, %d), bare(%d, %d), cp(%d, %d)",
+			k, lid, _l(s)[lid].rid, _l(s)[lid].qid, _l(s)[lid].rsid, _l(s)[lid].lsid,
+			p->upos, p->vpos, _bare(p->upos), _bare(p->vpos),
+			cp.apos, cp.bpos);
+
 		int32_t rev = _smask(cp.bpos);
-		mm_extend_load_ref(self, p->rid);
+		mm_extend_load_ref(self, _l(s)[lid].rid);
 		// debug("chain(%lu), cid(%u), rev(%d), plen(%d), (%u, %u), (%d, %d), (%d, %d)", k, self->map.a[p->mid], rev, plen, self->rid, self->qid, p->apos, p->bpos, cp.apos, cp.bpos);
 
 		/* open result bin */
@@ -3758,6 +3799,7 @@ uint64_t mm_extend(
 		};
 
 		/* loop: issue extension until whole chain is covered by alignments */
+		debug("plen(%d), ppos(%d), p(%u, %d)", plen, _p(&cp) - plen, _p(&cp), _p(&cp) - plen);
 		for(uint32_t ppos = _p(&cp) - plen, rem = 3, narrow = 0;
 			rem > 0 && _p(&cp) >= ppos;
 			cp = --rem > 0 ? mm_next(self, cp, lid) : cp
@@ -6077,6 +6119,7 @@ int main_align(mm_opt_t *o)
 			_mi = mm_idx_load(_pg, (read_t)pgread); \
 			pg_freeze(_pg);		/* release thread worker */ \
 		} else if(*(_r)) { \
+			debug("ref(%s)", *(_r)); \
 			bseq_file_t *_fp = _bseq_open_wrap(&br, *(_r)); \
 			_mi = mm_idx_gen(&o->c, _fp, o->pt); \
 			o->a.base_rid += bseq_close(_fp); \
