@@ -2849,7 +2849,7 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 			kh_put(&b->w.h, key, val); \
 		}
 		// debug("i(%lu), p(%p), single(%u), keys(%u)", b - mii->mi.bkt, b->v.p, b->v.n.single, b->v.n.keys);
-		kh_init_static(&b->w.h, b->v.n.keys / KH_THRESH);		/* make the hash table occupancy equal to (or slightly smaller than) KH_THRESH */
+		kh_init_static(&b->w.h, 1.1 * b->v.n.keys / KH_THRESH);	/* make the hash table occupancy equal to (or slightly smaller than) KH_THRESH */
 		uint64_t max_cnt = mii->mi.occ[mii->mi.n_occ - 1], sp = 0, *r = (uint64_t *)arr;	/* reuse minimizer array */
 		mm_mini_t *p = arr, *q = p, *t = &arr[n_arr];
 		for(uint64_t ph = p++->hrem; p < t; q = p, ph = p++->hrem) {
