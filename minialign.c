@@ -2306,23 +2306,26 @@ unittest( .name = "bseq.fastq.skip" ) {
  * @fn hash64
  */
 #define hash64(k0, k1, mask)		( (_mm_crc32_u64((k0), (k0)) ^ (k1)) & (mask) )
+// #define hash64(k0, k1, mask)		( (k0) & (mask) )
 
 /**
  * @struct mm_sketch_t
  * @brief minimizer window context, can be carried over (connected to) the next segment.
  */
 typedef struct {
-	uint64_t r[32];					/* UINT64_MAX */
-	uint64_t u, k0, k1;				/* UINT64_MAX, 0, 0 */
-	uint8_t w, k, i;
+	uint32_t w, k;
+	uint64_v *b;
+	uint64_t r[64];					/* UINT64_MAX */
 } mm_sketch_t;
+typedef struct {
+	uint64_t i, u, k0, k1;
+} mm_sketch_cap_t;
 
 static _force_inline
-void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k)
+void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k, uint64_v *b)
 {
-	_memset_blk_u(sk->r, 0xff, sizeof(uint64_t) * 32);	/* fill UINT64_MAX */
-	sk->u = UINT64_MAX; sk->k0 = sk->k1 = 0;
-	sk->w = w; sk->k = k;
+	sk->w = w; sk->k = k; sk->b = b;
+	_memset_blk_u(sk->r, UINT64_MAX, sizeof(uint64_t) * 32);	/* fill UINT64_MAX */
 	return;
 }
 
@@ -2332,54 +2335,70 @@ void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k)
  * minimizers are stored in uint64_t array, where upper 56bit holds actual hash value (minimizer),
  * and lower 8bit contains local index of the length-w bin. direction is encoded in the 7-th bit.
  */
-#define _loop_init(_len) \
+#define _loop_init(_len, _cap) \
 	uint64_t const kk = sk->k - 1, shift1 = 2*kk, mask = (1ULL<<2*sk->k) - 1, w = sk->w; \
-	kv_reserve(uint64_t, *b, b->n + 4 * (_len) / w);	/* reserve buffer for minimizers, expected number will be 2 * len / w */ \
-	uint64_t *q = b->a + b->n; \
+	kv_reserve(uint64_t, *sk->b, sk->b->n + 4 * (_len) / w);	/* reserve buffer for minimizers, expected number will be 2 * len / w */ \
+	uint64_t *q = sk->b->a + sk->b->n; \
 	uint8_t const *p = seq, *t = &seq[_len]; \
-	uint64_t u = sk->u, k0 = sk->k0, k1 = sk->k1;		/* forward and backward k-mers, min buffer (w < 32 must be guaranteed) */
+	uint64_t u = (_cap)->u, k0 = (_cap)->k0, k1 = (_cap)->k1;	/* forward and backward k-mers, min buffer (w < 32 must be guaranteed) */
 
-#define _loop_core() ({ \
-	uint64_t c = *p++, h, v; \
+#define _push_kmer() { \
+	uint64_t c = *p++; \
 	k0 = (k0 << 2 | c) & mask; k1 = (k1 >> 2) | ((3ULL^c) << shift1); \
-	uint64_t km = k0 < k1? k0 : k1, kx = k0 < k1? k1 : k0, m = k0 < k1? 0 : 0x80; \
-	h = hash64(km, kx, mask)<<8 | i | m; f = MIN2(f, h); v = MIN2(f, sk->r[i + 1]); \
-	if((v == h) | (v != u)) { *q++ = v; } u = v; \
-	h; \
+}
+#define _loop_core() ({ \
+	_push_kmer(); \
+	uint64_t km = k0 < k1 ? k0 : k1, kx = k0 < k1 ? k1 : k0, m = k0 < k1 ? 0 : 0x80; \
+	uint64_t h = hash64(km, kx, mask)<<8 | i | m; f = MIN2(f, h); uint64_t v = MIN2(f, sk->r[i + 1]); \
+	if((v == h) | (v - u)) { \
+		debug("push, i(%lu), uhfv(%lx, %lx, %lx, %lx), v(%lu, %lu, %lu), p(%p) pos(%lu)", \
+			i, u, h, f, v, v>>8, (v>>7)&1, v&0x7f, p, p - seq - 15); \
+		*q++ = v; \
+	} \
+	u = v; h; \
+})
+#define _push_cap(_i) ({ \
+	mm_sketch_cap_t *cap = (mm_sketch_cap_t *)q; \
+	*cap = (mm_sketch_cap_t){ .i = ~(_i), .u = u, .k0 = k0, .k1 = k1 }; \
+	sk->b->n = (uint64_t *)(cap + 1) - sk->b->a; \
+	cap; \
 })
 static _force_inline
-uint64_t mm_sketch(mm_sketch_t *sk, uint8_t const *seq, uint32_t len, uint64_v *b)
+mm_sketch_cap_t const *mm_sketch(mm_sketch_t *sk, uint8_t const *seq, uint32_t len)
 {
-	_loop_init(len);				/* initialize working buffers */
+	static mm_sketch_cap_t const init = { 0 };
+	_loop_init(len, &init);			/* initialize working buffers */
+	debug("p(%p), t(%p), len(%u, %lu)", p, t, len, t - p);
+	for(uint64_t i = 0; i < kk && p < t; i++) { _push_kmer(); }
 	while(t - p >= w) {
 		/* calculate hash values for the current block */
 		for(uint64_t i = 0, f = UINT64_MAX; i < w; i++) { sk->r[i] = _loop_core(); }
 		/* fold backward-min array */
-		for(uint64_t i = 1; i < w - 1; i++) { sk->r[w-i-1] = MIN2(sk->r[w-i-1], sk->r[w-i]); }
+		for(uint64_t i = 0, r = UINT64_MAX; i < w; i++) { r = MIN2(r, sk->r[w-i-1]); sk->r[w-i-1] = r;  }
 	}
 	uint64_t l = t - p;				/* remainder */
+	debug("remainder l(%lu)", l);
 	if(l > 0) {
-		/* move the last l elements of the previous block to the head of the array */
-		for(uint64_t i = 0; i < l; i++) { sk->r[i] = sk->r[w-l+i]; }
 		/* calculate hash values for the tail */
-		for(uint64_t i = w-l, f = UINT64_MAX; i < w; i++) { sk->r[i] = _loop_core(); }
+		for(uint64_t i = 0, f = UINT64_MAX; i < l; i++) { sk->r[w+i] = _loop_core() + w; }
 		/* fold backward-min array */
-		for(uint64_t i = 1; i < w - 1; i++) { sk->r[w-i-1] = MIN2(sk->r[w-i-1], sk->r[w-i]); }
+		for(uint64_t i = 0, r = UINT64_MAX; i < w; i++) { r = MIN2(r, sk->r[w+l-i-1]); sk->r[w+l-i-1] = r;  }
+		/* move to align the head */
+		for(uint64_t i = 0; i < w; i++) { sk->r[i] = sk->r[l+i] - l; }
 	}
-	sk->u = u; sk->k0 = k0; sk->k1 = k1; b->n = q - b->a;
-	return(0);						/* always w = 0 */
+	return(_push_cap(0));
 }
 static _force_inline
-uint64_t mm_sketch_tail(mm_sketch_t *sk, uint8_t const *seq, uint32_t len, uint64_v *b, uint64_t rem)
+mm_sketch_cap_t const *mm_sketch_cap(mm_sketch_t *sk, mm_sketch_cap_t const *cap, uint8_t const *seq, uint32_t len)
 {
-	uint64_t l = MIN2(rem + len, sk->w);
-	_loop_init(l); (void)t;			/* t is unused here */
-	for(uint64_t i = rem, f = UINT64_MAX; i < l; i++) { _loop_core(); }
-	b->n = q - b->a;
-	return(l);
+	uint64_t ci = ~cap->i, l = MIN2(len, sk->w - ci);
+	_loop_init(l, cap); (void)t;	/* t is unused here */
+	for(uint64_t i = ci, f = UINT64_MAX; i < w && p < t; i++) { _loop_core(); }
+	return(_push_cap(ci + l));
 }
 #undef _loop_init
 #undef _loop_core
+#undef _back_fold
 /* end of sketch.c */
 
 /* index.h */
@@ -2710,12 +2729,12 @@ void *mm_idx_worker(uint32_t tid, void *arg, void *item)
 
 	mm_sketch_t sk;
 	for(uint64_t i = 0; i < r->n_seq; i++) {
-		mm_sketch_init(&sk, mii->mi.w, mii->mi.k);
-		mm_sketch(&sk, r->seq[i].seq, r->seq[i].l_seq, &s->a);
+		mm_sketch_init(&sk, mii->mi.w, mii->mi.k, &s->a);
+		mm_sketch_cap_t const *cap = mm_sketch(&sk, r->seq[i].seq, r->seq[i].l_seq);
 
 		/* tail margin for circular sequences */
 		uint64_t c = mii->call | (mii->ctest && kh_str_get(mii->circ, r->seq[i].name, r->seq[i].l_name) != NULL);
-		if(c) { mm_sketch_tail(&sk, r->seq[i].seq, r->seq[i].l_seq, &s->a, 0); }			/* nori-shiro */
+		if(c) { mm_sketch_cap(&sk, cap, r->seq[i].seq, r->seq[i].l_seq); }			/* nori-shiro */
 		r->seq[i].u64 = (s->a.n<<1) | c;	/* (#minimizers: 63, circular:1) */
 		debug("c(%lu), n(%lu)", c, s->a.n);
 	}
@@ -2749,6 +2768,25 @@ void mm_idx_drain_intl(mm_idx_intl_t *mii, mm_idx_step_t *s)
 			.circular = src->u64 & 0x01
 		};
 		/* push minimizers */
+		uint64_t fpos = 0, rpos = -mii->mi.k + 1, v = w;
+		for(uint64_t *t = s->a.a + (src->u64>>1); p < t; p += 4) {
+			for(; (*p>>8) != 0xffffffffffffff; p++) {
+				uint64_t u = *p & 0x7f, h = *p>>8, d = u - v + (u <= v ? w : 0);
+				fpos += d; rpos -= d; v = u;
+				kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
+					.hrem = h>>b, .pos = (*p & 0x80) ? rpos : fpos, .rid = mii->svec.n
+				}));
+				// debug("fpos(%ld), rpos(%ld), pos(%ld), d(%lu)", fpos, rpos, (*p & 0x80) ? rpos : fpos, d);
+				/*
+				debug("bkt(%lu), i(%lu), (%u, %d, %lx)", h & mask, bkt[h & mask].w.a.n - 1,
+					bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].rid,
+					bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].pos,
+					bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].hrem);
+				*/
+			}
+		}
+
+		/*
 		uint64_t fpos = -w, rpos = 0, v = 0;
 		for(uint64_t *t = s->a.a + (src->u64>>1); p < t; p++) {
 			uint64_t u = *p & 0x7f, h = *p>>8, d = u - v + (u <= v ? w : 0);
@@ -2756,13 +2794,8 @@ void mm_idx_drain_intl(mm_idx_intl_t *mii, mm_idx_step_t *s)
 			kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
 				.hrem = h>>b, .pos = (*p & 0x80) ? rpos : fpos, .rid = mii->svec.n
 			}));
-			/*
-			debug("bkt(%lu), i(%lu), (%u, %d, %lx)", h & mask, bkt[h & mask].w.a.n - 1,
-				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].rid,
-				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].pos,
-				bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].hrem);
-			*/
 		}
+		*/
 		src++; mii->svec.n++;				/* update src and dst pointers (update rid) */
 	}
 	free(s->a.a);
@@ -3305,36 +3338,37 @@ void mm_collect_seed(
 	self->seed.n = 0;
 
 	mm_sketch_t sk;
-	mm_sketch_init(&sk, self->mi.w, self->mi.k);
-	mm_sketch(&sk, self->q[0].base, self->q[0].len, (uint64_v *)&self->root);
+	mm_sketch_init(&sk, self->mi.w, self->mi.k, (uint64_v *)&self->root);
+	mm_sketch(&sk, self->q[0].base, self->q[0].len);
 	debug("collected seeds, n(%zu)", self->root.n);
 
 	/* prepare rescue array */
 	kv_reserve(mm_resc_t, self->resc, self->root.n);
-	mm_resc_t *u = self->resc.a;
+	mm_resc_t *s = self->resc.a;
 
 	uint32_t const max_occ = self->mi.occ[self->mi.n_occ - 1];
 	uint32_t const resc_occ = self->mi.occ[0];
 
 	/* iterate over all the collected minimizers (seeds) on the query */
-	uint64_t w = self->mi.w, fpos = -w, rpos = 0, t = 0;
-	kv_foreach(uint64_t, self->root, ({
+	uint64_t w = self->mi.w, fpos = 0, rpos = -self->mi.k + 1, v = w;
+	for(uint64_t *p = (uint64_t *)self->root.a; (*p>>8) != 0xffffffffffffff; p++) {
 		/* first calculate pos for the current one */
-		uint64_t s = *p & 0x7f, h = *p>>8, d = s - t + (s <= t ? w : 0);
-		fpos += d; rpos -= d; t = s;
+		uint64_t u = *p & 0x7f, h = *p>>8, d = u - v + (u <= v ? w : 0);
+		fpos += d; rpos -= d; v = u;
 		int32_t pos = (*p & 0x80) ? rpos : fpos;
+		// debug("fpos(%ld), rpos(%ld), pos(%d), d(%lu)", fpos, rpos, pos, d);
 
 		/* get minimizer matched on the ref at the current query pos */
 		uint32_t n;
 		v2u32_t const *r = mm_idx_get(&self->mi, h, &n);
 		if(n > max_occ) { continue; }			/* skip if exceeds repetitive threshold */
 		if(n > resc_occ) {						/* save if less than max but exceeds current threshold */
-			*u++ = (mm_resc_t){ .p = r, .qs = pos, .n = n };
+			*s++ = (mm_resc_t){ .p = r, .qs = pos, .n = n };
 			continue;
 		}
 		mm_expand(self, n, r, pos);				/* append to seed array */
-	}));
-	self->resc.n = u - self->resc.a;			/* write back rescued array */
+	};
+	self->resc.n = s - self->resc.a;			/* write back rescued array */
 	self->presc = self->resc.a;					/* init resc pointer */
 	self->root.n = 0;							/* clear root array */
 	return;
