@@ -6145,10 +6145,11 @@ int main_align(mm_opt_t *o)
 		}
 		/* iterate over queries */
 		for(char const *const *q = (char const *const *)&o->parg.a[qh]; *q; q++) {
+			debug("query(%s)", *q);
 			bseq_file_t *fp = _bseq_open_wrap(&bq, *q);
 			mm_align_file(aln, fp, pr);
 			bseq_close(fp);
-			o->log(o, 9, __func__, "finished mapping `%s' onto `%s'.", *q, *r);
+			o->log(o, 9, __func__, "finished mapping `%s' onto `%s'.", *q, pg ? *o->parg.a : r[-1]);
 		}
 		mm_align_destroy(aln);
 		mm_idx_destroy(mi);
