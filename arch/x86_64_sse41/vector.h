@@ -85,6 +85,7 @@ typedef union v16_mask_u v16i8_masku_t;
  * from v32i8_t
  */
 #include "v2i32.h"
+#include "v4i32.h"
 #include "v2i64.h"
 #include "v16i8.h"
 #include "v16i16.h"
