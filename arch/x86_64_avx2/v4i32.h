@@ -47,7 +47,6 @@ typedef struct v4i32_s {
 
 /* expand intrinsic name */
 #define _i_v4i32(intrin) 			_mm_##intrin##_epi32
-#define _i_v4i32e(intrin)			_mm_##intrin##_epi64
 #define _i_v4i32x(intrin)			_mm_##intrin##_si128
 
 /* apply */
@@ -58,11 +57,11 @@ typedef struct v4i32_s {
 )
 #define _a_v4i32e(intrin, expander, ...) ( \
 	(v4i32_t) { \
-		_i_v4i32e(intrin)(expander##_v4i32_1(__VA_ARGS__)) \
+		_i_v4i32x(intrin)(expander##_v4i32_1(__VA_ARGS__)) \
 	} \
 )
 #define _a_v4i32ev(intrin, expander, ...) { \
-	_i_v4i32e(intrin)(expander##_v4i32_1(__VA_ARGS__)); \
+	_i_v4i32x(intrin)(expander##_v4i32_1(__VA_ARGS__)); \
 }
 #define _a_v4i32x(intrin, expander, ...) ( \
 	(v4i32_t) { \
@@ -74,10 +73,10 @@ typedef struct v4i32_s {
 }
 
 /* load and store */
-#define _load_v4i32(...)	_a_v4i32e(loadl, _e_p, __VA_ARGS__)
-#define _loadu_v4i32(...)	_a_v4i32e(loadl, _e_p, __VA_ARGS__)
-#define _store_v4i32(...)	_a_v4i32ev(storel, _e_pv, __VA_ARGS__)
-#define _storeu_v4i32(...)	_a_v4i32ev(storel, _e_pv, __VA_ARGS__)
+#define _load_v4i32(...)	_a_v4i32e(load, _e_p, __VA_ARGS__)
+#define _loadu_v4i32(...)	_a_v4i32e(load, _e_p, __VA_ARGS__)
+#define _store_v4i32(...)	_a_v4i32ev(store, _e_pv, __VA_ARGS__)
+#define _storeu_v4i32(...)	_a_v4i32ev(store, _e_pv, __VA_ARGS__)
 
 /* broadcast */
 #define _set_v4i32(...)		_a_v4i32(set1, _e_i, __VA_ARGS__)
