@@ -137,7 +137,7 @@ typedef struct v4i32_s {
 
 /* mask */
 #define _mask_v4i32(a) ( \
-	(uint32_t) (0xff & _mm_movemask_epi8((a).v1)) \
+	(uint32_t)(_mm_movemask_epi8((a).v1)) \
 )
 
 /* transpose */
