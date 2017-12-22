@@ -7,7 +7,9 @@
  * @author Hajime Suzuki (original files by Heng Li)
  * @license MIT
  */
-// #define DEBUG
+#ifndef NDEBUG
+#  define DEBUG
+#endif
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -2776,40 +2778,10 @@ void mm_idx_drain_intl(mm_idx_intl_t *mii, mm_idx_step_t *s)
 				base += u <= v ? w : 0; v = u;
 				debug("pos(%ld, %ld)", (-fr) ^ (base + u), ((-fr) ^ (base + u)) - ((-fr) & mii->mi.k));
 				kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
-					.hrem = h>>b, .pos = (-fr) ^ (base + u), .rid = (mii->svec.n<<1) + fr
+					.hrem = h>>b, .pos = base + u, .rid = (mii->svec.n<<1) + fr
 				}));
 			}
 		}
-		#if 0
-		uint64_t fpos = 0, rpos = -mii->mi.k + 1, v = w;
-		for(uint64_t *t = s->a.a + (src->u64>>1); p < t; p += 4) {
-			for(; (*p>>8) != 0xffffffffffffff; p++) {
-				uint64_t u = *p & 0x7f, h = *p>>8, d = u - v + (u <= v ? w : 0);
-				fpos += d; rpos -= d; v = u;
-				kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
-					.hrem = h>>b, .pos = (*p & 0x80) ? rpos : fpos, .rid = mii->svec.n
-				}));
-				// debug("fpos(%ld), rpos(%ld), pos(%ld), d(%lu)", fpos, rpos, (*p & 0x80) ? rpos : fpos, d);
-				/*
-				debug("bkt(%lu), i(%lu), (%u, %d, %lx)", h & mask, bkt[h & mask].w.a.n - 1,
-					bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].rid,
-					bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].pos,
-					bkt[h & mask].w.a.a[bkt[h & mask].w.a.n - 1].hrem);
-				*/
-			}
-		}
-		#endif
-
-		/*
-		uint64_t fpos = -w, rpos = 0, v = 0;
-		for(uint64_t *t = s->a.a + (src->u64>>1); p < t; p++) {
-			uint64_t u = *p & 0x7f, h = *p>>8, d = u - v + (u <= v ? w : 0);
-			fpos += d; rpos -= d; v = u;
-			kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
-				.hrem = h>>b, .pos = (*p & 0x80) ? rpos : fpos, .rid = mii->svec.n
-			}));
-		}
-		*/
 		src++; mii->svec.n++;				/* update src and dst pointers (update rid) */
 	}
 	free(s->a.a);
@@ -3154,7 +3126,7 @@ _static_assert(sizeof(mm_resc_t) == sizeof(v4u32_t));
  * @brief seed container / leaf seed container, alias to v4u32_t
  */
 typedef struct {
-	uint32_t upos, rid, vpos, prev;	/* 2x - y, ref id, x - 2y, previous seed index */
+	uint32_t upos, rid, vpos, cid;	/* 2x - y, ref id, x - 2y, previous seed index */
 } mm_seed_t;
 typedef struct {
 	uint32_t rsid, rid, qid, lsid;	/* flag == 0 */
@@ -3162,7 +3134,8 @@ typedef struct {
 typedef struct { size_t n, m; mm_seed_t *a; } mm_seed_v;
 _static_assert(sizeof(mm_seed_t) == sizeof(v4u32_t));
 _static_assert(sizeof(mm_leaf_t) == sizeof(mm_seed_t));
-_static_assert(offsetof(mm_seed_t, prev) == offsetof(mm_leaf_t, lsid));
+_static_assert(offsetof(mm_seed_t, cid) == offsetof(mm_leaf_t, lsid));
+#define CID_INIT				( -1 )
 
 /**
  * @struct mm_root_t
@@ -3327,15 +3300,15 @@ void mm_expand(
 	for(uint64_t i = 0; i < n; i++) {
 		uint32_t const rid = r[i].u32[1];
 		if(rid < self->qid) { continue; }		/* all-versus-all flag, base_rid, and base_qid are embedded in qid; skip if seed is in the lower triangle (all-versus-all) */
-		int32_t const rs = r[i].u32[0];			/* load reference pos */
+		uint32_t const rs = r[i].u32[0];		/* load reference pos */
 		uint32_t const rmask = -(rid & 0x01);
-		uint32_t const _rs = (rs - (self->mi.k & rmask)) ^ rmask, _qs = qs ^ rmask;
+		uint32_t const _rs = rs + (self->mi.k & rmask), _qs = qs ^ rmask;
 		self->seed.a[self->seed.n++] = (mm_seed_t){
 			.upos = _u(_rs, _qs),				/* coefficients */
 			.vpos = _v(_rs, _qs),
-			.rid = rid>>1, .prev = 0				/* first prev node is initialized with zero */
+			.rid = rid>>1, .cid = CID_INIT		/* first prev node is initialized with zero */
 		};
-		debug("abpos(%d, %d), uvpos(%d, %d)", rs, qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
+		debug("abpos(%d, %d), pos(%d, %d), uvpos(%d, %d)", rs, qs, _rs, _qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
 	}
 	return;
 }
@@ -3376,7 +3349,7 @@ void mm_collect_seed(
 		uint32_t n;
 		v2u32_t const *r = mm_idx_get(&self->mi, h, &n);
 		if(n > max_occ) { continue; }			/* skip if exceeds repetitive threshold */
-		uint32_t const cpos = (pos ^ -fr) - (self->mi.k & -fr);
+		uint32_t const cpos = (pos + (self->mi.k & -fr)) ^ -fr;
 		if(n > resc_occ) {						/* save if less than max but exceeds current threshold */
 			*s++ = (mm_resc_t){ .p = r, .qs = cpos, .n = n };
 			continue;
@@ -3401,15 +3374,11 @@ uint64_t mm_seed(
 	debug("seed iteration i(%lu)", cnt);
 	if(cnt == 0) {
 		/* push head sentinel */
-		kv_push(mm_seed_t, self->seed, ((mm_seed_t){
-			.upos = 0, .vpos = 0, .rid = -1, .prev = -1
-		}));
+		kv_push(mm_seed_t, self->seed, ((mm_seed_t){ .rid = -1, .cid = CID_INIT }));
 		mm_collect_seed(self);					/* first collect seeds */
 
 		/* push tail sentinel */
-		kv_push(mm_seed_t, self->seed, ((mm_seed_t){
-			.upos = 0, .vpos = 0, .rid = INT32_MAX, .prev = -1
-		}));
+		kv_push(mm_seed_t, self->seed, ((mm_seed_t){ .rid = INT32_MAX, .cid = CID_INIT }));
 	} else {
 		/* sort rescued array by occurrence */
 		debug("sort resc, n(%zu)", self->resc.n);
@@ -3445,19 +3414,16 @@ uint64_t mm_chain_seeds(
 	#define _l(_s)			( (mm_leaf_t *)(_s) )
 	mm_seed_t *s = self->seed.a;
 	mm_root_t *c = self->root.a;
-	uint64_t cid = 0, lid = self->n_seed, r = 0, nr = 0;
+	uint64_t ncid = 0, nlid = self->n_seed, r = 0, nr = 0;
+	v4i32_t const tw = _seta_v4i32(-self->twlen, 0, 0, self->twlen);
+	v4i32_t const bm = _seta_v4i32(INT32_MIN, INT32_MIN, INT32_MAX, INT32_MIN);
 	do {
-		r = nr; nr = UINT64_MAX;
-
-		/* open chain bin, load initial coordinates */
-		c[cid] = (mm_root_t){ .lid = lid, .plen = _ofs(0) };					/* long enough because used to collect minimizers */
-		_l(s)[lid].rsid = r; s[r].prev = 0;
-
-		v4i32_t const tw = _seta_v4i32(-self->twlen, 0, 0, self->twlen);
 		#define _ld(_p)			( _shuf_v4i32(_load_v4i32(&s[_p]), _km_v4i32(2, 2, 1, 0)) )
 		#define _bw(_x)			( _add_v4i32(_x, tw) )
 		#define _vin(_x, _y)	( _mask_v4i32(_gt_v4i32(_x, _y)) )
 		#define _vbare(_x)		( _sub_v4i32(_x, _seta_v4i32(_ofs(0), _ofs(0), 0, _ofs(0))) )
+		uint64_t cid = ncid, lid = nlid++, rsid = nr; r = nr; nr = UINT64_MAX;
+		v4i32_t const base = _min_v4i32(_ld(r), bm);
 
 		/* test branching path */ {
 			v4i32_t i = _ld(r);
@@ -3466,12 +3432,17 @@ uint64_t mm_chain_seeds(
 				_print_v4i32(_vbare(_bw(_ld(q - 1))));
 				debug("m(%lx)", m);
 				if(m == 0xf000) {
-					debug("hit at the middle of chain");
-					_l(s)[lid].rsid = _l(s)[s[q - 1].prev].rsid;
-					s[r].prev = q - 1;
+					debug("hit at the middle of chain, cid(%u)", s[q - 1].cid);
+					cid = s[q - 1].cid; rsid = _l(s)[c[cid].lid].rsid;
+					// _l(s)[lid].rsid = _l(s)[s[q - 1].prev].rsid; s[r].prev = q - 1;
 					goto _link_branch_break;
 				}
 			}
+
+			/* open chain bin, load initial coordinates */
+			c[ncid++] = (mm_root_t){ .lid = lid, .plen = _ofs(0) };					/* long enough because used to collect minimizers */
+			s[r].cid = ~lid; /*_l(s)[lid].rsid = r;*/ 								/* mark root */
+
 			/* record marginal seed for circularization */
 			debug("test margin, as(%d), circular(%u)", _as(&s[r]), self->mi.s[s[r].rid].circular);
 			if(_as(&s[r]) < (self->mi.s[s[r].rid].circular ? self->twlen : 0)) {	/* mark marginal if the reference-side seq is circular and the root is in the margin */
@@ -3482,48 +3453,64 @@ uint64_t mm_chain_seeds(
 
 	_link_branch_break:;
 		/* chain loop */
-		uint64_t p = r, pi, lq, m, acc = 0;
+		uint64_t p = r, pi, lsid, m, acc = 0;
 		do {
-			v4i32_t b = _bw(_ld(p));
+			v4i32_t b = _max_v4i32(base, _bw(_ld(p)));
+			_print_v4i32(_vbare(_bw(_ld(p))));
 			_print_v4i32(_vbare(b));
+			uint64_t q = p + 1;
+			do {
+				m = _vin(_ld(q), b);
+				_print_v4i32(_vbare(_ld(q)));
+				_print_v4i32(_gt_v4i32(_ld(q), b));
+
+				acc += 2 * (~(acc + 1) & 0x04);
+				debug("m(%lx), acc(%ld, %lx), %s", m, acc>>3, acc&0x03, m == 0xf000 ? "chained" : "not chained");
+				if(m == 0xf000) { lsid = q; s[q].cid = cid; acc |= 2; }
+				acc |= m != 0xf000; q++;
+			} while((m & 0xff) == 0);
+
+			/*
 			for(uint64_t q = p + 1; ((m = _vin(_ld(q), b)) & 0xff) == 0; q++) {
 				_print_v4i32(_vbare(_ld(q)));
 				_print_v4i32(_gt_v4i32(_ld(q), b));
-				acc |= m != 0xf000; acc += (~acc & 0x03) == 0 ? 0 : 0x04;
-				debug("m(%lx), acc(%ld, %lx), %s", m, acc>>2, acc&0x03, m == 0xf000 ? "chained" : "not chained");
+				acc |= m != 0xf000; acc += 2 * (~(acc + 1) & 0x04);
+				debug("m(%lx), acc(%ld, %lx), %s", m, acc>>3, acc&0x03, m == 0xf000 ? "chained" : "not chained");
 				if(m != 0xf000) { continue; }
-				lq = q; /*s[q].rid = ~lid; s[q].prev = p; */ s[q].prev = lid; acc |= 2;
+				lsid = q; s[q].cid = cid; acc |= 2;
 			}
-			pi = s[p + 1].prev != 0 ? 0 : acc>>2; p++; p += pi;
+			*/
+			pi = s[p + 1].cid != CID_INIT ? 1 : acc>>3; p += pi;
 		} while((m & 0xf0) == 0);
-		debug("r(%lu), c(%lu), inc(%lu), nr(%lu, %lu)", r, acc>>2, pi == 0 ? acc>>2 : 0, nr, MIN2(nr, r + (pi == 0 ? acc>>2 : 0)));
-		r++; nr = MIN2(nr, r + (pi == 0 ? acc>>2 : 0));
+		debug("r(%lu), pi(%lu), c(%lu), inc(%lu), nr(%lu, %lu)",
+			r, pi, acc>>3, pi == 1 ? acc>>3 : 1, nr, MIN2(nr, r + (pi == 1 ? acc>>3 : 1)));
+		nr = MIN2(nr, r + (pi == 1 ? acc>>3 : 1));
 
 		/* open leaf bin */
-		uint32_t rsid = MIN2(r, _l(s)[c[cid].lid].rsid);
+		// uint32_t rsid = MIN2(r, _l(s)[c[cid].lid].rsid);
 		_l(s)[lid] = (mm_leaf_t){				/* record leaf */
-			.rsid = rsid, .lsid = lq, .rid = s[rsid].rid, .qid = self->qid,			/* qid = self->qid */
+			.rsid = rsid, .lsid = lsid, .rid = s[rsid].rid, .qid = self->qid,			/* qid = self->qid */
 		};
 		debug("record leaf, sid(%u, %u), rid(%u), qid(%u)", _l(s)[lid].rsid, _l(s)[lid].lsid, _l(s)[lid].rid, _l(s)[lid].qid);
 
 		/* update root (chain) */
-		uint32_t plen = _ofs(_ps(&s[lq]) - _ps(&s[rsid]));
+		uint32_t plen = _ofs(_ps(&s[lsid]) - _ps(&s[rsid]));
 		debug("test plen, cid(%lu), plen(%u, %u)", cid, _ofs(c[cid].plen), _ofs(plen));
 		if(c[cid].plen > plen) {				/* choose the longer */
 			c[cid] = (mm_root_t){ .lid = lid, .plen = plen };
-			debug("update plen, lid(%lu), rsid(%u), rpos(%d, %d), lsid(%u), lpos(%d, %d), plen(%u)", lid,
-				_l(s)[lid].rsid, _bare(s[_l(s)[lid].rsid].upos), _bare(s[_l(s)[lid].rsid].vpos),
-				_l(s)[lid].lsid, _bare(s[_l(s)[lid].lsid].upos), _bare(s[_l(s)[lid].lsid].vpos), _ofs(plen));
+			debug("update plen, lid(%lu), rsid(%u), lsid(%u), rpos(%d, %d), lpos(%d, %d), plen(%u)",
+				lid, _l(s)[lid].rsid, _l(s)[lid].lsid,
+				_bare(s[_l(s)[lid].rsid].upos), _bare(s[_l(s)[lid].rsid].vpos),
+				_bare(s[_l(s)[lid].lsid].upos), _bare(s[_l(s)[lid].lsid].vpos), _ofs(plen));
 		}
-		cid++; lid++;
-
 		#undef _ld
 		#undef _bw
 		#undef _vin
 	} while(s[nr].rid < INT32_MAX);				/* check if the next root is found */
-	self->seed.n = lid;							/* write back tail index */
-	self->root.n = cid;							/* write back root index */
-	return(cid);								/* #collected chains */
+	self->seed.n = nlid;						/* write back tail index */
+	self->root.n = ncid;						/* write back root index */
+	debug("lid(%lu), cid(%lu)", nlid, ncid);
+	return(ncid);								/* #collected chains */
 }
 
 /**
@@ -3537,33 +3524,53 @@ void mm_circularize(
 	debug("circularize");
 	mm_root_t *c = self->root.a;
 	mm_seed_t *s = self->seed.a;
-	mm_leaf_t const *l = _l(&s[self->n_seed]), *lt = &l[self->seed.n];
+	mm_leaf_t const *l = &_l(s)[self->n_seed], *lt = &_l(s)[self->seed.n];
+	debug("i(%lu), t(%lu)", l - (mm_leaf_t *)self->seed.a, lt - (mm_leaf_t *)self->seed.a);
 	for(uint32_t const *m = self->margin.a, *mt = &self->margin.a[self->margin.n]; m < mt; m++) {
+		debug("i(%ld), m(%u), l(%lu)", m - self->margin.a, *m, l - (mm_leaf_t *)self->seed.a);
+
 		mm_leaf_t const *p = &_l(s)[c[*m].lid];
+		if(p < l) { continue; }
+
 		uint32_t const rid = s[p->rsid].rid;
+		debug("lid(%u), rsid(%u), lsid(%u), rid(%u, %u)", c[*m].lid, p->rsid, p->lsid, s[p->rsid].rid, p->rid);
 
 		uint32_t const uofs = _ud(self->mi.s[rid].l_seq, 0), vofs = _vd(self->mi.s[rid].l_seq, 0);
 		uint32_t const ulb = s[p->rsid].upos - self->twlen, uub = s[p->rsid].upos;
 		uint32_t const vlb = s[p->rsid].vpos, vub = s[p->rsid].vpos + self->twlen;
+		debug("ulb(%d), uub(%d), vlb(%d), vub(%d)", _bare(ulb), _bare(uub), _bare(vlb), _bare(vub));
 
 		/* forward lower boundary */
-		while(l < lt && s[l->rsid].rid < rid) { l++; }
-		while(l < lt && s[l->rsid].vpos - vofs < vlb) { l++; }
+		while(l < lt && s[l->rsid].rid < rid) {
+			debug("i(%lu), rid(%u, %u)", l - (mm_leaf_t *)self->seed.a, s[l->rsid].rid, rid);
+			l++;
+		}
+		while(l < lt && s[l->rsid].vpos - vofs < vlb) {
+			debug("i(%lu), vpos(%d, %d)", l - (mm_leaf_t *)self->seed.a, _bare(s[l->rsid].vpos - vofs), _bare(vlb));
+			l++;
+		}
 
 		/* link */
 		for(mm_leaf_t const *q = l; q < lt && s[q->lsid].upos - uofs < s[p->rsid].upos; q++) {
 			if(s[q->lsid].upos - uofs < ulb) { continue; }						/* FIXME: squash branches for better performance */
 			if(s[q->lsid].upos - uofs > uub) { continue; }
 			if(s[q->lsid].vpos - vofs > vub) { continue; }
+			debug("link p(%lu) to q(%lu), pos(%d, %d)", p - (mm_leaf_t *)self->seed.a, q - (mm_leaf_t *)self->seed.a, _bare(s[q->lsid].upos), _bare(s[q->lsid].vpos));
 
 			/* circularize */
-			uint32_t rcid = s[q->rsid].prev;
-			while((int32_t)rcid >= 0) { rcid = s[l[rcid].rsid].prev; } rcid = ~rcid;
+			uint32_t rcid = s[q->rsid].cid;
+			debug("rcid(%d), rsid(%u), lsid(%u)", rcid, q->rsid, q->lsid);
+			while((int32_t)rcid >= 0) {
+				debug("rcid(%d), rsid(%u), lsid(%u)", s[_l(s)[rcid].rsid].cid, _l(s)[rcid].rsid, _l(s)[rcid].lsid);
+				rcid = s[_l(s)[rcid].rsid].cid;
+			} rcid = ~rcid;
+			debug("found root, rcid(%d)", rcid);
 
 			int32_t pj = _ps(&s[p->rsid]) - _ps(&s[q->lsid]) + self->mi.s[rid].l_seq;
-			s[p->rsid].prev = c[rcid].lid;		/* create leaf edge */
+			s[p->rsid].cid = c[rcid].lid;		/* create leaf edge */
 			c[rcid].plen -= _ofs(c[*m].plen) + pj;
 			c[rcid].lid = c[*m].lid;
+			c[*m].plen = _ofs(0);				/* mark invalid */
 		}
 	}
 	return;
@@ -3608,10 +3615,10 @@ gaba_pos_pair_t mm_next(
 	do {
 		/* lid points at a leaf; FIXME: qid test is incomplete */
 		while(_l(s)[lid].qid != 0 && s[_l(s)[lid].lsid].rid != self->rid) {
-			lid = s[_l(s)[lid].rsid].prev;
+			lid = s[_l(s)[lid].rsid].cid;
 		}
 		/* lid points at a seed, vpos overlaps with flag and vpos never be zero for seeds; FIXME: _l(s)[lid].flag == 0 */
-		do { lid = s[lid].prev; } while(s[lid].vpos > vub || s[lid].upos < ulb);
+		do { lid = s[lid].cid; } while(s[lid].vpos > vub || s[lid].upos < ulb);
 	} while((int32_t)_l(s)[lid].rid >= 0);	/* negative for lid in seed_t */
 
 	return((gaba_pos_pair_t){
