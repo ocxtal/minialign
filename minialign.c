@@ -3235,7 +3235,6 @@ typedef struct mm_tbuf_s {
 	uint32_t rid, qid;				/* raw qid (used in ava filter; ava switching flag is embedded in qid sign bit) */
 
 	/* query and reference sections (initialized in mm_init_query) */
-	uint8_t tail[96];				/* zeros or 0x80s which does not match to any bases */
 	gaba_section_t r[2];			/* [0]: rf, [1]: rr */
 	gaba_section_t q[3];			/* [0]: qf, [1]: qr, [2]: qf */
 	gaba_section_t t[2];			/* tail sections */
@@ -3251,6 +3250,9 @@ typedef struct mm_tbuf_s {
 	uint32_t n_res;					/* #alignments collected */
 	ptr_v bin;						/* gaba_alignment_t* array */
 	kh_t pos;						/* alignment dedup hash */
+
+	/* sequence buffers */
+	uint8_t tail[128];				/* zeros or 0x80s which does not match to any bases */
 } mm_tbuf_t;
 
 /**
@@ -4228,13 +4230,13 @@ mm_tbuf_t *mm_tbuf_init(mm_tbuf_params_t *u)
 		.min_score = u->min_score,
 		.dp = gaba_dp_init(u->ctx, lim, lim),
 		.alloc = u->alloc,
-		.t[0] = _sec_fw(0xfffffffe, t->tail, 64),			/* tail sections */
-		.t[1] = _sec_fw(0xfffffffe, t->tail, 64)
+		.t[0] = _sec_fw(0xfffffffe, t->tail, 96),			/* tail sections */
+		.t[1] = _sec_fw(0xfffffffe, t->tail, 96)
 	};
 	if(t->dp == NULL) { goto _fail; }
 
 	/* miscellaneous */
-	memset(t->tail, N, 96);									/* tail seq array */
+	memset(t->tail, N, 128);								/* tail seq array */
 	t->qtp = &t->t[0];										/* query tail section info pointer */
 	kh_init_static(&t->pos, 128);							/* init hash */
 	return(t);
