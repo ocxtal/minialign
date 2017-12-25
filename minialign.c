@@ -3412,7 +3412,7 @@ uint64_t mm_seed(
 /**
  * @fn mm_chain_seeds
  */
-// static _force_inline
+static _force_inline
 uint64_t mm_chain_seeds(
 	mm_tbuf_t *self)
 {
@@ -3430,7 +3430,7 @@ uint64_t mm_chain_seeds(
 		uint64_t cid = ncid, lid = nlid++, rsid = nr; r = nr; nr = UINT64_MAX;
 		v4i32_t const base = _min_v4i32(_ld(r), bm);
 
-		/* test branching path */ {
+		/* test branching path: in: r, out: cid */ {
 			v4i32_t i = _ld(r);
 			_print_v4i32(_vbare(i));
 			for(uint64_t q = r, m; ((m = _vin(i, _bw(_ld(q - 1)))) & 0xff) == 0; q--) {/* check if the head can be a branching path */
@@ -3439,14 +3439,13 @@ uint64_t mm_chain_seeds(
 				if(m == 0xf000) {
 					debug("hit at the middle of chain, cid(%u)", s[q - 1].cid);
 					cid = s[q - 1].cid; rsid = _l(s)[c[cid].lid].rsid;
-					// _l(s)[lid].rsid = _l(s)[s[q - 1].prev].rsid; s[r].prev = q - 1;
 					goto _link_branch_break;
 				}
 			}
 
 			/* open chain bin, load initial coordinates */
 			c[ncid++] = (mm_root_t){ .lid = lid, .plen = _ofs(0) };					/* long enough because used to collect minimizers */
-			s[r].cid = ~lid; /*_l(s)[lid].rsid = r;*/ 								/* mark root */
+			s[r].cid = ~lid;						 								/* mark root */
 
 			/* record marginal seed for circularization */
 			debug("test margin, as(%d), circular(%u)", _as(&s[r]), self->mi.s[s[r].rid].circular);
@@ -3457,8 +3456,8 @@ uint64_t mm_chain_seeds(
 		}
 
 	_link_branch_break:;
-		/* chain loop */
-		uint64_t p = r, pi, lsid, m, acc = 0;
+		/* chain loop: in: r, out: nr, lsid */
+		uint64_t p = r, pi, lsid = r, m, acc = 0;
 		do {
 			v4i32_t b = _max_v4i32(base, _bw(_ld(p)));
 			uint64_t q = p + 1;
@@ -3483,7 +3482,6 @@ uint64_t mm_chain_seeds(
 		nr = MIN2(nr, r + (pi == 1 ? acc>>3 : 1));
 
 		/* open leaf bin */
-		// uint32_t rsid = MIN2(r, _l(s)[c[cid].lid].rsid);
 		_l(s)[lid] = (mm_leaf_t){				/* record leaf */
 			.rsid = rsid, .lsid = lsid, .rid = s[rsid].rid, .qid = self->qid,			/* qid = self->qid */
 		};
