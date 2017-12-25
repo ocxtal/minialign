@@ -90,7 +90,7 @@ struct gaba_api_s {
 		uint32_t cnt);
 
 	/* max score and pos search */
-	gaba_pos_pair_t (*dp_search_max)(
+	gaba_pos_pair_t *(*dp_search_max)(
 		gaba_dp_t *self,
 		gaba_fill_t const *sec);
 
@@ -131,7 +131,7 @@ _decl(void, gaba_dp_clean, gaba_dp_t *self);
 _decl(gaba_fill_t *, gaba_dp_fill_root, gaba_dp_t *self, gaba_section_t const *a, uint32_t apos, gaba_section_t const *b, uint32_t bpos, uint32_t pridx);
 _decl(gaba_fill_t *, gaba_dp_fill, gaba_dp_t *self, gaba_fill_t const *prev_sec, gaba_section_t const *a, gaba_section_t const *b, uint32_t pridx);
 _decl(gaba_fill_t *, gaba_dp_merge, gaba_dp_t *self, gaba_fill_t const *const *sec, uint8_t const *qofs, uint32_t cnt);
-_decl(gaba_pos_pair_t, gaba_dp_search_max, gaba_dp_t *self, gaba_fill_t const *sec);
+_decl(gaba_pos_pair_t *, gaba_dp_search_max, gaba_dp_t *self, gaba_fill_t const *sec);
 _decl(gaba_alignment_t *, gaba_dp_trace, gaba_dp_t *self, gaba_fill_t const *tail, gaba_alloc_t const *alloc);
 _decl(void, gaba_dp_res_free, gaba_alignment_t *res);
 _decl(int64_t, gaba_dp_print_cigar_forward, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
@@ -371,7 +371,7 @@ gaba_fill_t *gaba_dp_merge(
  * @fn gaba_dp_search_max
  */
 static inline
-gaba_pos_pair_t gaba_dp_search_max(
+gaba_pos_pair_t *gaba_dp_search_max(
 	gaba_dp_t *self,
 	gaba_fill_t const *sec)
 {

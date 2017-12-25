@@ -172,6 +172,11 @@ typedef uint64_t v2i8_t;
 		_mm_shuffle_epi32((a).v1, 0xd8) \
 	} \
 )
+#define _cvt_v2i64_v2i32(a) ( \
+	(v2i32_t) { \
+		_mm_shuffle_epi32((a).v1, 0x8d) \
+	} \
+)
 
 /* transpose */
 #define _lo_v2i32(a, b) ( \

@@ -60,7 +60,7 @@
 #endif
 
 #ifdef BIT
-#  if BIT == 2 || BIT == 4
+#  if !(BIT == 2 || BIT == 4)
 #    error "BIT must be 2 or 4."
 #  endif
 #else
@@ -193,27 +193,6 @@ _static_assert(sizeof(struct gaba_alignment_s) == 64);
 _static_assert(sizeof(nvec_masku_t) == BW / 8);
 
 /**
- * @macro _max_match, _gap_h, _gap_v
- * @brief calculate scores
- */
-#define _max_match(_p)				( _hmax_v16i8(_loadu_v16i8((_p)->score_matrix)) )
-#define _max_match_base(_p)			( 0x01 )
-#if MODEL == LINEAR
-#define _gap_h(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
-#define _gap_v(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
-#elif MODEL == AFFINE
-#define _gap_h(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
-#define _gap_v(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
-#else /* MODEL == COMBINED */
-#define _gap_h(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (_p)->gfa * (_l)) )
-#define _gap_v(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (_p)->gfb * (_l)) )
-#endif
-#define _ofs_h(_p)					( (_p)->gi + (_p)->ge )
-#define _ofs_v(_p)					( (_p)->gi + (_p)->ge )
-#define _ofs_e(_p)					( (_p)->gi )
-#define _ofs_f(_p)					( (_p)->gi )
-
-/**
  * @macro _plen
  * @brief extract plen from path_section_s
  */
@@ -341,7 +320,8 @@ struct gaba_joint_tail_s {
 	struct gaba_drop_s xd;				/** (16, 32, 64) */
 	struct gaba_middle_delta_s md;		/** (32, 64, 128) */
 
-	int32_t mdrop;						/** (4) drop from m.max (offset) */
+	int16_t mdrop;						/** (2) drop from m.max (offset) */
+	uint16_t istat;						/** (2) 1 if bridge */
 	uint32_t pridx;						/** (4) remaining p-length */
 	uint32_t aridx, bridx;				/** (8) reverse indices for the tails */
 	uint32_t aadv, badv;				/** (8) advanced lengths */
@@ -352,6 +332,9 @@ struct gaba_joint_tail_s {
 };
 _static_assert((sizeof(struct gaba_joint_tail_s) % 32) == 0);
 #define TAIL_BASE				( offsetof(struct gaba_joint_tail_s, f) )
+#define BRIDGE_TAIL_OFFSET		( offsetof(struct gaba_joint_tail_s, mdrop) )
+#define BRIDGE_TAIL_SIZE		( sizeof(struct gaba_joint_tail_s) - BRIDGE_TAIL_OFFSET )
+#define _bridge(x)				( (struct gaba_joint_tail_s *)((uint8_t *)(x) - BRIDGE_TAIL_OFFSET) )
 #define _tail(x)				( (struct gaba_joint_tail_s *)((uint8_t *)(x) - TAIL_BASE) )
 #define _fill(x)				( (struct gaba_fill_s *)((uint8_t *)(x) + TAIL_BASE) )
 #define _offset(x)				( (x)->f.max - (x)->mdrop )
@@ -472,6 +455,7 @@ struct gaba_writer_work_s {
 	uint32_t p, q;						/** (8) local p, q-coordinate, [0, BW) */
 
 	/** save */
+	uint32_t aofs, bofs;				/** (8) ofs for bridge */
 	uint32_t agidx, bgidx;				/** (8) grid indices of the current trace */
 	uint32_t asgidx, bsgidx;			/** (8) base indices of the current trace */
 	uint32_t aid, bid;					/** (8) section ids */
@@ -482,7 +466,6 @@ struct gaba_writer_work_s {
 	struct gaba_alignment_s *aln;		/** (8) */
 
 	struct gaba_leaf_s leaf;			/** (40) working buffer for max pos search */
-	uint64_t _pad1;
 	/** 64, 192 */
 };
 _static_assert((sizeof(struct gaba_writer_work_s) % 64) == 0);
@@ -754,15 +737,39 @@ struct gaba_dir_s {
 #define _lo32(v)				_ext_v2i32(v, 0)
 #define _hi32(v)				_ext_v2i32(v, 1)
 
-/* sequence encoding */
+/* scoring function and sequence encoding */
+
+/**
+ * @macro _max_match, _gap_h, _gap_v
+ * @brief calculate scores
+ */
+#define _max_match(_p)				( _hmax_v16i8(_loadu_v16i8((_p)->score_matrix)) )
+#if MODEL == LINEAR
+#define _gap_h(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
+#define _gap_v(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
+#elif MODEL == AFFINE
+#define _gap_h(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
+#define _gap_v(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
+#else /* MODEL == COMBINED */
+#define _gap_h(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (_p)->gfa * (_l)) )
+#define _gap_v(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (_p)->gfb * (_l)) )
+#endif
+#define _ofs_h(_p)					( (_p)->gi + (_p)->ge )
+#define _ofs_v(_p)					( (_p)->gi + (_p)->ge )
+#define _ofs_e(_p)					( (_p)->gi )
+#define _ofs_f(_p)					( (_p)->gi )
 
 /**
  * @enum BASES
  */
 #if BIT == 2
-enum BASES { A = 0x00, C = 0x01, G = 0x02, T = 0x03, N = 0x80 };
+enum BASES { A = 0x00, C = 0x01, G = 0x02, T = 0x03, N = 0x09 };
+#  define _max_match_base_a(_p)		( 0x0c )
+#  define _max_match_base_b(_p)		( 0x03 )
 #else
 enum BASES { A = 0x01, C = 0x02, G = 0x04, T = 0x08, N = 0x00 };
+#  define _max_match_base_a(_p)		( 0x01 )
+#  define _max_match_base_b(_p)		( 0x01 )
 #endif
 
 /**
@@ -1065,25 +1072,11 @@ static _force_inline
 void fill_load_section(
 	struct gaba_dp_context_s *self,
 	struct gaba_joint_tail_s const *tail,
-	struct gaba_section_s const *a,
-	struct gaba_section_s const *b,
-	v2i32_t ridx,								/* (bridx, aridx) */
+	v2i32_t id, v2i32_t len, v2i64_t bptr,
 	uint32_t pridx)
 {
-	/* load current section lengths */
-	v2i64_t asec = _loadu_v2i64(a);				/* tuple of (64bit ptr, 32-bit id, 32-bit len) */
-	v2i64_t bsec = _loadu_v2i64(b);
-
-	/* transpose sections to extract {id, len, base} pairs */
-	v2i32_t aid_alen = _cast_v2i64_v2i32(asec);	/* extract lower 64bit */
-	v2i32_t bid_blen = _cast_v2i64_v2i32(bsec);
-
-	v2i32_t id = _lo_v2i32(aid_alen, bid_blen);
-	v2i32_t len = _hi_v2i32(aid_alen, bid_blen);
-	v2i64_t bptr = _hi_v2i64(asec, bsec);
-	_print_v2i32(id); _print_v2i32(len); _print_v2i64(bptr);
-
 	/* calc ridx */
+	v2i32_t ridx = _load_v2i32(&tail->aridx);	/* (bridx, aridx), 0 for reload */
 	ridx = _sel_v2i32(_eq_v2i32(ridx, _zero_v2i32()),/* if ridx is zero (occurs when section is updated) */
 		len,									/* load the next section */
 		ridx									/* otherwise use the same section as the previous */
@@ -1110,6 +1103,9 @@ void fill_load_section(
 	_store_v2i32(&self->w.r.arem, rem);
 	_store_v2i32(&self->w.r.asridx, ridx);
 	_print_v2i32(ridx);
+
+	/* save tail */
+	self->w.r.tail = tail;
 	return;
 }
 
@@ -1137,22 +1133,43 @@ struct gaba_block_s *fill_create_phantom(
 }
 
 /**
- * @fn fill_load_tail
+ * @fn fill_create_bridge
+ * @brief ``bridge'' tail skips <len - ridx> bases at the head of the sections.
+ */
+static _force_inline
+struct gaba_joint_tail_s *fill_create_bridge(
+	struct gaba_dp_context_s *self,
+	struct gaba_joint_tail_s const *prev_tail,
+	v2i32_t id, v2i32_t len, v2i64_t bptr,
+	v2i32_t adv)
+{
+	struct gaba_joint_tail_s *tail = _bridge(gaba_dp_malloc(self, BRIDGE_TAIL_SIZE));
+
+	/* vector position and scores are unchanged */
+	_storeu_u64(&tail->mdrop, 0x00010000 | _loadu_u64(&prev_tail->mdrop));	/* mark istat */
+
+	/* relative section pointer is moved, set advanced length */
+	_store_v2i32(&tail->aridx, _sub_v2i32(len, adv));			/* FIXME: len -> correct ridx */
+	_store_v2i32(&tail->aadv, adv);
+
+	/* copy breakpoint arrays and pointers */
+	tail->tail = prev_tail;
+	_store_v2i64(&tail->abrk, _load_v2i64(&prev_tail->abrk));	/* unchanged */
+	_store_v2i64(&tail->atptr, _add_v2i64(bptr, _cvt_v2i32_v2i64(len)));/* correct tptr for safety (actually not required) */
+	_store_v2i32(&tail->f.aid, id);								/* correct id pair is required */
+	_memcpy_blk_uu(&tail->f.ascnt, &prev_tail->f.ascnt, 32);	/* just copy (unchanged) */
+	return(tail);
+}
+
+/**
+ * @fn fill_load_vectors
  * @brief load sequences and indices from the previous tail
  */
 static _force_inline
-struct gaba_block_s *fill_load_tail(
+struct gaba_block_s *fill_load_vectors(
 	struct gaba_dp_context_s *self,
-	struct gaba_joint_tail_s const *tail,
-	struct gaba_section_s const *a,
-	struct gaba_section_s const *b,
-	v2i32_t ridx,
-	uint32_t pridx)
+	struct gaba_joint_tail_s const *tail)
 {
-	/* load sequences and sections */
-	fill_load_section(self, tail, a, b, ridx, pridx);
-	self->w.r.tail = tail;
-
 	/* load sequence vectors */
 	nvec_t const mask = _set_n(0x0f);
 	nvec_t ch = _loadu_n(&tail->ch.w);
@@ -1179,86 +1196,99 @@ struct gaba_block_s *fill_load_tail(
  * @brief create joint_tail at the end of the blocks
  */
 static _force_inline
+int32_t fill_save_vectors(
+	struct gaba_dp_context_s *self,
+	struct gaba_joint_tail_s *tail,
+	uint32_t cnt)
+{
+	/* store char vector */
+	nvec_t ach = _loadu_n(_rd_bufa(self, cnt & 0xff, BW));
+	nvec_t bch = _loadu_n(_rd_bufb(self, cnt>>8, BW));
+	_print_n(ach); _print_n(bch);
+	_storeu_n(&tail->ch, _or_n(ach, _shl_n(bch, 4)));
+
+	/* copy delta vectors */
+	nvec_t xd = _load_n(&self->w.r.xd);				/* gcc-4.8 w/ -mavx2 -mbmi2 has an optimization bug with vpmovsxbw */
+	wvec_t md = _load_w(&self->w.r.md);
+	_storeu_n(&tail->xd, xd);
+	_storeu_w(&tail->md, md);
+	_print_n(xd);
+	_print_w(md);
+
+	/* search max section */
+	md = _add_w(md, _cvt_n_w(xd));					/* xd holds drop from max */
+	return(_hmax_w(md));
+}
+static _force_inline
+struct gaba_joint_tail_s *fill_save_section(
+	struct gaba_dp_context_s *self,
+	struct gaba_joint_tail_s *tail,
+	uint32_t xstat,
+	int32_t mdrop)
+{
+	v2i32_t rlim = _load_v2i32(&self->w.r.arlim);
+	v2i32_t id = _load_v2i32(&self->w.r.aid);
+	v2i64_t tptr = _load_v2i64(&self->w.r.atptr);
+	tptr = _add_v2i64(tptr, _cvt_v2i32_v2i64(rlim));
+	_print_v2i32(rlim); _print_v2i32(_load_v2i32(&self->w.r.arem));
+
+	/* adjust reversed indices */
+	tail->mdrop = mdrop;
+	tail->istat = 0;
+	tail->pridx = self->w.r.pridx;
+	v2i32_t ridx = _add_v2i32(_load_v2i32(&self->w.r.arem), rlim);
+	v2i32_t sridx = _load_v2i32(&self->w.r.asridx);
+	v2i32_t adv = _sub_v2i32(sridx, ridx);
+	_store_v2i32(&tail->aridx, ridx);
+	_store_v2i32(&tail->aadv, adv);
+
+	/* adjust breakpoint masks */
+	struct gaba_joint_tail_s const *prev_tail = self->w.r.tail;
+	v2i64_t brk = _shrv_v2i64(_loadu_v2i64(&prev_tail->abrk), _cvt_v2i32_v2i64(adv));
+	tail->tail = prev_tail;
+	_store_v2i64(&tail->abrk, brk);
+
+	/* save section info */
+	_store_v2i64(&tail->atptr, tptr);
+	_store_v2i32(&tail->f.aid, id);
+	_print_v2i32(ridx); _print_v2i32(sridx); _print_v2i32(adv);
+
+	/* calc end-of-section flag, section counts, and base counts */
+	v2i32_t update = _eq_v2i32(ridx, _zero_v2i32());
+	_store_v2i32(&tail->f.ascnt, _sub_v2i32(
+		_load_v2i32(&prev_tail->f.ascnt),			/* aligned section counts */
+		update										/* increment by one if the pointer reached the end of the current section */
+	));
+	_store_v2i64(&tail->f.apos, _add_v2i64(
+		_load_v2i64(&prev_tail->f.apos),
+		_cvt_v2i32_v2i64(adv)
+	));
+	_print_v2i32(_load_v2i32(&tail->f.ascnt));
+	_print_v2i64(_load_v2i64(&tail->f.apos));
+
+	/* store max, status flag */
+	tail->f.max = _offset(prev_tail) + self->w.r.ofsd + mdrop;
+	tail->f.stat = ((xstat & (TERM | CONT))<<8) | _mask_v2i32(update);
+	debug("prev_offset(%ld), offset(%ld), max(%d, %ld)",
+		_offset(prev_tail), _offset(prev_tail) + self->w.r.ofsd, mdrop, tail->f.max);
+	return(tail);
+}
+static _force_inline
 struct gaba_joint_tail_s *fill_create_tail(
 	struct gaba_dp_context_s *self,
 	struct gaba_block_s *blk)
 {
 	/* inspect fetched base counts */
-	uint16_t cnt = _load_v2i8(&blk->acnt);				/* *((uint16_t const *)&blk->acnt); */
+	uint32_t cnt = _load_v2i8(&blk->acnt), xstat = blk->xstat;/* *((uint16_t const *)&blk->acnt); */
 
 	/* create joint_tail: squash the last block if no vector was filled */
 	struct gaba_joint_tail_s *tail = (struct gaba_joint_tail_s *)(blk + (cnt != 0));
 	self->stack.top = (void *)(tail + 1);				/* write back stack_top */
 	debug("end stack_top(%p), stack_end(%p), blk(%p)", self->stack.top, self->stack.end, blk);
 
-	int32_t mdrop;
-	/* vectors */ {
-		/* store char vector */
-		nvec_t ach = _loadu_n(_rd_bufa(self, cnt & 0xff, BW));
-		nvec_t bch = _loadu_n(_rd_bufb(self, cnt>>8, BW));
-		_print_n(ach); _print_n(bch);
-		_storeu_n(&tail->ch, _or_n(ach, _shl_n(bch, 4)));
-
-		/* copy delta vectors */
-		nvec_t xd = _load_n(&self->w.r.xd);				/* gcc-4.8 w/ -mavx2 -mbmi2 has an optimization bug with vpmovsxbw */
-		wvec_t md = _load_w(&self->w.r.md);
-		_storeu_n(&tail->xd, xd);
-		_storeu_w(&tail->md, md);
-		_print_n(xd);
-		_print_w(md);
-
-		/* search max section */
-		md = _add_w(md, _cvt_n_w(xd));					/* xd holds drop from max */
-		mdrop = _hmax_w(md);
-		tail->mdrop = mdrop;
-	}
-
-	/* section */ {
-		v2i32_t rlim = _load_v2i32(&self->w.r.arlim);
-		v2i32_t id = _load_v2i32(&self->w.r.aid);
-		v2i64_t tptr = _load_v2i64(&self->w.r.atptr);
-		tptr = _add_v2i64(tptr, _cvt_v2i32_v2i64(rlim));
-		_print_v2i32(rlim); _print_v2i32(_load_v2i32(&self->w.r.arem));
-
-		/* adjust reversed indices */
-		tail->pridx = self->w.r.pridx;
-		v2i32_t ridx = _add_v2i32(_load_v2i32(&self->w.r.arem), rlim);
-		v2i32_t sridx = _load_v2i32(&self->w.r.asridx);
-		v2i32_t adv = _sub_v2i32(sridx, ridx);
-		_store_v2i32(&tail->aridx, ridx);
-		_store_v2i32(&tail->aadv, adv);
-
-		/* adjust breakpoint masks */
-		struct gaba_joint_tail_s const *prev_tail = self->w.r.tail;
-		v2i64_t brk = _shrv_v2i64(_loadu_v2i64(&prev_tail->abrk), _cvt_v2i32_v2i64(adv));
-		tail->tail = prev_tail;
-		_store_v2i64(&tail->abrk, brk);
-
-		/* save section info */
-		_store_v2i64(&tail->atptr, tptr);
-		_store_v2i32(&tail->f.aid, id);
-		_print_v2i32(ridx); _print_v2i32(sridx); _print_v2i32(adv);
-
-		/* calc end-of-section flag, section counts, and base counts */
-		v2i32_t update = _eq_v2i32(ridx, _zero_v2i32());
-		_store_v2i32(&tail->f.ascnt, _sub_v2i32(
-			_load_v2i32(&prev_tail->f.ascnt),			/* aligned section counts */
-			update										/* increment by one if the pointer reached the end of the current section */
-		));
-		_store_v2i64(&tail->f.apos, _add_v2i64(
-			_load_v2i64(&prev_tail->f.apos),
-			_cvt_v2i32_v2i64(adv)
-		));
-		_print_v2i32(_load_v2i32(&tail->f.ascnt));
-		_print_v2i64(_load_v2i64(&tail->f.apos));
-
-		/* store max, status flag */
-		tail->f.max = _offset(prev_tail) + self->w.r.ofsd + mdrop;
-		tail->f.stat = ((uint32_t)(blk->xstat & (TERM | CONT))<<8) | _mask_v2i32(update);
-		debug("prev_offset(%ld), offset(%ld), max(%d, %ld)",
-			_offset(prev_tail), _offset(prev_tail) + self->w.r.ofsd, mdrop, tail->f.max);
-	}
-	return(tail);
+	return(fill_save_section(self, tail, xstat,			/* sections */
+		fill_save_vectors(self, tail, cnt)				/* vectors */
+	));
 }
 
 /**
@@ -1404,7 +1434,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	delta = _op_add(delta, _t); \
 	drop = _op_subs(drop, _t); \
 	_dir_update(dir, _vector, _sign); \
-	_print_n(drop); \
+	_print_n(delta); _print_n(drop); \
 	_print_w(_add_w(_load_w(&self->w.r.md), _add_w(_cvt_n_w(delta), _set_w(_offset(self->w.r.tail) + self->w.r.ofsd - 128)))); \
 	_print_w(_add_w(_add_w(_load_w(&self->w.r.md), _cvt_n_w(delta)), _add_w(_cvt_n_w(drop), _set_w(_offset(self->w.r.tail) + self->w.r.ofsd)))); \
 }
@@ -1801,15 +1831,24 @@ struct gaba_fill_s *_export(gaba_dp_fill_root)(
 	/* restore dp context pointer by adding offset */
 	self = _restore_dp_context(self);
 
-	/* load sections and extract the last block pointer */
-	v2i32_t pos = _seta_v2i32(bpos, apos), len = _seta_v2i32(b->len, a->len);
-	_print_v2i32(pos);
-	_print_v2i32(len);
-	struct gaba_block_s *blk = fill_load_tail(
-		self, _root(self), a, b,
-		_sub_v2i32(len, pos),
-		pridx == 0 ? UINT32_MAX : pridx /* UINT32_MAX */
+	/* load current sections, then transpose sections to extract {id, len, base} pairs */
+	v2i64_t asec = _loadu_v2i64(a), bsec = _loadu_v2i64(b);	/* tuple of (64bit ptr, 32-bit id, 32-bit len) */
+	v2i64_t id_len = _lo_v2i64(asec, bsec), bptr = _hi_v2i64(asec, bsec);
+	v2i32_t id = _cvt_v2i64_v2i32(id_len), len = _cvth_v2i64_v2i32(id_len);
+	v2i32_t adv = _seta_v2i32(bpos, apos);		/* head offsets */
+	_print_v2i32(id); _print_v2i32(len); _print_v2i64(bptr); _print_v2i32(adv);
+
+	/* create bridge (skip (apos, bpos) at the head) */
+	struct gaba_joint_tail_s *brg = fill_create_bridge(self, _root(self), id, len, bptr, adv);
+
+	/* load sections */
+	fill_load_section(self,
+		brg, id, len, bptr,
+		pridx == 0 ? UINT32_MAX : pridx			/* UINT32_MAX */
 	);
+
+	/* load sequences and extract the last block pointer */
+	struct gaba_block_s *blk = fill_load_vectors(self, _root(self));
 
 	/* init fetch */
 	if(fill_init_fetch(self, blk, _load_v2i64(&_root(self)->f.apos)) < INIT_FETCH_BPOS) {
@@ -1837,14 +1876,22 @@ struct gaba_fill_s *_export(gaba_dp_fill)(
 {
 	self = _restore_dp_context(self);
 
-	/* load sections and extract the last block pointer */
-	_print_v2i32(_load_v2i32(&_tail(fill)->aridx));
-	_print_v2i32(_load_v2i32(&_tail(fill)->aadv));
-	struct gaba_block_s *blk = fill_load_tail(
-		self, _tail(fill), a, b,
-		_load_v2i32(&_tail(fill)->aridx),
+	/* load current sections, then transpose sections to extract {id, len, base} pairs */
+	v2i64_t asec = _loadu_v2i64(a), bsec = _loadu_v2i64(b);	/* tuple of (64bit ptr, 32-bit id, 32-bit len) */
+	v2i64_t id_len = _lo_v2i64(asec, bsec), bptr = _hi_v2i64(asec, bsec);
+	v2i32_t id = _cvt_v2i64_v2i32(id_len), len = _cvth_v2i64_v2i32(id_len);
+	_print_v2i32(id); _print_v2i32(len); _print_v2i64(bptr);
+
+	/* load sections */
+	fill_load_section(self,
+		_tail(fill), id, len, bptr,
 		pridx == 0 ? _tail(fill)->pridx : pridx /* UINT32_MAX */
 	);
+
+	/* load sequences and extract the last block pointer */
+	_print_v2i32(_load_v2i32(&_tail(fill)->aridx));
+	_print_v2i32(_load_v2i32(&_tail(fill)->aadv));
+	struct gaba_block_s *blk = fill_load_vectors(self, _tail(fill));
 
 	/* check if still in the init (head) state */
 	if((int64_t)_tail(fill)->f.bpos < INIT_FETCH_BPOS) {
@@ -2412,7 +2459,7 @@ uint64_t leaf_search(
 /**
  * @fn gaba_dp_search_max
  */
-struct gaba_pos_pair_s _export(gaba_dp_search_max)(
+struct gaba_pos_pair_s *_export(gaba_dp_search_max)(
 	struct gaba_dp_context_s *self,
 	struct gaba_fill_s const *fill)
 {
@@ -2420,28 +2467,37 @@ struct gaba_pos_pair_s _export(gaba_dp_search_max)(
 	struct gaba_joint_tail_s const *tail = _tail(fill);
 	leaf_search(self, tail);
 
-	v2i32_t const v11 = _set_v2i32(1);
+	v2i32_t const v11 = _seta_v2i32(1, 1);
 	v2i32_t gidx = _load_v2i32(&self->w.l.agidx), acc = _zero_v2i32();
+	v2i32_t id = _load_v2i32(&tail->f.aid);
+
 	debug("gidx(%d, %d), acc(%d, %d)", _hi32(gidx), _lo32(gidx), _hi32(acc), _lo32(acc));
-	while(_test_v2i32(_gt_v2i32(v11, gidx), v11)) {
-		/* recalculate update mask */
-		v2i32_t update = _eq_v2i32(_load_v2i32(&tail->aridx), _zero_v2i32());
-		_print_v2i32(update);
+	while(1) {
+		v2i32_t update = _gt_v2i32(v11, gidx);
+		if(_test_v2i32(update, v11)) { break; }
 
 		/* accumulate advanced lengths */
-		acc = _add_v2i32(acc, _load_v2i32(&tail->aadv));
-		_print_v2i32(acc); _print_v2i32(_load_v2i32(&tail->aadv));
+		v2i32_t adv = _load_v2i32(&tail->aadv), nid = _load_v2i32(&tail->f.aid);
+		acc = _add_v2i32(acc, adv);
+		_print_v2i32(acc); _print_v2i32(adv); _print_v2i32(nid);
+
+		/* fetch previous tail and calculate the last update mask */
+		tail = tail->tail;
+		v2i32_t ridx = _load_v2i32(&tail->aridx);
+		v2i32_t mask = _and_v2i32(update, _eq_v2i32(ridx, _zero_v2i32()));
+		_print_v2i32(update);
 
 		/* add advanced lengths */
-		gidx = _add_v2i32(gidx, _and_v2i32(update, acc));
-		acc = _andn_v2i32(update, acc);
-		_print_v2i32(gidx);
-
-		/* fetch prev */
-		tail = tail->tail;
+		gidx = _add_v2i32(gidx, _and_v2i32(mask, acc));
+		id = _sel_v2i32(mask, nid, id);			/* reload */
+		acc = _andn_v2i32(mask, acc);			/* flush if summed up to gidx */
+		_print_v2i32(gidx); _print_v2i32(id);
 	}
-	struct gaba_pos_pair_s pos;
-	_store_v2i32(&pos, _sub_v2i32(gidx, v11));
+
+	struct gaba_pos_pair_s *pos = gaba_dp_malloc(self, sizeof(struct gaba_pos_pair_s));
+	_store_v2i32(&pos->aid, id);
+	_store_v2i32(&pos->apos, _sub_v2i32(gidx, v11));
+	_print_v2i32(_sub_v2i32(gidx, v11));
 	return(pos);
 }
 
@@ -2467,21 +2523,59 @@ void trace_reload_section(
 
 	while(gidx <= 0) {
 		do {
-			gidx += _r(tail->aadv, i);
-			debug("add ridx(%d), adv(%d), gidx(%d), stat(%x)", _r(tail->aridx, i), _r(tail->aadv, i), gidx, tail->f.stat);
+			gidx += tail->istat ? 0 : _r(tail->aadv, i);
+			debug("add istat(%u), ridx(%d), adv(%d), gidx(%d), stat(%x)", tail->istat, _r(tail->aridx, i), _r(tail->aadv, i), gidx, tail->f.stat);
 			prev_tail = tail; tail = tail->tail;
 		} while(_r(tail->aridx, i) != 0);
 	}
 
 	/* reload finished, store section info */
-	_r(self->w.l.atail, i) = tail;		/* FIXME: is this correct?? */
+	_r(self->w.l.atail, i) = tail;				/* FIXME: is this correct?? */
 	_r(self->w.l.aid, i) = _r(prev_tail->f.aid, i);
 
+	/* save indices, offset for bridged region adjustment */
+	_r(self->w.l.aofs, i) = prev_tail->istat ? _r(prev_tail->aadv, i) : 0;
 	_r(self->w.l.agidx, i) = gidx;
 	_r(self->w.l.asgidx, i) = gidx;
+	debug("prev_tail->istat(%u), ofs(%u)", prev_tail->istat, _r(self->w.l.aofs, i));
 	return;
 
 	#undef _r
+}
+
+/**
+ * @fn trace_push_segment
+ */
+static _force_inline
+void trace_push_segment(
+	struct gaba_dp_context_s *self)
+{
+	/* windback pointer */
+	self->w.l.a.slen++;
+	self->w.l.a.seg--;
+
+	/* calc ppos */
+	uint64_t ppos = (self->w.l.path - self->w.l.aln->path) * 32 + self->w.l.ofs;
+	debug("ppos(%lu), path(%p, %p), ofs(%u)", ppos, self->w.l.path, self->w.l.aln->path, self->w.l.ofs);
+
+	/* load section info */
+	v2i32_t ofs = _load_v2i32(&self->w.l.aofs);
+	v2i32_t gidx = _load_v2i32(&self->w.l.agidx);
+	v2i32_t sgidx = _load_v2i32(&self->w.l.asgidx);
+	v2i32_t id = _load_v2i32(&self->w.l.aid);
+	_print_v2i32(gidx); _print_v2i32(sgidx); _print_v2i32(id);
+
+	/* store section info */
+	v2i32_t mask = _eq_v2i32(gidx, _zero_v2i32());/* add bridged length if the traceback pointer has reached the head */
+	v2i32_t pos = _add_v2i32(_and_v2i32(mask, ofs), gidx), len = _sub_v2i32(sgidx, gidx);
+	_store_v2i32(&self->w.l.a.seg->apos, pos);
+	_store_v2i32(&self->w.l.a.seg->alen, len);
+	_store_v2i32(&self->w.l.a.seg->aid, id);
+	self->w.l.a.seg->ppos = ppos;
+
+	/* update rsgidx */
+	_store_v2i32(&self->w.l.asgidx, gidx);
+	return;
 }
 
 /**
@@ -2768,38 +2862,6 @@ _trace_term:;
 #  define DEBUG
 #  include "log.h"
 #endif
-
-/**
- * @fn trace_push_segment
- */
-static _force_inline
-void trace_push_segment(
-	struct gaba_dp_context_s *self)
-{
-	/* windback pointer */
-	self->w.l.a.slen++;
-	self->w.l.a.seg--;
-
-	/* calc ppos */
-	uint64_t ppos = (self->w.l.path - self->w.l.aln->path) * 32 + self->w.l.ofs;
-	debug("ppos(%lu), path(%p, %p), ofs(%u)", ppos, self->w.l.path, self->w.l.aln->path, self->w.l.ofs);
-
-	/* load section info */
-	v2i32_t gidx = _load_v2i32(&self->w.l.agidx);
-	v2i32_t sgidx = _load_v2i32(&self->w.l.asgidx);
-	v2i32_t id = _load_v2i32(&self->w.l.aid);
-	_print_v2i32(gidx); _print_v2i32(sgidx); _print_v2i32(id);
-
-	/* store section info */
-	_store_v2i32(&self->w.l.a.seg->apos, gidx);
-	_store_v2i32(&self->w.l.a.seg->alen, _sub_v2i32(sgidx, gidx));
-	_store_v2i32(&self->w.l.a.seg->aid, id);
-	self->w.l.a.seg->ppos = ppos;
-
-	/* update rsgidx */
-	_store_v2i32(&self->w.l.asgidx, gidx);
-	return;
-}
 
 /**
  * @fn trace_init
@@ -3424,7 +3486,7 @@ void gaba_init_phantom(
 
 		/* score and vectors */
 		.mdrop = 0,
-		.ch.w = { [0] = _max_match_base(p), [BW-1] = _max_match_base(p)<<4 },
+		.ch.w = { [0] = _max_match_base_a(p), [BW-1] = _max_match_base_b(p)<<4 },
 		.xd.drop = { [BW / 2] = _max_match(p) - _gap_v(p, 1) },
 		.md = gaba_init_middle_delta(p)
 	};
@@ -4438,24 +4500,30 @@ uint8_t unittest_encode_base(char c)
 	#define _b(x)	( (x) & 0x1f )
 
 	/* conversion tables */
-	enum bases { A = 0x01, C = 0x02, G = 0x04, T = 0x08 };
+	#if BIT == 2
+		enum bases { A = 0x00, C = 0x01, G = 0x02, T = 0x03 };
+	#else
+		enum bases { A = 0x01, C = 0x02, G = 0x04, T = 0x08 };
+	#endif
 	static uint8_t const table[] = {
 		[_b('A')] = A,
 		[_b('C')] = C,
 		[_b('G')] = G,
 		[_b('T')] = T,
 		[_b('U')] = T,
-		[_b('R')] = A | G,
-		[_b('Y')] = C | T,
-		[_b('S')] = G | C,
-		[_b('W')] = A | T,
-		[_b('K')] = G | T,
-		[_b('M')] = A | C,
-		[_b('B')] = C | G | T,
-		[_b('D')] = A | G | T,
-		[_b('H')] = A | C | T,
-		[_b('V')] = A | C | G,
-		[_b('N')] = 0,		/* treat 'N' as a gap */
+		#if BIT == 4
+			[_b('R')] = A | G,
+			[_b('Y')] = C | T,
+			[_b('S')] = G | C,
+			[_b('W')] = A | T,
+			[_b('K')] = G | T,
+			[_b('M')] = A | C,
+			[_b('B')] = C | G | T,
+			[_b('D')] = A | G | T,
+			[_b('H')] = A | C | T,
+			[_b('V')] = A | C | G,
+			[_b('N')] = 0,		/* treat 'N' as a gap */
+		#endif
 		[_b('_')] = 0		/* sentinel */
 	};
 	return(table[_b((uint8_t)c)]);
@@ -4568,17 +4636,30 @@ struct gaba_fill_s const *unittest_dp_extend(
 	while((f->stat & GABA_TERM) == 0) {
 		if(f->stat & GABA_UPDATE_A) {
 			a++;
-			debug("update a(%u, %u, %s)", a->id, a->len, a->base);
+			debug("update a(%u, %u, %p, %s)", a->id, a->len, a->base, a->base);
 		}
 		if(f->stat & GABA_UPDATE_B) {
 			b++;
-			debug("update b(%u, %u, %s)", b->id, b->len, b->base);
+			debug("update b(%u, %u, %p, %s)", b->id, b->len, b->base, b->base);
 		}
 		if(a->base == NULL || b->base == NULL) { break; }
 		f = _export(gaba_dp_fill)(dp, f, a, b, 0);
 		m = f->max > m->max ? f : m;
 	}
 	return(m);									/* never be null */
+}
+
+static
+int unittest_check_maxpos(
+	uint32_t id,
+	uint32_t pos,
+	uint64_t ofs,
+	uint64_t len,
+	struct gaba_section_s const *sec)
+{
+	int64_t acc = 0;
+	while(acc + sec->len < ofs + len) { acc += sec++->len; }
+	return((id == sec->id && ofs + len - 1 == pos + acc) ? 1 : 0);
 }
 
 static
@@ -4665,28 +4746,40 @@ void unittest_test_pair(
 	struct gaba_dp_context_s *dp,
 	struct unittest_seq_pair_s const *pair)
 {
-	/* test naive implementations */
+	/* prepare sequences */
 	char *a = unittest_cat_seq(pair->a);
 	char *b = unittest_cat_seq(pair->b);
+	debug("a(%s), b(%s)", a, b);
+
 	uint64_t *asec = unittest_build_section_array(pair->a);
 	uint64_t *bsec = unittest_build_section_array(pair->b);
-	struct unittest_naive_result_s nr = unittest_naive(unittest_default_params, a, b, asec, bsec);
+	struct unittest_sec_pair_s *s = unittest_build_section(
+		pair,
+		unittest_build_section_forward
+	);
 
+	/* test naive implementations */
+	struct unittest_naive_result_s nr = unittest_naive(unittest_default_params, a, b, asec, bsec);
 	assert(nr.score >= 0);
 	assert(nr.path_length <= strlen(a) + strlen(b));
 	assert(nr.path != NULL);
 	assert(nr.sec != NULL);
 
+	/* fix head segment */
+	nr.sec[0].apos += s->apos;
+	nr.sec[0].bpos += s->bpos;
+
 	/* fill-in sections */
-	debug("a(%s), b(%s)", a, b);
-	struct unittest_sec_pair_s *s = unittest_build_section(
-		pair,
-		unittest_build_section_forward
-	);
 	struct gaba_fill_s const *m = unittest_dp_extend(dp, s);
 
 	assert(m != NULL);
 	assert(m->max == nr.score, "m->max(%ld), nr.score(%d)", m->max, nr.score);
+
+	/* test max pos */
+	struct gaba_pos_pair_s const *p = _export(gaba_dp_search_max)(dp, m);
+	assert(p != NULL);
+	assert(unittest_check_maxpos(p->aid, p->apos, s->apos, nr.alen, s->a), "a(%s), b(%s)", a, b);
+	assert(unittest_check_maxpos(p->bid, p->bpos, s->bpos, nr.blen, s->b), "a(%s), b(%s)", a, b);
 
 	/* test path */
 	struct gaba_alignment_s const *r = _export(gaba_dp_trace)(dp, m, NULL);
@@ -4696,8 +4789,8 @@ void unittest_test_pair(
 	assert(unittest_check_path(r, nr.path), "a(%s), b(%s), r->path(%s), nr.path(%s)", a, b, unittest_decode_path(r), nr.path);
 	assert(unittest_check_section(r, nr.sec, nr.scnt), "a(%s), b(%s)", a, b);
 
+	/* cleanup everything */
 	unittest_clean_section(s);
-
 	free(a);
 	free(b);
 	free(asec);
@@ -4710,10 +4803,18 @@ void unittest_test_pair(
 unittest()
 {
 	struct unittest_seq_pair_s pairs[] = {
-		{
+		/**
+		 * Empty segment should be supported but not for now. The logic in the sequence fetcher
+		 * does not support segments with len == 0, where the reload condition (link forwarding)
+		 * is detected by ridx == 0. It is possible to place compare-zero-branch barriar at the
+		 * head of the fill-in functions, but not implemented yet (nor decided whether I will)
+		 * because the additional branching path causes an overhead on the execution time and
+		 * the code (binary) size.
+		 */
+/*		{
 			.a = { "" },
 			.b = { "" }
-		},
+		},*/
 		{
 			.a = { "A" },
 			.b = { "A" }

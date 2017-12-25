@@ -165,6 +165,7 @@ typedef struct gaba_fill_s gaba_fill_t;
  * @struct gaba_pos_pair_s
  */
 struct gaba_pos_pair_s {
+	uint32_t aid, bid;
 	uint32_t apos, bpos;
 };
 typedef struct gaba_pos_pair_s gaba_pos_pair_t;
@@ -299,7 +300,7 @@ gaba_fill_t *gaba_dp_merge(
  * @fn gaba_dp_search_max
  */
 GABA_EXPORT_LEVEL
-gaba_pos_pair_t gaba_dp_search_max(
+gaba_pos_pair_t *gaba_dp_search_max(
 	gaba_dp_t *dp,
 	gaba_fill_t const *sec);
 
