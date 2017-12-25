@@ -3144,6 +3144,13 @@ typedef struct { size_t n, m; mm_root_t *a; } mm_root_v;
 _static_assert(sizeof(mm_root_t) == sizeof(v2u32_t));
 
 /**
+ * @struct mm_pos_pair_t
+ */
+typedef struct {
+	uint32_t apos, bpos;
+} mm_pos_pair_t;
+
+/**
  * @struct mm_res_t
  * @brief result container, alias to v2u32_t and mm_chain_t
  */
@@ -3591,9 +3598,9 @@ uint64_t mm_chain(
  * @brief pick up next seed in the upward region of the current chain
  */
 static _force_inline
-gaba_pos_pair_t mm_next(
+mm_pos_pair_t mm_next(
 	mm_tbuf_t *self,
-	gaba_pos_pair_t cp,
+	mm_pos_pair_t cp,
 	uint32_t lid)					/* leaf id */
 {
 	mm_seed_t const *s = self->seed.a;
@@ -3607,7 +3614,7 @@ gaba_pos_pair_t mm_next(
 		do { lid = s[lid].cid; } while(s[lid].vpos > vub || s[lid].upos < ulb);
 	} while((int32_t)_l(s)[lid].rid >= 0);	/* negative for lid in seed_t */
 
-	return((gaba_pos_pair_t){
+	return((mm_pos_pair_t){
 		.apos = _as(&s[lid]), .bpos = _bs(&s[lid])
 	});
 }
@@ -3621,7 +3628,7 @@ static _force_inline
 int64_t mm_test_pos(
 	mm_tbuf_t *self,
 	mm_res_t *res,
-	gaba_pos_pair_t pos)
+	mm_pos_pair_t pos)
 {
 	v2u32_t *h = (v2u32_t *)kh_get_ptr(&self->pos, _key(_loadu_u64(&pos), _loadu_u64(&self->rid)));
 	if(h == NULL) { return(-1); }
@@ -3637,7 +3644,7 @@ int64_t mm_test_pos(
 static _force_inline
 void mm_mark_pos(
 	mm_tbuf_t *self,
-	gaba_pos_pair_t pos)
+	mm_pos_pair_t pos)
 {
 	kh_put(&self->pos, _key(_loadu_u64(&pos), _loadu_u64(&self->rid)), KH_INIT_VAL);
 	return;
@@ -3727,7 +3734,7 @@ gaba_fill_t const *mm_extend_core(
 	gaba_section_t const *at,
 	gaba_section_t const *b,
 	gaba_section_t const *bt,
-	gaba_pos_pair_t s)
+	mm_pos_pair_t s)
 {
 	/* fill root */
 	debug("a(%u, %u, %p), b(%u, %u, %p)", a->id, a->len, a->base, b->id, b->len, b->base);
@@ -3792,7 +3799,7 @@ uint64_t mm_extend(
 
 		/* load seed positions and sequence ids */
 		mm_seed_t const *p = &s[_l(s)[lid].lsid];/* load tail */
-		gaba_pos_pair_t cp = { .apos = _as(p), .bpos = _bs(p) };
+		mm_pos_pair_t cp = { .apos = _as(p), .bpos = _bs(p) };
 		debug("k(%lu), lid(%u), id(%u, %u), sid(%u, %u), pos(%d, %d), bare(%d, %d), cp(%d, %d)",
 			k, lid, _l(s)[lid].rid, _l(s)[lid].qid, _l(s)[lid].rsid, _l(s)[lid].lsid,
 			p->upos, p->vpos, _bare(p->upos), _bare(p->vpos),
@@ -3825,11 +3832,14 @@ uint64_t mm_extend(
 			gaba_fill_t const *t = (gaba_fill_t const *)self->tail, *u = t;
 
 			/* downward extension */
-			gaba_pos_pair_t tp = cp;
+			mm_pos_pair_t tp = cp;
 			u = mm_extend_core(&self->dp[narrow], &self->r[0], self->rtp, &self->q[-rev], self->qtp-rev, tp);
 
 			/* search pos if extended */
-			if(u->max > 0) { tp = gaba_dp_search_max(&self->dp[narrow], u); }
+			if(u->max > 0) {
+				gaba_pos_pair_t *mpos = gaba_dp_search_max(&self->dp[narrow], u);
+				_storeu_u64(&tp.apos, _loadu_u64(&mpos->apos));
+			}
 			gaba_dp_trace(&self->dp[0], u, &self->alloc);		/* lmm is contained in self->trace */
 			debug("len(%u, %u), score(%ld), (%u, %u) -> (%u, %u)",
 				self->r[0].len, self->q[0].len, u->max, cp.apos, cp.bpos, tp.apos, tp.bpos);
@@ -3843,7 +3853,7 @@ uint64_t mm_extend(
 
 			/* upward extension: coordinate reversed here */
 			t = mm_extend_core(&self->dp[0], &self->r[1], self->rtp+1, &self->q[1+rev], self->qtp+1+rev,
-				((gaba_pos_pair_t){
+				((mm_pos_pair_t){
 					.apos = self->r[0].len - tp.apos - 1,
 					.bpos = self->q[0].len - tp.bpos - 1
 				})
@@ -3870,7 +3880,7 @@ uint64_t mm_extend(
 			}
 
 			/* update itr states */
-			cp = *((gaba_pos_pair_t *)&a->seg->apos);
+			cp = *((mm_pos_pair_t *)&a->seg->apos);
 			narrow = 0;
 			debug("split detected, try narrower(%u), cp(%u, %u), p(%u), ppos(%u), rem(%u)", narrow, cp.apos, cp.bpos, _p(&cp), ppos, rem);
 		}
