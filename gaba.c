@@ -2755,9 +2755,9 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
 	} \
 }
 
-// #undef DEBUG
-// #undef _LOG_H_INCLUDED
-// #include "log.h"
+#undef DEBUG
+#undef _LOG_H_INCLUDED
+#include "log.h"
 
 /**
  * @fn trace_core
