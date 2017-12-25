@@ -209,7 +209,7 @@ enum alphabet {
 	C = 0x01,
 	G = 0x02,
 	T = 0x03,
-	N = 0x80
+	N = 0x04
 };
 static uint8_t const enc4f[16] = { [1] = A, [2] = C, [4] = G, [8] = T };
 static uint8_t const enc4r[16] = { [1] = T, [2] = G, [4] = C, [8] = A };
@@ -220,9 +220,9 @@ static uint8_t const encaf[16] = {
 };
 // #define _encaf(_c)			 ( 0x03 & (((_c)>>1) - ((_c)>>3)) )
 #define _encaf(_c)			 ( 0x03 & (((_c)>>2) ^ ((_c)>>1)) )
-static uint8_t const decaf[16] = { [A] = 'A', [C] = 'C', [G] = 'G', [T] = 'T' };
-static uint8_t const decar[16] = { [A] = 'T', [C] = 'G', [G] = 'C', [T] = 'A' };
-static uint8_t const idxaf[256] = { ['A'] = 1, ['C'] = 2, ['G'] = 3, ['T'] = 4, ['U'] = 4 };
+static uint8_t const decaf[16] = { [A] = 'A', [C] = 'C', [G] = 'G', [T] = 'T', [N] = 'N' };
+static uint8_t const decar[16] = { [A] = 'T', [C] = 'G', [G] = 'C', [T] = 'A', [N] = 'N' };
+static uint8_t const idxaf[256] = { ['A'] = 1, ['C'] = 2, ['G'] = 3, ['T'] = 4, ['U'] = 4, ['N'] = 5 };
 
 /**
  * @macro mm_encode_tag
