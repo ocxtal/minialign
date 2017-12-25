@@ -77,15 +77,16 @@
 #  define BW						64
 #endif
 
-#if BW == 16
+#define _W							BW
+#if _W == 16
 #  define _NVEC_ALIAS_PREFIX		v16i8
 #  define _WVEC_ALIAS_PREFIX		v16i16
 #  define DP_CTX_INDEX				2
-#elif BW == 32
+#elif _W == 32
 #  define _NVEC_ALIAS_PREFIX		v32i8
 #  define _WVEC_ALIAS_PREFIX		v32i16
 #  define DP_CTX_INDEX				1
-#elif BW == 64
+#elif _W == 64
 #  define _NVEC_ALIAS_PREFIX		v64i8
 #  define _WVEC_ALIAS_PREFIX		v64i16
 #  define DP_CTX_INDEX				0
@@ -96,7 +97,7 @@
 
 #define DP_CTX_MAX					( 3 )
 #define _dp_ctx_index(_bw)			( ((_bw) == 64) ? 0 : (((_bw) == 32) ? 1 : 2) )
-_static_assert(_dp_ctx_index(BW) == DP_CTX_INDEX);
+// _static_assert(_dp_ctx_index(BW) == DP_CTX_INDEX);
 
 
 /* add suffix for gap-model- and bandwidth-wrapper (see gaba_wrap.h) */
@@ -190,7 +191,7 @@ _static_assert(sizeof(struct gaba_section_s) == 16);
 // _static_assert(sizeof(struct gaba_fill_s) == 24);
 _static_assert(sizeof(struct gaba_segment_s) == 32);
 _static_assert(sizeof(struct gaba_alignment_s) == 64);
-_static_assert(sizeof(nvec_masku_t) == BW / 8);
+_static_assert(sizeof(nvec_masku_t) == _W / 8);
 
 /**
  * @macro _plen
@@ -209,17 +210,17 @@ struct gaba_dp_context_s;
  * @struct gaba_drop_s
  */
 struct gaba_drop_s {
-	int8_t drop[BW];					/** (32) max */
+	int8_t drop[_W];					/** (32) max */
 };
-_static_assert(sizeof(struct gaba_drop_s) == BW);
+_static_assert(sizeof(struct gaba_drop_s) == _W);
 
 /**
  * @struct gaba_middle_delta_s
  */
 struct gaba_middle_delta_s {
-	int16_t delta[BW];					/** (64) middle delta */
+	int16_t delta[_W];					/** (64) middle delta */
 };
-_static_assert(sizeof(struct gaba_middle_delta_s) == sizeof(int16_t) * BW);
+_static_assert(sizeof(struct gaba_middle_delta_s) == sizeof(int16_t) * _W);
 
 /**
  * @struct gaba_mask_pair_s
@@ -229,7 +230,7 @@ struct gaba_mask_pair_s {
 	nvec_masku_t h;						/** (4) horizontal mask vector */
 	nvec_masku_t v;						/** (4) vertical mask vector */
 };
-_static_assert(sizeof(struct gaba_mask_pair_s) == BW / 4);
+_static_assert(sizeof(struct gaba_mask_pair_s) == _W / 4);
 #else	/* affine and combined */
 struct gaba_mask_pair_s {
 	nvec_masku_t h;						/** (4) horizontal mask vector */
@@ -237,7 +238,7 @@ struct gaba_mask_pair_s {
 	nvec_masku_t e;						/** (4) e mask vector */
 	nvec_masku_t f;						/** (4) f mask vector */
 };
-_static_assert(sizeof(struct gaba_mask_pair_s) == BW / 2);
+_static_assert(sizeof(struct gaba_mask_pair_s) == _W / 2);
 #endif
 
 /**
@@ -245,27 +246,27 @@ _static_assert(sizeof(struct gaba_mask_pair_s) == BW / 2);
  */
 #if MODEL == LINEAR
 struct gaba_diff_vec_s {
-	uint8_t dh[BW];						/** (32) dh */
-	uint8_t dv[BW];						/** (32) dv */
+	uint8_t dh[_W];						/** (32) dh */
+	uint8_t dv[_W];						/** (32) dv */
 };
-_static_assert(sizeof(struct gaba_diff_vec_s) == 2 * BW);
+_static_assert(sizeof(struct gaba_diff_vec_s) == 2 * _W);
 #else	/* affine and combined gap penalty */
 struct gaba_diff_vec_s {
-	uint8_t dh[BW];						/** (32) dh */
-	uint8_t dv[BW];						/** (32) dv */
-	uint8_t de[BW];						/** (32) de */
-	uint8_t df[BW];						/** (32) df */
+	uint8_t dh[_W];						/** (32) dh */
+	uint8_t dv[_W];						/** (32) dv */
+	uint8_t de[_W];						/** (32) de */
+	uint8_t df[_W];						/** (32) df */
 };
-_static_assert(sizeof(struct gaba_diff_vec_s) == 4 * BW);
+_static_assert(sizeof(struct gaba_diff_vec_s) == 4 * _W);
 #endif
 
 /**
  * @struct gaba_char_vec_s
  */
 struct gaba_char_vec_s {
-	uint8_t w[BW];						/** (32) a in the lower 4bit, b in the higher 4bit */
+	uint8_t w[_W];						/** (32) a in the lower 4bit, b in the higher 4bit */
 };
-_static_assert(sizeof(struct gaba_char_vec_s) == BW);
+_static_assert(sizeof(struct gaba_char_vec_s) == _W);
 
 /**
  * @struct gaba_block_s
@@ -298,12 +299,12 @@ _static_assert(sizeof(struct gaba_phantom_s) % 16 == 0);
 struct gaba_merge_s {
 	uint64_t reserved1;					/** (8) keep aligned to 16byte boundary */
 	struct gaba_block_s const *blk[1];	/** (8) addressed by [tail_idx[vec][q]] */
-	int8_t tidx[2][BW];					/** (32, 64, 128) lanewise index array */
+	int8_t tidx[2][_W];					/** (32, 64, 128) lanewise index array */
 	struct gaba_diff_vec_s diff; 		/** (64, 128, 256) diff variables of the last (just before the head) vector */
 	int8_t acc, xstat;					/** (2) acc and xstat are reserved for block_s */
 	uint8_t reserved2[13], qofs[1];		/** (14) displacement of vectors in the q-direction */
 };
-#define MERGE_TAIL_OFFSET 			( BLK * sizeof(struct gaba_mask_pair_s) - 2 * BW - 2 * sizeof(void *) )
+#define MERGE_TAIL_OFFSET 			( BLK * sizeof(struct gaba_mask_pair_s) - 2 * _W - 2 * sizeof(void *) )
 #define _merge(x)					( (struct gaba_merge_s *)((uint8_t *)(x) + MERGE_TAIL_OFFSET) )
 _static_assert(sizeof(struct gaba_merge_s) % 16 == 0);
 _static_assert(sizeof(struct gaba_merge_s) + MERGE_TAIL_OFFSET == sizeof(struct gaba_block_s));
@@ -346,7 +347,7 @@ struct gaba_root_block_s {
 	uint8_t _pad1[288 - sizeof(struct gaba_phantom_s)];
 	struct gaba_phantom_s blk;
 	struct gaba_joint_tail_s tail;
-#if BW != 64
+#if _W != 64
 	uint8_t _pad2[352 + 32 - sizeof(struct gaba_joint_tail_s)];
 #endif
 };
@@ -377,8 +378,8 @@ struct gaba_reader_work_s {
 
 	/** 64byte aligned */
 	struct gaba_drop_s xd;				/** (16, 32, 64) current drop from max */
-#if BW != 64
-	uint8_t _pad[BW == 16 ? 16 : 32];	/** padding to align to 64-byte boundary */
+#if _W != 64
+	uint8_t _pad[_W == 16 ? 16 : 32];	/** padding to align to 64-byte boundary */
 #endif
 	struct gaba_middle_delta_s md;		/** (32, 64, 128) */
 };
@@ -387,12 +388,12 @@ _static_assert((sizeof(struct gaba_reader_work_s) % 64) == 0);
 /**
  * @struct gaba_merge_work_s
  */
-#define MERGE_BUFFER_LENGTH		( 2 * BW )
+#define MERGE_BUFFER_LENGTH		( 2 * _W )
 struct gaba_merge_work_s {
 	uint8_t qofs[16];					/** (16) q-offset array */
 	uint32_t qw, _pad1;					/** (8) */
 	uint32_t lidx, uidx;				/** (8) */
-#if BW != 16
+#if _W != 16
 	uint8_t _pad2[32];					/** padding to align to 64-byte boundary */
 #endif
 	uint64_t abrk[4];					/** (32) */
@@ -684,8 +685,8 @@ struct gaba_dir_s {
  * @brief update direction determiner for the next band
  */
 #define _dir_update(_d, _vector, _sign) { \
-	(_d).acc += (_sign) * (_ext_n(_vector, 0) - _ext_n(_vector, BW-1)); \
-	/*debug("acc(%d), (%d, %d)", _dir_acc, _ext_n(_vector, 0), _ext_n(_vector, BW-1));*/ \
+	(_d).acc += (_sign) * (_ext_n(_vector, 0) - _ext_n(_vector, _W-1)); \
+	/*debug("acc(%d), (%d, %d)", _dir_acc, _ext_n(_vector, 0), _ext_n(_vector, _W-1));*/ \
 }
 /**
  * @macro _dir_adjust_remainder
@@ -728,7 +729,7 @@ struct gaba_dir_s {
 /**
  * seqreader macros
  */
-#define _rd_bufa_base(k)		( (k)->w.r.bufa + BLK + BW )
+#define _rd_bufa_base(k)		( (k)->w.r.bufa + BLK + _W )
 #define _rd_bufb_base(k)		( (k)->w.r.bufb )
 #define _rd_bufa(k, pos, len)	( _rd_bufa_base(k) - (pos) - (len) )
 #define _rd_bufb(k, pos, len)	( _rd_bufb_base(k) + (pos) )
@@ -829,12 +830,12 @@ void fill_fetch_seq_a(
 		debug("reverse fetch a: pos(%p), len(%lu)", pos, len);
 		/* reverse fetch: 2 * alen - (2 * alen - pos) + (len - 32) */
 		v32i8_t ach = _loadu_v32i8(pos + (len - BLK));
-		_storeu_v32i8(_rd_bufa(self, BW, len), _rva_v32i8(ach));		/* reverse */
+		_storeu_v32i8(_rd_bufa(self, _W, len), _rva_v32i8(ach));		/* reverse */
 	} else {
 		debug("forward fetch a: pos(%p), len(%lu)", pos, len);
 		/* forward fetch: 2 * alen - pos */
 		v32i8_t ach = _loadu_v32i8(_rev(pos + (len - 1), self->alim));
-		_storeu_v32i8(_rd_bufa(self, BW, len), _fwa_v32i8(ach));		/* complement */
+		_storeu_v32i8(_rd_bufa(self, _W, len), _fwa_v32i8(ach));		/* complement */
 	}
 	return;
 }
@@ -888,12 +889,12 @@ void fill_fetch_seq_b(
 		debug("forward fetch b: pos(%p), len(%lu)", pos, len);
 		/* forward fetch: pos */
 		v32i8_t bch = _loadu_v32i8(pos);
-		_storeu_v32i8(_rd_bufb(self, BW, len), _fwb_v32i8(bch));		/* forward */
+		_storeu_v32i8(_rd_bufb(self, _W, len), _fwb_v32i8(bch));		/* forward */
 	} else {
 		debug("reverse fetch b: pos(%p), len(%lu)", pos, len);
 		/* reverse fetch: 2 * blen - pos + (len - 32) */
 		v32i8_t bch = _loadu_v32i8(_rev(pos, self->blim) - (BLK - 1));
-		_storeu_v32i8(_rd_bufb(self, BW, len), _rvb_v32i8(bch));		/* reverse complement */
+		_storeu_v32i8(_rd_bufb(self, _W, len), _rvb_v32i8(bch));		/* reverse complement */
 	}
 	return;
 }
@@ -944,13 +945,13 @@ void fill_fetch_core(
 	uint32_t blen)
 {
 	/* fetch seq a */
-	nvec_t a = _loadu_n(_rd_bufa(self, acnt, BW));		/* unaligned */
+	nvec_t a = _loadu_n(_rd_bufa(self, acnt, _W));		/* unaligned */
 	fill_fetch_seq_a(self, self->w.r.atptr - self->w.r.arem, alen);
-	_store_n(_rd_bufa(self, 0, BW), a);					/* always aligned */
+	_store_n(_rd_bufa(self, 0, _W), a);					/* always aligned */
 
 	/* fetch seq b */
-	nvec_t b = _loadu_n(_rd_bufb(self, bcnt, BW));		/* unaligned */
-	_store_n(_rd_bufb(self, 0, BW), b);					/* always aligned */
+	nvec_t b = _loadu_n(_rd_bufb(self, bcnt, _W));		/* unaligned */
+	_store_n(_rd_bufb(self, 0, _W), b);					/* always aligned */
 	fill_fetch_seq_b(self, self->w.r.btptr - self->w.r.brem, blen);
 
 	_print_n(a); _print_n(b);
@@ -1012,8 +1013,8 @@ int64_t fill_init_fetch(
 
 	/* fetch sequence and store at (0, 0), then save newly loaded sequence lengths */
 	fill_fetch_core(self, 0, _lo32(len), 0, _hi32(len));
-	_print_n(_loadu_n(_rd_bufa(self, _lo32(len), BW)));
-	_print_n(_loadu_n(_rd_bufb(self, _hi32(len), BW)));
+	_print_n(_loadu_n(_rd_bufa(self, _lo32(len), _W)));
+	_print_n(_loadu_n(_rd_bufb(self, _hi32(len), _W)));
 
 	/* save fetch length for use in the next block fill / tail construction */
 	_store_v2i8(&blk->acnt, _cvt_v2i32_v2i8(len));
@@ -1039,12 +1040,12 @@ void fill_restore_fetch(
 	_print_v2i32(sridx);
 
 	/* calc fetch positions and lengths */
-	v2i32_t dridx = _add_v2i32(ridx, _set_v2i32(BW));	/* desired fetch pos */
+	v2i32_t dridx = _add_v2i32(ridx, _set_v2i32(_W));	/* desired fetch pos */
 	v2i32_t cridx = _min_v2i32(dridx, sridx);			/* might be clipped at the head of sequence section */
 	v2i32_t ofs = _sub_v2i32(dridx, cridx);				/* lengths fetched from phantom */
 	v2i32_t len = _min_v2i32(
 		cridx,											/* clipped at the tail of sequence section */
-		_sub_v2i32(_set_v2i32(BW_MAX + BLK), ofs)		/* lengths to fill buffers */
+		_sub_v2i32(_set_v2i32(_W + BLK), ofs)			/* lengths to fill buffers */
 	);
 	_print_v2i32(dridx); _print_v2i32(cridx);
 	_print_v2i32(ofs); _print_v2i32(len);
@@ -1064,7 +1065,7 @@ void fill_restore_fetch(
 	if(_hi32(ofs) > 0) {
 		nvec_t bch = _and_n(
 			_set_n(0x0f),
-			_shr_n(_loadu_n(&prev_tail->ch.w[BW - _hi32(ofs)]), 4)	/* invades backward */
+			_shr_n(_loadu_n(&prev_tail->ch.w[_W - _hi32(ofs)]), 4)	/* invades backward */
 		);
 		_print_n(bch);
 		_storeu_n(_rd_bufb(self, 0, _hi32(ofs)), bch);				/* aligned store */
@@ -1092,7 +1093,7 @@ void fill_load_section(
 
 	/* calc #bases until the next breakpoint (FIXME: simpler calculation needed) */
 	v2i32_t brem = _seta_v2i32(tzcnt(tail->bbrk) + 1, tzcnt(tail->abrk) + 1);
-	v2i32_t rem = _sel_v2i32(_gt_v2i32(brem, _set_v2i32(BW)),
+	v2i32_t rem = _sel_v2i32(_gt_v2i32(brem, _set_v2i32(_W)),
 		ridx,									/* no merging breakpoint found for this extension */
 		_min_v2i32(ridx, brem)					/* merging breakpoint found, bounded by brem */
 	);
@@ -1183,8 +1184,8 @@ struct gaba_block_s *fill_load_vectors(
 	nvec_t ch = _loadu_n(&tail->ch.w);
 	nvec_t ach = _and_n(mask, ch);
 	nvec_t bch = _and_n(mask, _shr_n(ch, 4));	/* bit 7 must be cleared not to affect shuffle mask */
-	_store_n(_rd_bufa(self, 0, BW), ach);
-	_store_n(_rd_bufb(self, 0, BW), bch);
+	_store_n(_rd_bufa(self, 0, _W), ach);
+	_store_n(_rd_bufb(self, 0, _W), bch);
 	_print_n(ach); _print_n(bch);
 
 	/* copy max and middle delta vectors */
@@ -1210,8 +1211,8 @@ int32_t fill_save_vectors(
 	uint32_t cnt)
 {
 	/* store char vector */
-	nvec_t ach = _loadu_n(_rd_bufa(self, cnt & 0xff, BW));
-	nvec_t bch = _loadu_n(_rd_bufb(self, cnt>>8, BW));
+	nvec_t ach = _loadu_n(_rd_bufa(self, cnt & 0xff, _W));
+	nvec_t bch = _loadu_n(_rd_bufb(self, cnt>>8, _W));
 	_print_n(ach); _print_n(bch);
 	_storeu_n(&tail->ch, _or_n(ach, _shl_n(bch, 4)));
 
@@ -1307,8 +1308,8 @@ struct gaba_joint_tail_s *fill_create_tail(
 #define _fill_load_context(_blk) \
 	debug("blk(%p)", (_blk)); \
 	/* load sequence buffer offset */ \
-	uint8_t const *aptr = _rd_bufa(self, 0, BW); \
-	uint8_t const *bptr = _rd_bufb(self, 0, BW); \
+	uint8_t const *aptr = _rd_bufa(self, 0, _W); \
+	uint8_t const *bptr = _rd_bufb(self, 0, _W); \
 	/* load mask pointer */ \
 	struct gaba_mask_pair_s *ptr = ((struct gaba_block_s *)(_blk))->mask; \
 	/* load vector registers */ \
@@ -1328,8 +1329,8 @@ struct gaba_joint_tail_s *fill_create_tail(
 #define _fill_load_context(_blk) \
 	debug("blk(%p)", (_blk)); \
 	/* load sequence buffer offset */ \
-	uint8_t const *aptr = _rd_bufa(self, 0, BW); \
-	uint8_t const *bptr = _rd_bufb(self, 0, BW); \
+	uint8_t const *aptr = _rd_bufa(self, 0, _W); \
+	uint8_t const *bptr = _rd_bufb(self, 0, _W); \
 	/* load mask pointer */ \
 	struct gaba_mask_pair_s *ptr = ((struct gaba_block_s *)(_blk))->mask; \
 	/* load vector registers */ \
@@ -1500,11 +1501,11 @@ struct gaba_joint_tail_s *fill_create_tail(
 	/* store direction array */ \
 	_dir_save(_blk, dir); \
 	/* update xdrop status and offsets */ \
-	(_blk)->xstat = (self->tx - _ext_n(drop, BW/2)) & TERM; \
-	int32_t cofs = _ext_n(delta, BW/2); \
+	(_blk)->xstat = (self->tx - _ext_n(drop, _W/2)) & TERM; \
+	int32_t cofs = _ext_n(delta, _W/2); \
 	/* store cnt */ \
-	int32_t acnt = _rd_bufa(self, 0, BW) - aptr; \
-	int32_t bcnt = bptr - _rd_bufb(self, 0, BW); \
+	int32_t acnt = _rd_bufa(self, 0, _W) - aptr; \
+	int32_t bcnt = bptr - _rd_bufb(self, 0, _W); \
 	(_blk)->acnt = acnt; (_blk)->bcnt = bcnt; \
 	/* write back local working buffers */ \
 	self->w.r.ofsd += cofs; self->w.r.arem -= acnt; self->w.r.brem -= bcnt; \
@@ -1558,8 +1559,8 @@ int64_t fill_bulk_test_idx(
  * @brief returns negative if ij-bound (for the cap fill) is invaded
  */
 #define _fill_cap_test_idx_init() \
-	uint8_t const *alim = _rd_bufa(self, self->w.r.arem, BW); \
-	uint8_t const *blim = _rd_bufb(self, self->w.r.brem, BW); \
+	uint8_t const *alim = _rd_bufa(self, self->w.r.arem, _W); \
+	uint8_t const *blim = _rd_bufb(self, self->w.r.brem, _W); \
 	uint8_t const *plim = blim - (ptrdiff_t)alim + (ptrdiff_t)self->w.r.pridx;
 #define _fill_cap_test_idx() ({ \
 	debug("arem(%zd), brem(%zd), prem(%zd)", \
@@ -2133,7 +2134,7 @@ uint64_t merge_detect_maxpos(
 	}
 
 	/* determine span to be sliced */
-	uint64_t const ofs = BW / 2, ub = MERGE_BUFFER_LENGTH - BW;
+	uint64_t const ofs = _W / 2, ub = MERGE_BUFFER_LENGTH - _W;
 	qmax = MIN2(ub, qmax - ofs);					/* shift and clip at ub */
 	qmax = (qmax < ub) ? qmax : 0;					/* clip negative val */
 	return(qmax);
@@ -2274,7 +2275,7 @@ struct gaba_joint_tail_s *merge_create_tail(
 			_set_v16i8(q)
 		))
 	);
-	mg->acc = _cb(self, q + BW - 1) - _cb(self, q);
+	mg->acc = _cb(self, q + _W - 1) - _cb(self, q);
 	mg->xstat = MERGE;					/* always MERGE; the other flags are not propagated (must be handled before the merge function is called) */
 
 	/* copy vectors from the working buffer */
@@ -2441,7 +2442,7 @@ uint64_t leaf_search(
 	_print_v2i32(ridx);
 	ridx = _sub_v2i32(ridx,
 		_seta_v2i32(
-			(0    + popcnt(dir_mask)) - (BW - self->w.l.q),	/* bcnt - bqdiff where popcnt(dir_mask) is #b-side extensions */
+			(0    + popcnt(dir_mask)) - (_W - self->w.l.q),	/* bcnt - bqdiff where popcnt(dir_mask) is #b-side extensions */
 			(fcnt - popcnt(dir_mask)) - (1 + self->w.l.q)	/* acnt - aqdiff */
 		)
 	);
@@ -2458,7 +2459,7 @@ uint64_t leaf_search(
 	/* calc plen */
 	v2i32_t eridx = _load_v2i32(&tail->aridx);
 	v2i32_t rem = _sub_v2i32(ridx, eridx);
-	uint64_t plen = tail->f.apos + tail->f.bpos - (INIT_FETCH_APOS + INIT_FETCH_BPOS) + BW - _hi32(rem) - _lo32(rem);
+	uint64_t plen = tail->f.apos + tail->f.bpos - (INIT_FETCH_APOS + INIT_FETCH_BPOS) + _W - _hi32(rem) - _lo32(rem);
 	_print_v2i32(eridx); _print_v2i32(rem);
 	debug("path length: %ld", plen);
 	return(plen);
@@ -2723,7 +2724,7 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
  * @macro _trace_*_load
  * @brief set _state 0 when in diagonal loop, otherwise pass 1
  */
-#define TRACE_HEAD_CNT			( BW / BLK + (BW == 16) )
+#define TRACE_HEAD_CNT			( _W / BLK + (_W == 16) )
 #define _trace_bulk_load_n(t, _state, _jump_to) { \
 	if(_unlikely(mask < blk->mask)) { \
 		_trace_reload_block(); \
@@ -2803,7 +2804,7 @@ void trace_core(
 	v2i32_t const v01 = _seta_v2i32(0, -1);
 	v2i32_t const v10 = _seta_v2i32(-1, 0);
 	v2i32_t const v11 = _seta_v2i32(-1, -1);
-	v2i32_t const bw = _set_v2i32(BW);
+	v2i32_t const bw = _set_v2i32(_W);
 
 	/* gap counts; #gap regions in lower and #gap bases in higher */
 	register v2i32_t gc = _load_v2i32(&self->w.l.a.gicnt);
@@ -2950,7 +2951,7 @@ struct gaba_alignment_s *trace_body(
 		/* fragment trace: q must be inside [0, BW) */
 		trace_core(self);
 		debug("p(%d), q(%d)", self->w.l.p, self->w.l.q);
-		if(_unlikely(self->w.l.q >= BW)) {
+		if(_unlikely(self->w.l.q >= _W)) {
 			/* out of band: abort */
 			self->w.l.a.lfree(self->w.l.a.opaque,
 				(void *)((uint8_t *)self->w.l.aln - self->w.l.a.head_margin)
@@ -3352,7 +3353,7 @@ int64_t gaba_init_check_score(
 	if(p->gfa < 0 || (p->gfa != 0 && p->gfa <= p->ge)) { return(-1); }
 	if(p->gfb < 0 || (p->gfb != 0 && p->gfb <= p->ge)) { return(-1); }
 	if((p->gfa == 0) ^ (p->gfb == 0)) { return(-1); }
-	for(int32_t i = 0; i < BW/2; i++) {
+	for(int32_t i = 0; i < _W/2; i++) {
 		int32_t t1 = _ofs_h(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
 		int32_t t2 = _ofs_h(p) + (_max_match(p) + _gap_v(p, i*2 + 1)) - _gap_v(p, (i + 1) * 2);
 		int32_t t3 = _ofs_v(p) + (_max_match(p) + _gap_h(p, i*2 + 1)) - _gap_v(p, (i + 1) * 2);
@@ -3411,9 +3412,9 @@ struct gaba_middle_delta_s gaba_init_middle_delta(
 	struct gaba_params_s const *p)
 {
 	struct gaba_middle_delta_s md __attribute__(( aligned(MEM_ALIGN_SIZE) ));
-	for(int i = 0; i < BW/2; i++) {
-		md.delta[BW/2 - 1 - i] = -(i + 1) * _max_match(p) + _gap_h(p, i*2 + 1);
-		md.delta[BW/2     + i] = -(i + 1) * _max_match(p) + _gap_v(p, i*2 + 1);
+	for(int i = 0; i < _W/2; i++) {
+		md.delta[_W/2 - 1 - i] = -(i + 1) * _max_match(p) + _gap_h(p, i*2 + 1);
+		md.delta[_W/2     + i] = -(i + 1) * _max_match(p) + _gap_v(p, i*2 + 1);
 	}
 	_print_w(_load_w(&md));
 	return(md);
@@ -3438,16 +3439,16 @@ struct gaba_diff_vec_s gaba_init_diff_vectors(
 	 * de: dE[i, j] + gi + dV[i, j] - ge
 	 * df: dF[i, j] + gi + dH[i, j] - ge
 	 */
-	for(int i = 0; i < BW/2; i++) {
-		diff.dh[BW/2 - 1 - i] = _ofs_h(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
-		diff.dh[BW/2     + i] = _ofs_h(p) + _max_match(p) + _gap_v(p, i*2 + 1) - _gap_v(p, (i + 1) * 2);
-		diff.dv[BW/2 - 1 - i] = _ofs_v(p) + _max_match(p) + _gap_h(p, i*2 + 1) - _gap_v(p, (i + 1) * 2);
-		diff.dv[BW/2     + i] = _ofs_v(p) + _gap_v(p, i*2 + 1) - _gap_v(p, i*2);
+	for(int i = 0; i < _W/2; i++) {
+		diff.dh[_W/2 - 1 - i] = _ofs_h(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
+		diff.dh[_W/2     + i] = _ofs_h(p) + _max_match(p) + _gap_v(p, i*2 + 1) - _gap_v(p, (i + 1) * 2);
+		diff.dv[_W/2 - 1 - i] = _ofs_v(p) + _max_match(p) + _gap_h(p, i*2 + 1) - _gap_v(p, (i + 1) * 2);
+		diff.dv[_W/2     + i] = _ofs_v(p) + _gap_v(p, i*2 + 1) - _gap_v(p, i*2);
 	#if MODEL == AFFINE || MODEL == COMBINED
-		diff.de[BW/2 - 1 - i] = _ofs_e(p) + diff.dv[BW/2 - 1 - i];
-		diff.de[BW/2     + i] = _ofs_e(p) + diff.dv[BW/2     + i] - p->gi;
-		diff.df[BW/2 - 1 - i] = _ofs_f(p) + diff.dh[BW/2 - 1 - i] - p->gi;
-		diff.df[BW/2     + i] = _ofs_f(p) + diff.dh[BW/2     + i];
+		diff.de[_W/2 - 1 - i] = _ofs_e(p) + diff.dv[_W/2 - 1 - i];
+		diff.de[_W/2     + i] = _ofs_e(p) + diff.dv[_W/2     + i] - p->gi;
+		diff.df[_W/2 - 1 - i] = _ofs_f(p) + diff.dh[_W/2 - 1 - i] - p->gi;
+		diff.df[_W/2     + i] = _ofs_f(p) + diff.dh[_W/2     + i];
 	#endif
 	}
 	#if MODEL == AFFINE || MODEL == COMBINED
@@ -3481,7 +3482,7 @@ void gaba_init_phantom(
 			.max = 0,
 			.stat = CONT | GABA_UPDATE_A | GABA_UPDATE_B,
 			.ascnt = 0,    .bscnt = 0,
-			.apos = -BW/2, .bpos = -BW/2,
+			.apos = -_W/2, .bpos = -_W/2,
 			.aid = 0,      .bid = 0,
 		},
 
@@ -3494,8 +3495,8 @@ void gaba_init_phantom(
 
 		/* score and vectors */
 		.mdrop = 0,
-		.ch.w = { [0] = _max_match_base_a(p), [BW-1] = _max_match_base_b(p)<<4 },
-		.xd.drop = { [BW / 2] = _max_match(p) - _gap_v(p, 1) },
+		.ch.w = { [0] = _max_match_base_a(p), [_W-1] = _max_match_base_b(p)<<4 },
+		.xd.drop = { [_W / 2] = _max_match(p) - _gap_v(p, 1) },
 		.md = gaba_init_middle_delta(p)
 	};
 
@@ -4584,8 +4585,8 @@ struct gaba_section_s *unittest_build_section_forward(char const *const *p)
 		}
 		i++; *a++ = '\0';
 	}
-	s[i] = gaba_build_section(i * 2, a, BW);
-	memset(a, N, BW);
+	s[i] = gaba_build_section(i * 2, a, _W);
+	memset(a, N, _W);
 	return(s);
 }
 
@@ -4605,8 +4606,8 @@ struct gaba_section_s *unittest_build_section_reverse(char const *const *p)
 		}
 		i++; *a++ = '\0';
 	}
-	s[i] = gaba_build_section(i * 2 + 1, a, BW);
-	memset(a, N, BW);
+	s[i] = gaba_build_section(i * 2 + 1, a, _W);
+	memset(a, N, _W);
 	return(s);
 }
 
@@ -4991,7 +4992,7 @@ unittest()
 
 		for(uint64_t j = 0; pair.a[j] != NULL; j++) {
 			// pair.b[j] = pair.a[j];
-			pair.b[j] = unittest_generate_mutated_sequence(pair.a[j], 0, 0, BW);
+			pair.b[j] = unittest_generate_mutated_sequence(pair.a[j], 0, 0, _W);
 		}
 
 		unittest_test_pair(UNITTEST_ARG_LIST, dp, &pair);
