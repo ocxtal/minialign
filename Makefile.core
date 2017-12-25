@@ -10,7 +10,7 @@ $(MINIALIGN_OBJS): minialign.c
 	$(CC) -c -o $@ $(CFLAGS) $<
 
 $(GABA_OBJS): gaba.c
-	$(CC) -c -o $@ $(CFLAGS) -DMODEL=`echo $@ | cut -d'.' -f2 | tr a-z A-Z` -DBW=`echo $@ | cut -d'.' -f3` -DSUFFIX $<
+	$(CC) -c -o $@ $(CFLAGS) -DMODEL=`echo $@ | cut -d'.' -f2 | tr a-z A-Z` -DBW=`echo $@ | cut -d'.' -f3` -DSUFFIX -DBIT=2 $<
 
 gaba.c: gaba.h log.h unittest.h sassert.h
 minialign.c: kvec.h ksort.h gaba_wrap.h gaba.h lmm.h unittest.h sassert.h
