@@ -1946,10 +1946,10 @@ uint64_t bseq_read_bam(
 	} while(_len >= 32); \
 	_p += _len - 32; _p - _b; \
 })
-#define _beg(_q, _b)		( (uint8_t *)(_q - _b) )
-#define _term(_q, _b, _ofs) ({ \
-	uint64_t _len = (uint64_t)(_q - &(_b)[(uint64_t)(_ofs)]); \
-	*_q++ = '\0'; _len; \
+#define _init(_q)			( (uint8_t *)(_q) )
+#define _term(_ptr, _q, _base) ({ \
+	uint64_t _len = (uint64_t)(_q) - (uint64_t)(_ptr); \
+	(_ptr) -= (ptrdiff_t)(_base); *_q++ = '\0'; _len; \
 })
 
 /**
@@ -1985,24 +1985,24 @@ uint64_t bseq_read_fasta(
 			s = kv_pushp(bseq_seq_t, *seq);		/* create new sequence */
 		_forward_state(2):						/* transition to spaces between delim and name */
 			_strip(p, t, sv); _cp();
-			s->name = (char*)_beg(q, mem->a);
+			s->name = (char*)_init(q);
 		_forward_state(3):
 			m = _readline(p, t, q, sv, _id); _cp();
 			p++;								/* skip '\n' or ' ' after sequence name */
-			s->l_name = _term(q, mem->a, s->name);
-			s->tag = _beg(q, mem->a);			/* prepare room for tag before the third state, to use m before it vanishes */
+			s->l_name = _term(s->name, q, mem->a);
 			s->n_tag = m & fp->keep_comment;	/* set n_tag if comment line found */
-			if(s->n_tag == 0) { goto _seq_head; }
+			s->tag = _init(q);					/* prepare room for tag before the third state, to use m before it vanishes */
+			if(m == 0) { goto _seq_head; }
 		_forward_state(4):						/* spaces between name and comment */
 			_strip(p, t, sv); _cp();
 			*q++ = 'C'; *q++ = 'O'; *q++ = 'Z';
 		_forward_state(5):						/* parsing comment */
 			_readline(p, t, q, lv, _id); _cp();	/* refill needed, comment continues */
-			p++;								/* skip '\n' after comment */
-			while(q[-1] == ' ') { q--; }		/* strip spaces at the tail of the comment */
+			p++; while(q[-1] == ' ') { q--; }	/* skip '\n' after comment, strip spaces at the tail of the comment */
+			if(s->n_tag == 0) { q = (uint8_t *)s->tag; }
 		_seq_head:
-			_term(q, mem->a, s->tag);
-			s->seq = _beg(q, mem->a);
+			_term(s->tag, q, mem->a);
+			s->seq = _init(q);
 		_forward_state(6):						/* parsing seq */
 			while(1) {
 				m = _readline(p, t, q, dv, _trans);
@@ -2015,8 +2015,8 @@ uint64_t bseq_read_fasta(
 				p++;							/* skip '\n' */
 			}
 			if((m & 0x01) == 0) { goto _refill; }/* buffer starved but not yet reached the end of the sequence section */
-			s->l_seq = _term(q, mem->a, s->seq);
-			s->qual = _beg(q, mem->a);
+			s->l_seq = _term(s->seq, q, mem->a);
+			s->qual = _init(q);
 			if(fp->delim == '>' || _unlikely(p >= t)) { goto _qual_tail; }/* here p >= t only holds when EOF is detected */
 		_forward_state(7):
 			_skipline(p, t); _cp();
@@ -2033,7 +2033,7 @@ uint64_t bseq_read_fasta(
 		_forward_state(9):
 			_cp(); _strip(p, t, lv);
 		_qual_tail:
-			_term(q, mem->a, s->qual);			/* fall through to go back to idle */
+			_term(s->qual, q, mem->a);			/* fall through to go back to idle */
 	}
 	debug("break, state(%u), eof(%u), name(%s), len(%u)", fp->state, fp->is_eof, mem->a + (uintptr_t)s->name, s->l_seq);
 	fp->state = 0;								/* back to idle */
@@ -2052,7 +2052,7 @@ _refill:
 #undef _strip
 #undef _readline
 #undef _skipline
-#undef _beg
+#undef _init
 #undef _term
 
 /**
