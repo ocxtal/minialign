@@ -2559,6 +2559,10 @@ static _force_inline
 void trace_push_segment(
 	struct gaba_dp_context_s *self)
 {
+	/* windback pointer */
+	self->w.l.a.slen++;
+	self->w.l.a.seg--;
+
 	/* calc ppos */
 	uint64_t ppos = (self->w.l.path - self->w.l.aln->path) * 32 + self->w.l.ofs;
 	debug("ppos(%lu), path(%p, %p), ofs(%u), seg(%p)", ppos, self->w.l.path, self->w.l.aln->path, self->w.l.ofs, self->w.l.a.seg);
@@ -2911,7 +2915,7 @@ void trace_init(
 
 	/* section */
 	self->w.l.a.slen = 0;
-	self->w.l.a.seg = (sn - 1) + (struct gaba_segment_s *)(self->w.l.aln->path + _roundup(pn, 8)),
+	self->w.l.a.seg = sn + (struct gaba_segment_s *)(self->w.l.aln->path + _roundup(pn, 8)),
 
 	/* clear state */
 	self->w.l.state = ts_d;
