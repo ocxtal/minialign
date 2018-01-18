@@ -2559,13 +2559,9 @@ static _force_inline
 void trace_push_segment(
 	struct gaba_dp_context_s *self)
 {
-	/* windback pointer */
-	self->w.l.a.slen++;
-	self->w.l.a.seg--;
-
 	/* calc ppos */
 	uint64_t ppos = (self->w.l.path - self->w.l.aln->path) * 32 + self->w.l.ofs;
-	debug("ppos(%lu), path(%p, %p), ofs(%u)", ppos, self->w.l.path, self->w.l.aln->path, self->w.l.ofs);
+	debug("ppos(%lu), path(%p, %p), ofs(%u), seg(%p)", ppos, self->w.l.path, self->w.l.aln->path, self->w.l.ofs, self->w.l.a.seg);
 
 	/* load section info */
 	v2i32_t ofs = _load_v2i32(&self->w.l.aofs);
@@ -2581,6 +2577,10 @@ void trace_push_segment(
 	_store_v2i32(&self->w.l.a.seg->alen, len);
 	_store_v2i32(&self->w.l.a.seg->aid, id);
 	self->w.l.a.seg->ppos = ppos;
+
+	/* windback pointer */
+	self->w.l.a.slen++;
+	self->w.l.a.seg--;
 
 	/* update rsgidx */
 	_store_v2i32(&self->w.l.asgidx, gidx);
@@ -2847,10 +2847,10 @@ void trace_core(
 _trace_term:;
 	/* reached a boundary of sections, compensate ofs */
 	uint64_t rem = mask - blk->mask + 1;
-	debug("rem(%lu), path(%p), ofs(%lu)", rem, path + (ofs + rem >= BLK), (ofs + rem) & (BLK - 1));
 	path += (ofs + rem) >= BLK;
 	ofs = (ofs + rem) & (BLK - 1);
 	_storeu_u64(path, path_array<<ofs);
+	debug("rem(%lu), path(%p), arr(%lx), ofs(%lu)", rem, path, path_array<<ofs, ofs);
 
 	/* save gap counts */
 	_store_v2i32(&self->w.l.a.gicnt, gc);
@@ -2919,6 +2919,7 @@ void trace_init(
 	/* store block and coordinates */
 	self->w.l.ofs = plen & (32 - 1);
 	self->w.l.path = self->w.l.aln->path + plen / 32;
+	debug("sn(%lu), seg(%p), pn(%lu), path(%p)", sn, self->w.l.a.seg, pn, self->w.l.path);
 
 	/* clear array */
 	self->w.l.path[0] = 0x01<<self->w.l.ofs;
