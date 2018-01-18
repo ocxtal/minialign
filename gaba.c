@@ -2572,19 +2572,16 @@ void trace_push_segment(
 	v2i32_t gidx = _load_v2i32(&self->w.l.agidx);
 	v2i32_t sgidx = _load_v2i32(&self->w.l.asgidx);
 	v2i32_t id = _load_v2i32(&self->w.l.aid);
-	_print_v2i32(gidx); _print_v2i32(sgidx); _print_v2i32(id);
+	_print_v2i32(gidx); _print_v2i32(sgidx); _print_v2i32(id); _print_v2i32(ofs);
 
 	/* store section info */
-	v2i32_t mask = _eq_v2i32(gidx, _zero_v2i32());/* add bridged length if the traceback pointer has reached the head */
-	v2i32_t pos = _add_v2i32(_and_v2i32(mask, ofs), gidx), len = _sub_v2i32(sgidx, gidx);
+	// v2i32_t mask = _eq_v2i32(gidx, _zero_v2i32());/* add bridged length if the traceback pointer has reached the head */
+	// v2i32_t pos = _add_v2i32(_and_v2i32(mask, ofs), gidx), len = _sub_v2i32(sgidx, gidx);
+	v2i32_t pos = _add_v2i32(ofs, gidx), len = _sub_v2i32(sgidx, gidx);		/* add bridged length, is this correct? */
 	_store_v2i32(&self->w.l.a.seg->apos, pos);
 	_store_v2i32(&self->w.l.a.seg->alen, len);
 	_store_v2i32(&self->w.l.a.seg->aid, id);
 	self->w.l.a.seg->ppos = ppos;
-
-	/* windback pointer */
-	self->w.l.a.slen++;
-	self->w.l.a.seg--;
 
 	/* update rsgidx */
 	_store_v2i32(&self->w.l.asgidx, gidx);
