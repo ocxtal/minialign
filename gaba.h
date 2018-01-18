@@ -326,11 +326,11 @@ void gaba_dp_res_free(
  *
  * @brief convert path string to cigar.
  * @detail
- * printer(void *fp, int64_t len, char c); will be called with a pair;
+ * printer(void *fp, uint64_t len, char c); will be called with a pair;
  * cigar operation (c) and its length (len).
  * void *fp is an opaque pointer to the context of the printer.
  */
-typedef int (*gaba_dp_printer_t)(void *, int64_t, char);
+typedef int (*gaba_dp_printer_t)(void *, uint64_t, char);
 GABA_EXPORT_LEVEL
 uint64_t gaba_dp_print_cigar_forward(
 	gaba_dp_printer_t printer,
