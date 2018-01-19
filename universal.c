@@ -4,6 +4,8 @@
  *
  * @brief main function dispatcher
  */
+#define ARCH_CAP
+
 #include <stdio.h>
 #include "arch/arch.h"
 

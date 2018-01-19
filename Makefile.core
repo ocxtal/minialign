@@ -1,16 +1,30 @@
 
+# load architecture-dependent optimization flags, the default is `-march=native'
+ARCH = NATIVE
+NATIVE_FLAGS = -march=native
+SSE41_FLAGS = -msse4.2
+AVX2_FLAGS = -mavx2 -mbmi -mlzcnt
+ARCHFLAGS = $($(ARCH)_FLAGS)
 
+# add suffix if namespace is specified
 SUFFIX = $(NAMESPACE:$(NAMESPACE)=.$(NAMESPACE))
+SUFFIXFLAGS = $(NAMESPACE:$(NAMESPACE)=-DNAMESPACE=$(NAMESPACE))
+
+# compose flags
+CFLAGS_INTL = $(CFLAGS) $(ARCHFLAGS) $(SUFFIXFLAGS)
+
+# expand objects
 MINIALIGN_OBJS = minialign$(SUFFIX).o
 GABA_OBJS = $(shell bash -c "echo gaba.{linear,affine,combined}.{16,32,64}$(SUFFIX).o")
+
 
 all: $(MINIALIGN_OBJS) $(GABA_OBJS)
 
 $(MINIALIGN_OBJS): minialign.c
-	$(CC) -c -o $@ $(CFLAGS) $<
+	$(CC) -c -o $@ $(CFLAGS_INTL) $<
 
 $(GABA_OBJS): gaba.c
-	$(CC) -c -o $@ $(CFLAGS) -DMODEL=`echo $@ | cut -d'.' -f2 | tr a-z A-Z` -DBW=`echo $@ | cut -d'.' -f3` -DSUFFIX -DBIT=2 $<
+	$(CC) -c -o $@ $(CFLAGS_INTL) -DMODEL=`echo $@ | cut -d'.' -f2 | tr a-z A-Z` -DBW=`echo $@ | cut -d'.' -f3` -DSUFFIX -DBIT=2 $<
 
 gaba.c: gaba.h log.h unittest.h sassert.h
 minialign.c: kvec.h ksort.h gaba_wrap.h gaba.h lmm.h unittest.h sassert.h

@@ -10,14 +10,14 @@ TARGET = minialign
 all: native
 
 native:
-	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) $(ARCHFLAGS)'
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)'
 	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba.*.o $(LDFLAGS)
 
 sse41 avx2:
-	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) $(ARCHFLAGS) -DUNITTEST=0 -DNAMESPACE=$@' NAMESPACE=$@
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) -DUNITTEST=0' ARCH=`echo $@ | tr a-z A-Z` NAMESPACE=$@
 
 universal: sse41 avx2
-	$(CC) -o $(TARGET) $(CFLAGS) -march=generic universal.c minialign.*.o gaba.*.o $(LDFLAGS)
+	$(CC) -o $(TARGET) $(CFLAGS) -mtune=generic universal.c minialign.*.o gaba.*.o $(LDFLAGS)
 
 clean:
 	rm -fr gmon.out *.o a.out $(TARGET) *~ *.a *.dSYM session*
