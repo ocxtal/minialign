@@ -226,13 +226,16 @@
 	_store_v16i8((_scv).v2, _make_gap(_adjh, _adjv, _ofsh, _ofsv)) \
 }
 #define _store_adjv(_scv, _adjh, _adjv, _ofsh, _ofsv) { \
-	_store_v16i8((_scv).v3, _make_gap(_adjh, _adjv, _ofsh, _ofsv)) \
+	/* nothing to do; use v2 */ \
+	/* _store_v16i8((_scv).v3, _make_gap(_adjh, _adjv, _ofsh, _ofsv)) */ \
 }
 #define _store_ofsh(_scv, _adjh, _adjv, _ofsh, _ofsv) { \
-	_store_v16i8((_scv).v4, _make_gap(_adjh, _adjv, _ofsh, _ofsv)) \
+	/* nothing to do; use v2 */ \
+	/* _store_v16i8((_scv).v4, _make_gap(_adjh, _adjv, _ofsh, _ofsv)) */ \
 }
 #define _store_ofsv(_scv, _adjh, _adjv, _ofsh, _ofsv) { \
-	_store_v16i8((_scv).v5, _make_gap(_adjh, _adjv, _ofsh, _ofsv)) \
+	/* nothing to do; use v2 */ \
+	/* _store_v16i8((_scv).v5, _make_gap(_adjh, _adjv, _ofsh, _ofsv)) */ \
 }
 
 /* load */
@@ -241,10 +244,15 @@
 )
 
 #define _load_adjh(_scv)					( _from_v16i8_n(_load_gap((_scv).v2, 0x00)) )
+#define _load_adjv(_scv)					( _from_v16i8_n(_load_gap((_scv).v2, 0x00)) )
+#define _load_ofsh(_scv)					( _from_v16i8_n(_load_gap((_scv).v2, 0x55)) )
+#define _load_ofsv(_scv)					( _from_v16i8_n(_load_gap((_scv).v2, 0x55)) )
+#define _load_gfh(_scv)						( _from_v16i8_n(_load_gap((_scv).v2, 0xaa)) )
+#define _load_gfv(_scv)						( _from_v16i8_n(_load_gap((_scv).v2, 0xff)) )
+/*
 #define _load_adjv(_scv)					( _from_v16i8_n(_load_gap((_scv).v2, 0x55)) )
-#define _load_ofsh(_scv)					( _from_v16i8_n(_load_gap((_scv).v2, 0xaa)) )
 #define _load_ofsv(_scv)					( _from_v16i8_n(_load_gap((_scv).v2, 0xff)) )
-
+*/
 
 
 /* cache line operation */
