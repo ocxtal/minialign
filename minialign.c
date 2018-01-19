@@ -8,7 +8,7 @@
  * @license MIT
  */
 #ifndef NDEBUG
-#  define DEBUG
+// #  define DEBUG
 #endif
 /* configurations */
 /**
@@ -3324,7 +3324,7 @@ void mm_expand(
  * @brief collect minimizers for the query seq
  * (note: branch misprediction penalty and memory access pattern should be alleviated, but how?)
  */
-// static _force_inline
+static _force_inline
 void mm_collect_seed(
 	mm_tbuf_t *self)
 {
@@ -3655,7 +3655,7 @@ void mm_mark_pos(
  * @fn mm_record
  * @brief record alignment, returns nonzero if new head position found, zero the alignment is duplicated
  */
-int mm_record_print_cigar(void *fp, uint64_t len, char c)
+static int mm_record_print_cigar(void *fp, uint64_t len, char c)
 {
 	return(fprintf((FILE *)fp, "%lu%c", len, c));
 }
@@ -5866,6 +5866,8 @@ static void mm_opt_gf(mm_opt_t *o, char const *arg) {
 			case 1: o->a.p.gfb = mm_opt_atoi(o, p, l);
 		}
 	});
+	oassert(o, o->a.p.gfa >= 0 && o->a.p.gfa < 32, "short-gap extension penalty (-r) must be inside [0,32].");
+	oassert(o, o->a.p.gfb >= 0 && o->a.p.gfb < 32, "short-gap extension penalty (-r) must be inside [0,32].");
 }
 static void mm_opt_xdrop(mm_opt_t *o, char const *arg) {
 	int32_t xdrop = mm_opt_atoi(o, arg, UINT32_MAX);
