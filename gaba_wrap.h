@@ -472,8 +472,8 @@ struct unittest_seqs_s {
 };
 #define unittest_seq_pair(_a, _b) ( \
 	(void *)&((struct unittest_seqs_s const){ \
-		.a = _a "GGGGGGGGGGGGGGGGGGGG", \
-		.b = _b "CCCCCCCCCCCCCCCCCCCC" \
+		.a = _a "GGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG", \
+		.b = _b "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC" \
 	}) \
 )
 
@@ -552,8 +552,8 @@ void *unittest_build_seqs(void *params)
 
 	uint64_t atot = strlen(a);
 	uint64_t btot = strlen(b);
-	uint32_t alen = atot - 20;
-	uint32_t blen = btot - 20;
+	uint32_t alen = atot - 64;
+	uint32_t blen = btot - 64;
 
 	uint64_t margin = 64;
 	struct unittest_sections_s *sec = malloc(
@@ -586,15 +586,15 @@ void *unittest_build_seqs(void *params)
 		
 		/* forward */
 		.afsec = gaba_build_section(0, ca, alen),
-		.aftail = gaba_build_section(2, ca + alen, 20),
+		.aftail = gaba_build_section(2, ca + alen, 64),
 		.bfsec = gaba_build_section(4, cb, blen),
-		.bftail = gaba_build_section(6, cb + blen, 20),
+		.bftail = gaba_build_section(6, cb + blen, 64),
 
 		/* reverse */
 		.arsec = gaba_build_section(1, gaba_rev(ca + alen, alim), alen),
-		.artail = gaba_build_section(3, gaba_rev(ca + atot, alim), 20),
+		.artail = gaba_build_section(3, gaba_rev(ca + atot, alim), 64),
 		.brsec = gaba_build_section(5, gaba_rev(cb + blen, blim), blen),
-		.brtail = gaba_build_section(7, gaba_rev(cb + btot, blim), 20)
+		.brtail = gaba_build_section(7, gaba_rev(cb + btot, blim), 64)
 	};
 	return((void *)sec);
 }
