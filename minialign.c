@@ -152,6 +152,7 @@ void oom_abort(
 #include "unittest.h"
 #include "lmm.h"
 #include "gaba_wrap.h"
+#include "gaba_parse.h"
 #include "arch/arch.h"
 #include "kvec.h"
 
@@ -507,7 +508,6 @@ kh_bidx_t kh_allocate(v4u32_t *a, uint64_t k, uint64_t v, uint64_t mask)
 		} \
 		_k1;	/* return key */ \
 	})
-
 
 	uint64_t i = k & mask, k0 = k, v0 = v;
 	uint64_t k1 = _poll_bucket(i, i & mask);		/* search first bucket */
@@ -2452,12 +2452,13 @@ typedef struct mm_reg_s mm_reg_t;
  */
 typedef struct {
 	mm_idx_t mi;							/* (immutable) index object */
-	uint32_t org, thresh;					/* ava filter constants, calculated from opt->base_rid and opt->base_qid */
+	// uint32_t org, thresh;				/* ava filter constants, calculated from opt->base_rid and opt->base_qid */
 	uint32_t flag;
 	int32_t wlen, glen;						/* chainable window edge length, linkable gap length */
 	float min_ratio;
 	uint32_t min_score;
-	uint32_t base_rid, base_qid;
+	// uint32_t base_rid;					/* currently disabled */
+	uint32_t base_qid;
 	gaba_t *ctx;
 	gaba_alloc_t alloc;						/* lmm contained */
 } mm_tbuf_params_t;
@@ -3730,6 +3731,7 @@ uint64_t mm_record(
 /**
  * @fn mm_extend_core
  * @brief extension loop, returns fill object with max, never returns NULL.
+ * NOTE: further modified to follow links between sequences, to be implemented in gaba_gbfs.h
  */
 static _force_inline
 gaba_fill_t const *mm_extend_core(
@@ -4125,11 +4127,11 @@ void mm_init_query(
 	kh_clear(&self->pos);
 	self->n_res = 0;
 
-	/* set query seq info */
+	/* set query seq info; the query sequence can be a pair of an array of subsequences and a list of links between subsequences */
 	self->qid = qid;
-	self->q[0] = _sec_fw(qid, seq, l_seq);
-	self->q[1] = _sec_rv(qid, seq, l_seq);
-	self->q[2] = _sec_fw(qid, seq, l_seq);
+	self->q[0] = _sec_fw(0, seq, l_seq);		/* gaba::id is always set zero so that seq is treated as uint8_t const *[1] */
+	self->q[1] = _sec_rv(0, seq, l_seq);
+	self->q[2] = _sec_fw(0, seq, l_seq);
 
 	/* store lmm */
 	self->alloc.opaque = (void *)lmm;
@@ -4283,7 +4285,7 @@ void *mm_align_source(uint32_t tid, void *arg)
 	// if(b->base_qid == UINT32_MAX) { b->base_qid = atoi(r->seq[0].name); }
 
 	/* allocate working buffer */
-	mm_align_step_t *s = (mm_align_step_t *)r;		/* overlaps, use unused64[3] */
+	mm_align_step_t *s = (mm_align_step_t *)r;	/* overlaps, use unused64[3] */
 	*s = (mm_align_step_t){
 		.id = b->icnt++,			/* assign id */
 		// .base_qid = b->base_qid,
@@ -4446,6 +4448,7 @@ typedef struct {
  */
 struct mm_print_s {
 	uint8_t *base, *tail, *p;
+	uint64_t size;
 	uint8_t conv[40];				/* binary -> string conv table */
 	mm_print_fn_t fn;
 	uint64_t tags;					/* sam optional tags */
@@ -4466,11 +4469,29 @@ typedef struct {
  * @macro _flush
  * @brief flush the buffer if there is no room for(margin + 1) bytes
  */
+#define _force_flush(_buf) { \
+	fwrite((_buf)->base, sizeof(uint8_t), (_buf)->p - (_buf)->base, stdout); \
+	(_buf)->p = (_buf)->base; \
+}
 #define _flush(_buf, _margin) { \
 	if(_unlikely((uintptr_t)(_buf)->p + (_margin) >= (uintptr_t)(_buf)->tail)) { \
-		fwrite((_buf)->base, sizeof(uint8_t), (_buf)->p - (_buf)->base, stdout); \
-		(_buf)->p = (_buf)->base; \
+		_force_flush(_buf); \
 	} \
+}
+
+/**
+ * @macro _with_buffer
+ */
+#define _with_buffer(_buf, _len, _body) { \
+	if(_unlikely((uintptr_t)(_buf)->p + (_len) >= (uintptr_t)(_buf)->tail)) { \
+		_force_flush(_buf); \
+		if((_buf)->size < (_len)) { \
+			uint64_t prev_size = (_buf)->tail - (_buf)->base; \
+			(_buf)->p = (_buf)->base = realloc((_buf)->base, (_buf)->size = (_len));	/* abort when failed */ \
+			(_buf)->tail = (_buf)->base + prev_size; \
+		} \
+	} \
+	uint8_t *p = (_buf)->p; { _body; } (_buf)->p = p; \
 }
 
 /**
@@ -4847,50 +4868,53 @@ static _force_inline
 void mm_print_sam_mapped_core(
 	mm_print_t *b,
 	mm_idx_seq_t const *r,
-	bseq_seq_t const *t,
-	mm_aln_t const *a,
-	uint16_t flag)
+	bseq_seq_t const *q,
+	gaba_path_section_t const *s,
+	uint32_t const *path,
+	uint16_t flag,
+	uint16_t mapq)
 {
-	const gaba_path_section_t *s = &a->a->seg[0];
+	uint32_t rid = s->aid>>1, qid = s->bid>>1;
 	uint32_t rs = s->apos;									/* ref start pos */
-	uint32_t hl = s->bpos, tl = t->l_seq - s->bpos - s->blen;/* head and tail clip lengths */
+	uint32_t hl = s->bpos, tl = q[qid].l_seq - s->bpos - s->blen;/* head and tail clip lengths */
 	uint32_t qs = (flag & 0x900) ? hl : 0;					/* query start pos */
-	uint32_t qe = t->l_seq - ((flag & 0x900) ? tl : 0);		/* query end pos */
+	uint32_t qe = q[qid].l_seq - ((flag & 0x900) ? tl : 0);		/* query end pos */
 
-	_putsn(b, t->name, t->l_name); _t(b);					/* qname */
+	_putsn(b, q[qid].name, q[qid].l_name); _t(b);			/* qname */
 	_putn(b, flag | ((~s->bid & 0x01)<<4)); _t(b);			/* flag */
-	_putsn(b, r->name, r->l_name); _t(b);					/* tname (ref name) */
+	_putsn(b, r[rid].name, r[rid].l_name); _t(b);			/* tname (ref name) */
 	_putn(b, rs + 1); _t(b);								/* mapped pos */
-	_putn(b, a->mapq>>MAPQ_DEC); _t(b);						/* mapping quality */
+	_putn(b, mapq>>MAPQ_DEC); _t(b);						/* mapping quality */
 
 	/* print cigar */
 	if(hl) {
 		_putn(b, hl);
-		_put(b, (flag&0x900)? 'H' : 'S');					/* print head clip */
+		_put(b, (flag & 0x900) ? 'H' : 'S');				/* print head clip */
 	}
 
-	// fprintf(stderr, "ppos(%u)\n", a->a->seg->ppos);
-	gaba_dp_print_cigar_forward(mm_cigar_printer, b, a->a->path, 0, a->a->plen);
+	_with_buffer(b, gaba_plen(s), {
+		p += gaba_dp_dump_cigar_forward((char *)p, gaba_plen(s), path, s->ppos, gaba_plen(s));
+	});
 	if(tl) {
 		_putn(b, tl);
-		_put(b, (flag&0x900)? 'H' : 'S');					/* print tail clip */
+		_put(b, (flag & 0x900) ? 'H' : 'S');				/* print tail clip */
 	}
 	_putsk(b, "\t*\t0\t0\t");								/* mate tags, unused */
 
 	/* print sequence */
 	if(s->bid & 0x01) {
-		_putsntr(b, &t->seq[t->l_seq-qe], qe-qs, decar);
+		_putsntr(b, &q[qid].seq[q[qid].l_seq - qe], qe - qs, decar);
 	} else {
-		_putsnt(b, &t->seq[qs], qe-qs, decaf);
+		_putsnt(b, &q[qid].seq[qs], qe-qs, decaf);
 	}
 	_t(b);
 
 	/* print quality string if available */
-	if(t->qual[0] != '\0') {
+	if(q[qid].qual[0] != '\0') {
 		if(s->bid & 0x01) {
-			_putsnr(b, &t->qual[t->l_seq-qe], qe-qs);
+			_putsnr(b, &q[qid].qual[q[qid].l_seq-qe], qe-qs);
 		} else {
-			_putsn(b, &t->qual[qs], qe-qs);
+			_putsn(b, &q[qid].qual[qs], qe-qs);
 		}
 	} else {
 		_put(b, '*');
@@ -4910,7 +4934,7 @@ void mm_print_sam_supp(
 	mm_aln_t const *a)
 {
 	/* rname,pos,strand,CIGAR,mapQ,NM; */
-	const gaba_path_section_t *s = &a->a->seg[0];
+	gaba_path_section_t const *s = &a->a->seg[0];
 	uint32_t rs = s->apos;
 	uint32_t hl = s->bpos, tl = s->bpos + s->blen;			/* head and tail clips */
 	
@@ -4926,7 +4950,7 @@ void mm_print_sam_supp(
 
 	/* mapping quality and editdist */
 	_putn(b, a->mapq); _c(b);
-	_putn(b, a->a->xcnt + a->a->gecnt); _put(b, ';');
+	// _putn(b, a->a->xcnt + a->a->gecnt); _put(b, ';');
 	return;
 }
 
@@ -4949,7 +4973,7 @@ void mm_print_sam_md(
 	uint64_t const f = b->tags;
 	if((f & 0x01ULL<<MM_MD) == 0) { return; }				/* skip if disabled */
 
-	const gaba_path_section_t *s = &a->a->seg[0];
+	gaba_path_section_t const *s = &a->a->seg[0];
 	uint32_t rs = s->apos, qs = s->bpos;
 
 	_puts(b, "\tMD:Z:");
@@ -5060,7 +5084,7 @@ void mm_print_sam_general_tags(
 	/* editdist to ref */
 	if(f & 0x01ULL<<MM_NM) {
 		_putsk(b, "\tNM:i:");
-		_putn(b, a->a->xcnt + a->a->gecnt);
+		// _putn(b, a->a->xcnt + a->a->gecnt);
 	}
 	return;
 }
@@ -5112,39 +5136,39 @@ static
 void mm_print_sam_mapped(
 	mm_print_t *b,
 	mm_idx_seq_t const *ref,
-	bseq_seq_t const *t,
+	bseq_seq_t const *query,
 	mm_reg_t const *reg)
 {
 	debug("b(%p), reg(%p)", b, reg);
-	if(reg == NULL) { mm_print_sam_unmapped(b, t); return; }
+	if(reg == NULL) { mm_print_sam_unmapped(b, query); return; }
 	debug("n_uniq(%u), n_all(%u)", reg->n_uniq, reg->n_all);
 
 	/* iterate over alignment sets */
 	uint64_t const n = (b->tags & MM_OMIT_REP) ? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0, flag = 0; i < n; i++) {
 		debug("i(%lu)", i);
-		if(i >= reg->n_uniq) {
-			flag = 0x100;				/* mark secondary */
-		}
+		if(i >= reg->n_uniq) { flag = 0x100; }/* overwrite the flag as secondary */
 
 		mm_aln_t const *a = reg->aln[i];
-		uint32_t rid = a->a->seg->aid>>1;
-		mm_idx_seq_t const *r = &ref[rid];
+		for(uint64_t j = 0; j < a->a->slen; j++) {
+			/* print body */
+			mm_print_sam_mapped_core(b, ref, query, &a->a->seg[j], a->a->path, flag, a->mapq);
+			if(j > 0) { continue; } else { flag = 0x800; }
 
-		/* print body */
-		mm_print_sam_mapped_core(b, r, t, a, flag);
+			#if 0
+			/* print general tags (scores, ...) */
+			mm_print_sam_general_tags(b, a, reg->n_all, i);
 
-		/* print general tags (scores, ...) */
-		mm_print_sam_general_tags(b, a, reg->n_all, i);
+			/* mismatch position (MD) */
+			mm_print_sam_md(b, r, query, a);
 
-		/* mismatch position (MD) */
-		mm_print_sam_md(b, r, t, a);
-
-		/* primary-specific tags */
-		if(i == 0 && mm_print_sam_primary_tags(b, r, t, reg)) {
-			i = n;						/* skip supplementary records when SA tag is enabled */
+			/* primary-specific tags */
+			if(i == 0 && j == 0 && mm_print_sam_primary_tags(b, r, query, reg)) {
+				i = n;						/* skip supplementary records when SA tag is enabled */
+			}
+			#endif
+			_cr(b);
 		}
-		_cr(b);
 
 		flag = 0x800;					/* mark supplementary */
 	}
@@ -5272,7 +5296,7 @@ void mm_print_maf_mapped_core(
 	bseq_seq_t const *t,
 	mm_aln_t const *a)
 {
-	const gaba_path_section_t *s = &a->a->seg[0];
+	gaba_path_section_t const *s = &a->a->seg[0];
 
 	/* header */
 	_put(b, 'a'); _sp(b); _putsk(b, "score="); _putn(b, a->a->score); _cr(b);
@@ -5354,11 +5378,12 @@ void mm_print_blast6_mapped(
 	uint64_t const n = (b->tags & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->seg[0];
+		gaba_path_section_t const *s = &a->a->seg[0];
 		mm_idx_seq_t const *r = &ref[s->aid>>1];
 
-		int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
-		int32_t mid = 100000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
+		// int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
+		// int32_t mid = 100000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
+		int32_t dcnt = 0, slen = 0, mid = 100000;
 		uint32_t rs = s->bid&0x01? r->l_seq - s->apos : s->apos + 1;
 		uint32_t re = s->bid&0x01? s->apos + 1 : r->l_seq - s->apos;
 		uint32_t qs = s->bpos + 1, qe = s->bpos + s->blen;
@@ -5369,8 +5394,8 @@ void mm_print_blast6_mapped(
 
 		_putfi(int32_t, b, mid, 3); _t(b);				/* sequence identity */
 		_putn(b, slen); _t(b);							/* alignment length */
-		_putn(b, a->a->xcnt); _t(b);					/* mismatch count */
-		_putn(b, a->a->gicnt); _t(b);					/* gap count */
+		// _putn(b, a->a->xcnt); _t(b);					/* mismatch count */
+		// _putn(b, a->a->gicnt); _t(b);					/* gap count */
 		
 		/* positions */
 		_putn(b, qs); _t(b);
@@ -5402,10 +5427,11 @@ void mm_print_paf_mapped(
 	uint64_t const n = (b->tags & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		const gaba_path_section_t *s = &a->a->seg[0];
+		gaba_path_section_t const *s = &a->a->seg[0];
 		mm_idx_seq_t const *r = &ref[s->aid>>1];
 
-		uint32_t dcnt = (a->a->plen - a->a->gecnt)>>1;			/* #matches + #mismatches */
+		// uint32_t dcnt = (a->a->plen - a->a->gecnt)>>1;			/* #matches + #mismatches */
+		uint32_t dcnt = 0;
 		uint32_t rs = s->apos, re = s->apos + s->alen;
 		uint32_t qs = s->bpos, qe = s->bpos + s->blen;
 
@@ -5423,14 +5449,14 @@ void mm_print_paf_mapped(
 		_putn(b, re); _t(b);
 
 		/* #matches, block length, mapping quality */
-		_putn(b, dcnt - a->a->xcnt); _t(b);
-		_putn(b, dcnt + a->a->gecnt); _t(b);
+		// _putn(b, dcnt - a->a->xcnt); _t(b);
+		// _putn(b, dcnt + a->a->gecnt); _t(b);
 		_putn(b, a->mapq>>MAPQ_DEC);
 
 		/* print optional tags */
 		uint64_t const f = b->tags;
 		if(f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->a->score); }
-		if(f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, a->a->xcnt + a->a->gecnt); }
+		// if(f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, a->a->xcnt + a->a->gecnt); }
 		_cr(b);
 	}
 	return;
@@ -5488,6 +5514,7 @@ mm_print_t *mm_print_init(
 	void *p = malloc(sizeof(uint8_t) * r->outbuf_size);
 	*pr = (mm_print_t){
 		.p = p, .base = p, .tail = p + r->outbuf_size,
+		.size = r->outbuf_size,
 		.tags = r->flag | mm_print_tag2flag(r->n_tag, r->tag),
 		.fn = printer[r->format],
 		.arg_line = mm_strdup(r->arg_line),
