@@ -1,9 +1,16 @@
+
+# compilers
 CC = gcc
 GIT = git
-VERSION = $(shell $(GIT) describe --tags || grep "define MM_VERSION" minialign.c | grep -o '".*"' | sed 's/"//g')
-ARCHFLAGS = -march=native
-CFLAGS = -O3 -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-label -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
+
+# compiler flags
+CFLAGS = -g -Wall -Wno-unused-function -Wno-unused-variable -Wno-unused-label -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
 LDFLAGS = -lm -lz -lpthread
+
+# default version string is parsed from git tags, otherwise extracted from the source
+VERSION = $(shell $(GIT) describe --tags || grep "define MM_VERSION" minialign.c | grep -o '".*"' | sed 's/"//g')
+
+# install directory and binary name
 PREFIX = /usr/local
 TARGET = minialign
 
