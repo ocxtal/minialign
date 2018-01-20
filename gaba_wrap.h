@@ -134,10 +134,10 @@ _decl(gaba_fill_t *, gaba_dp_merge, gaba_dp_t *self, gaba_fill_t const *const *s
 _decl(gaba_pos_pair_t *, gaba_dp_search_max, gaba_dp_t *self, gaba_fill_t const *sec);
 _decl(gaba_alignment_t *, gaba_dp_trace, gaba_dp_t *self, gaba_fill_t const *tail, gaba_alloc_t const *alloc);
 _decl(void, gaba_dp_res_free, gaba_alignment_t *res);
-_decl(int64_t, gaba_dp_print_cigar_forward, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
-_decl(int64_t, gaba_dp_print_cigar_reverse, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
-_decl(int64_t, gaba_dp_dump_cigar_forward, char *buf, uint64_t buf_size, uint32_t const *path, uint32_t offset, uint32_t len);
-_decl(int64_t, gaba_dp_dump_cigar_reverse, char *buf, uint64_t buf_size, uint32_t const *path, uint32_t offset, uint32_t len);
+// _decl(int64_t, gaba_dp_print_cigar_forward, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
+// _decl(int64_t, gaba_dp_print_cigar_reverse, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
+// _decl(int64_t, gaba_dp_dump_cigar_forward, char *buf, uint64_t buf_size, uint32_t const *path, uint32_t offset, uint32_t len);
+// _decl(int64_t, gaba_dp_dump_cigar_reverse, char *buf, uint64_t buf_size, uint32_t const *path, uint32_t offset, uint32_t len);
 
 #undef _decl
 
@@ -401,7 +401,7 @@ void gaba_dp_res_free(
 	return;
 }
 
-
+#if 0
 /**
  * @fn gaba_dp_print_cigar_forward
  */
@@ -457,7 +457,7 @@ uint64_t gaba_dp_dump_cigar_reverse(
 {
 	return(_import(gaba_dp_dump_cigar_reverse_linear_64)(buf, buf_size, path, offset, len));
 }
-
+#endif
 
 /* unittests */
 #if UNITTEST != 0

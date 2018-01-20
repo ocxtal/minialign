@@ -28,6 +28,7 @@
 #include <stddef.h>				/* offsetof */
 #include <string.h>				/* memset, memcpy */
 #include "gaba.h"
+#include "gaba_parse.h"
 #include "log.h"
 #include "sassert.h"
 #include "arch/arch.h"			/* architecture dependents */
@@ -188,7 +189,7 @@ _static_assert(sizeof(void *) == 8);
 /** check size of structs declared in gaba.h */
 _static_assert(sizeof(struct gaba_params_s) == 48);
 _static_assert(sizeof(struct gaba_section_s) == 16);
-// _static_assert(sizeof(struct gaba_fill_s) == 24);
+_static_assert(sizeof(struct gaba_fill_s) == 64);
 _static_assert(sizeof(struct gaba_segment_s) == 32);
 _static_assert(sizeof(struct gaba_alignment_s) == 64);
 _static_assert(sizeof(nvec_masku_t) == _W / 8);
@@ -416,17 +417,18 @@ struct gaba_aln_intl_s {
 	struct gaba_segment_s *seg;			/** (8) */
 	uint64_t plen;						/** (8) path length (psum) */
 	int64_t score;						/** (8) score */
-	uint32_t mcnt, xcnt;				/** (8) #matchs, #mismatchs */
-	uint32_t gicnt, gecnt;				/** (8) #gap opens, #gap bases */
+	// uint32_t mcnt, xcnt;				/** (8) #matchs, #mismatchs */
+	// uint32_t gicnt, gecnt;				/** (8) #gap opens, #gap bases */
+	uint32_t _pad[4];
 };
 _static_assert(sizeof(struct gaba_alignment_s) == sizeof(struct gaba_aln_intl_s));
 _static_assert(offsetof(struct gaba_alignment_s, slen) == offsetof(struct gaba_aln_intl_s, slen));
 _static_assert(offsetof(struct gaba_alignment_s, seg) == offsetof(struct gaba_aln_intl_s, seg));
 _static_assert(offsetof(struct gaba_alignment_s, plen) == offsetof(struct gaba_aln_intl_s, plen));
-_static_assert(offsetof(struct gaba_alignment_s, mcnt) == offsetof(struct gaba_aln_intl_s, mcnt));
-_static_assert(offsetof(struct gaba_alignment_s, xcnt) == offsetof(struct gaba_aln_intl_s, xcnt));
-_static_assert(offsetof(struct gaba_alignment_s, gicnt) == offsetof(struct gaba_aln_intl_s, gicnt));
-_static_assert(offsetof(struct gaba_alignment_s, gecnt) == offsetof(struct gaba_aln_intl_s, gecnt));
+// _static_assert(offsetof(struct gaba_alignment_s, mcnt) == offsetof(struct gaba_aln_intl_s, mcnt));
+// _static_assert(offsetof(struct gaba_alignment_s, xcnt) == offsetof(struct gaba_aln_intl_s, xcnt));
+// _static_assert(offsetof(struct gaba_alignment_s, gicnt) == offsetof(struct gaba_aln_intl_s, gicnt));
+// _static_assert(offsetof(struct gaba_alignment_s, gecnt) == offsetof(struct gaba_aln_intl_s, gecnt));
 
 /**
  * @struct gaba_leaf_s
@@ -446,7 +448,7 @@ struct gaba_leaf_s {
  */
 struct gaba_writer_work_s {
 	/** local context */
-	struct gaba_aln_intl_s a;			/** (64) working buffer, copied to the result object */
+	struct gaba_aln_intl_s a;			/** (48) working buffer, copied to the result object */
 
 	/** work */
 	uint32_t state;						/** (4) d/v0/v1/h0/h1 */
@@ -2602,9 +2604,14 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
  * @macro _trace_inc_*
  * @brief increment gap counters
  */
+/*
 #define _trace_inc_gi()					{ gc = _sub_v2i32(gc, v01); }
 #define _trace_inc_ge()					{ gc = _sub_v2i32(gc, v10); }
 #define _trace_inc_gf()					{ gc = _sub_v2i32(gc, v00); }
+*/
+#define _trace_inc_gi()					;
+#define _trace_inc_ge()					;
+#define _trace_inc_gf()					;
 
 /**
  * @macro _trace_*_*_test_index
@@ -2781,13 +2788,17 @@ void trace_core(
 	}
 	#define _trace_gap_loop(t, _c, _n, _l) { \
 		_trace_##_c##_##_l##_head: \
-			if(_trace_##_c##_##_l##_test_index()) { self->w.l.state = ts_##_l##0; goto _trace_term; } \
+			if(_unlikely(_trace_##_c##_##_l##_test_index())) { \
+				self->w.l.state = ts_##_l##0; goto _trace_term; \
+			} \
 			_trace_inc_gi();		/* increment #gap regions at the head */ \
 			_pop_vector(_c, _l, 1, _trace_##_n##_##_l##_head); \
 			while(1) { \
 		_trace_##_c##_##_l##_mid: \
 				if(_trace_test_gap_##_l() == 0) { goto _trace_##_c##_d_head; } \
-				if(_trace_##_c##_##_l##_test_index()) { self->w.l.state = ts_##_l##1; goto _trace_term; } \
+				if(_unlikely(_trace_##_c##_##_l##_test_index())) { \
+					self->w.l.state = ts_##_l##1; goto _trace_term; \
+				} \
 				_trace_inc_ge();	/* increment #gap bases on every iter */ \
 				_pop_vector(_c, _l, 1, _trace_##_n##_##_l##_head); \
 			} \
@@ -2796,7 +2807,9 @@ void trace_core(
 		while(1) { \
 		_trace_##_c##_d_head: \
 			if(_trace_test_diag_h() != 0) { goto _trace_##_c##_h_head; } \
-			if(_trace_##_c##_d_test_index()) { self->w.l.state = ts_d; goto _trace_term; } \
+			if(_unlikely(_trace_##_c##_d_test_index())) { \
+				self->w.l.state = ts_d; goto _trace_term; \
+			} \
 			_pop_vector(_c, h, 0, _trace_##_n##_d_mid); \
 		_trace_##_c##_d_mid: \
 			_pop_vector(_c, v, 0, _trace_##_n##_d_tail); \
@@ -2813,7 +2826,7 @@ void trace_core(
 	v2i32_t const bw = _set_v2i32(_W);
 
 	/* gap counts; #gap regions in lower and #gap bases in higher */
-	register v2i32_t gc = _load_v2i32(&self->w.l.a.gicnt);
+	// register v2i32_t gc = _load_v2i32(&self->w.l.a.gicnt);
 
 	/* load path array, adjust path offset to align the head of the current block */
 	uint64_t ofs = self->w.l.ofs;	/* global p-coordinate */
@@ -2859,7 +2872,7 @@ _trace_term:;
 	debug("rem(%lu), path(%p), arr(%lx), ofs(%lu)", rem, path, path_array<<ofs, ofs);
 
 	/* save gap counts */
-	_store_v2i32(&self->w.l.a.gicnt, gc);
+	// _store_v2i32(&self->w.l.a.gicnt, gc);
 
 	/* store pointers and coordinates */
 	self->w.l.ofs = ofs;			/* global p-coordinate */
@@ -2910,10 +2923,10 @@ void trace_init(
 	/* use gaba_alignment_s buffer instead in the traceback loop */
 	self->w.l.a.plen = plen;
 	self->w.l.a.score = tail->f.max;					/* just copy */
-	self->w.l.a.mcnt = 0;
-	self->w.l.a.xcnt = 0;
-	self->w.l.a.gicnt = 0;
-	self->w.l.a.gecnt = 0;
+	// self->w.l.a.mcnt = 0;
+	// self->w.l.a.xcnt = 0;
+	// self->w.l.a.gicnt = 0;
+	// self->w.l.a.gecnt = 0;
 
 	/* section */
 	self->w.l.a.slen = 0;
@@ -2971,7 +2984,11 @@ struct gaba_alignment_s *trace_body(
 	}
 
 	/* calc mismatch and match counts */
-	self->w.l.a.xcnt = 0;
+	// self->w.l.a.xcnt = 0;
+	self->w.l.a._pad[0] = 0;
+	self->w.l.a._pad[1] = 0;
+	self->w.l.a._pad[2] = 0;
+	self->w.l.a._pad[3] = 0;
 	/*
 	self->w.l.a.xcnt = ((int64_t)self->m * ((self->w.l.a.plen - self->w.l.a.gecnt)>>1)
 		- (self->w.l.a.score - (int64_t)self->gi * self->w.l.a.gicnt - (int64_t)self->ge * self->w.l.a.gecnt)
@@ -3026,292 +3043,6 @@ void _export(gaba_dp_res_free)(
 	debug("free mem, ptr(%p), lmm(%p)", (void *)a - a->head_margin, a->opaque);
 	a->lfree(a->opaque, (void *)((uint8_t *)a - a->head_margin));
 	return;
-}
-
-/**
- * @fn parse_load_uint64
- */
-static _force_inline
-uint64_t parse_load_uint64(
-	uint64_t const *ptr,
-	int64_t pos)
-{
-	int64_t rem = pos & 63;
-	uint64_t a = (ptr[pos>>6]>>rem) | ((ptr[(pos>>6) + 1]<<(63 - rem))<<1);
-	return(a);
-}
-
-/**
- * @fn parse_dump_match_string
- */
-static _force_inline
-int64_t parse_dump_match_string(
-	char *buf,
-	int64_t len)
-{
-	if(len < 64) {
-		static uint8_t const conv[64] = {
-			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
-			0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
-			0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29,
-			0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
-			0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49,
-			0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
-			0x60, 0x61, 0x62, 0x63
-		};
-		char *p = buf;
-		*p = (conv[len]>>4) + '0'; p += (conv[len] & 0xf0) != 0;
-		*p++ = (conv[len] & 0x0f) + '0';
-		*p++ = 'M';
-		return(p - buf);
-	} else {
-		int64_t adv;
-		uint8_t b[16] = { 'M', '0' }, *p = &b[1];
-		while(len != 0) { *p++ = (len % 10) + '0'; len /= 10; }
-		for(p -= (p != &b[1]), adv = (int64_t)((ptrdiff_t)(p - b)) + 1; p >= b; p--) { *buf++ = *p; }
-		return(adv);
-	}
-}
-
-/**
- * @fn parse_dump_gap_string
- */
-static _force_inline
-int64_t parse_dump_gap_string(
-	char *buf,
-	int64_t len,
-	char ch)
-{
-	if(len < 64) {
-		static uint8_t const conv[64] = {
-			0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
-			0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19,
-			0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29,
-			0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,
-			0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49,
-			0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59,
-			0x60, 0x61, 0x62, 0x63
-		};
-		char *p = buf;
-		*p = (conv[len]>>4) + '0'; p += (conv[len] & 0xf0) != 0;
-		*p++ = (conv[len] & 0x0f) + '0';
-		*p++ = ch;
-		return(p - buf);
-	} else {
-		int64_t adv;
-		uint8_t b[16] = { ch, '0' }, *p = &b[1];
-		while(len != 0) { *p++ = (len % 10) + '0'; len /= 10; }
-		for(p -= (p != &b[1]), adv = (int64_t)((ptrdiff_t)(p - b)) + 1; p >= b; p--) { *buf++ = *p; }
-		return(adv);
-	}
-}
-
-/**
- * @macro _parse_count_match_forward, _parse_count_gap_forward
- */
-#define _parse_count_match_forward(_arr) ({ \
-	tzcnt((_arr) ^ 0x5555555555555555); \
-})
-#define _parse_count_gap_forward(_arr) ({ \
-	uint64_t _a = (_arr); \
-	uint64_t mask = 0ULL - (_a & 0x01); \
-	uint64_t gc = tzcnt(_a ^ mask) + (uint64_t)mask; \
-	gc; \
-})
-
-/**
- * @fn gaba_dp_print_cigar_forward
- * @brief parse path string and print cigar to file
- */
-uint64_t _export(gaba_dp_print_cigar_forward)(
-	gaba_dp_printer_t printer,
-	void *fp,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len)
-{
-	uint64_t clen = 0;
-
-	/* convert path to uint64_t pointer */
-	uint64_t const *p = (uint64_t const *)((uint64_t)path & ~(sizeof(uint64_t) - 1));
-	uint64_t lim = offset + (((uint64_t)path & sizeof(uint32_t)) ? 32 : 0) + len;
-	uint64_t ridx = len;
-
-	while(1) {
-		uint64_t rsidx = ridx;
-		while(1) {
-			uint64_t m = _parse_count_match_forward(parse_load_uint64(p, lim - ridx));
-			uint64_t a = MIN2(m, ridx) & ~0x01;
-			ridx -= a;
-			ZCNT_RESULT uint64_t c = a;
-			if(c < 64) { break; }
-		}
-		uint64_t m = (rsidx - ridx)>>1;
-		if(m > 0) {
-			clen += printer(fp, m, 'M');
-		}
-		if(ridx == 0) { break; }
-
-		uint64_t arr;
-		uint64_t g = MIN2(
-			_parse_count_gap_forward(arr = parse_load_uint64(p, lim - ridx)),
-			ridx);
-		if(g > 0) {
-			clen += printer(fp, g, 'D' + ((char)(0ULL - (arr & 0x01)) & ('I' - 'D')));
-		}
-		if((ridx -= g) <= 1) { break; }
-	}
-	return(clen);
-}
-
-/**
- * @fn gaba_dp_dump_cigar_forward
- * @brief parse path string and store cigar to buffer
- */
-uint64_t _export(gaba_dp_dump_cigar_forward)(
-	char *buf,
-	uint64_t buf_size,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len)
-{
-	uint64_t const filled_len_margin = 5;
-	char *b = buf, *blim = buf + buf_size - filled_len_margin;
-
-	/* convert path to uint64_t pointer */
-	uint64_t const *p = (uint64_t const *)((uint64_t)path & ~(sizeof(uint64_t) - 1));
-	uint64_t lim = offset + (((uint64_t)path & sizeof(uint32_t)) ? 32 : 0) + len;
-	uint64_t ridx = len;
-
-	while(1) {
-		uint64_t rsidx = ridx;
-		while(1) {
-			uint64_t m = _parse_count_match_forward(parse_load_uint64(p, lim - ridx));
-			uint64_t a = MIN2(m, ridx) & ~0x01;
-			ridx -= a;
-			ZCNT_RESULT uint64_t c = a;
-			if(c < 64) { break; }
-		}
-		uint64_t m = (rsidx - ridx)>>1;
-		if(m > 0) {
-			b += parse_dump_match_string(b, m);
-		}
-		if(ridx == 0 || b > blim) { break; }
-
-		uint64_t arr;
-		uint64_t g = MIN2(
-			_parse_count_gap_forward(arr = parse_load_uint64(p, lim - ridx)),
-			ridx);
-		if(g > 0) {
-			b += parse_dump_gap_string(b, g, 'D' + ((char)(0ULL - (arr & 0x01)) & ('I' - 'D')));
-		}
-		if((ridx -= g) <= 1 || b > blim) { break; }
-	}
-	*b = '\0';
-	return(b - buf);
-}
-
-/**
- * @macro _parse_count_match_reverse, _parse_count_gap_reverse
- */
-#define _parse_count_match_reverse(_arr) ({ \
-	lzcnt((_arr) ^ 0x5555555555555555); \
-})
-#define _parse_count_gap_reverse(_arr) ({ \
-	uint64_t _a = (_arr); \
-	uint64_t mask = (uint64_t)(((int64_t)_a)>>63); \
-	uint64_t gc = lzcnt(_a ^ mask) - ((int64_t)mask + 1); \
-	gc; \
-})
-
-/**
- * @fn gaba_dp_print_cigar_reverse
- * @brief parse path string and print cigar to file
- */
-uint64_t _export(gaba_dp_print_cigar_reverse)(
-	gaba_dp_printer_t printer,
-	void *fp,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len)
-{
-	int64_t clen = 0;
-
-	/* convert path to uint64_t pointer */
-	uint64_t const *p = (uint64_t const *)((uint64_t)path & ~(sizeof(uint64_t) - 1));
-	uint64_t ofs = (int64_t)offset + (((uint64_t)path & sizeof(uint32_t)) ? -32 : -64);
-	uint64_t idx = len;
-
-	while(1) {
-		uint64_t sidx = idx;
-		while(1) {
-			uint64_t m = _parse_count_match_reverse(parse_load_uint64(p, idx + ofs));
-			uint64_t a = MIN2(m, idx) & ~0x01;
-			idx -= a;
-			if(a < 64) { break; }
-		}
-		uint64_t m = (sidx - idx)>>1;
-		if(m > 0) {
-			clen += printer(fp, m, 'M');
-		}
-		if(idx == 0) { break; }
-
-		uint64_t arr;
-		uint64_t g = MIN2(
-			_parse_count_gap_reverse(arr = parse_load_uint64(p, idx + ofs)),
-			idx);
-		if(g > 0) {
-			clen += printer(fp, g, 'D' + ((char)(((int64_t)arr)>>63) & ('I' - 'D')));
-		}
-		if((idx -= g) <= 1) { break; }
-	}
-	return(clen);
-}
-
-/**
- * @fn gaba_dp_dump_cigar_reverse
- * @brief parse path string and store cigar to buffer
- */
-uint64_t _export(gaba_dp_dump_cigar_reverse)(
-	char *buf,
-	uint64_t buf_size,
-	uint32_t const *path,
-	uint32_t offset,
-	uint32_t len)
-{
-	uint64_t const filled_len_margin = 5;
-	char *b = buf, *blim = buf + buf_size - filled_len_margin;
-
-	/* convert path to uint64_t pointer */
-	uint64_t const *p = (uint64_t const *)((uint64_t)path & ~(sizeof(uint64_t) - 1));
-	uint64_t ofs = (int64_t)offset + (((uint64_t)path & sizeof(uint32_t)) ? -32 : -64);
-	uint64_t idx = len;
-
-	while(1) {
-		uint64_t sidx = idx;
-		while(1) {
-			uint64_t m = _parse_count_match_reverse(parse_load_uint64(p, idx + ofs));
-			uint64_t a = MIN2(m, idx) & ~0x01;
-			idx -= a;
-			if(a < 64) { break; }
-		}
-		uint64_t m = (sidx - idx)>>1;
-		if(m > 0) {
-			b += parse_dump_match_string(b, m);
-		}
-		if(idx == 0 || b > blim) { break; }
-
-		uint64_t arr;
-		uint64_t g = MIN2(
-			_parse_count_gap_reverse(arr = parse_load_uint64(p, idx + ofs)),
-			idx);
-		if(g > 0) {
-			b += parse_dump_gap_string(b, g, 'D' + ((char)(((int64_t)arr)>>63) & ('I' - 'D')));
-		}
-		if((idx -= g) <= 1 || b > blim) { break; }
-	}
-	*b = '\0';
-	return(b - buf);
 }
 
 /**
@@ -3865,59 +3596,59 @@ unittest()
 	char *p = buf;
 
 	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55), 0, 8);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "6M4D8M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "6M4I8M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "6M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "6M5I8M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_forward)(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "2D5M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	#undef _arr
@@ -3930,59 +3661,59 @@ unittest()
 	char *p = buf;
 
 	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55), 0, 8);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "8M4D6M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "8M4I6M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "8M5D6M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	_export(gaba_dp_print_cigar_reverse)(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I5M2D") == 0, "%s", buf);
 
 	#undef _arr
@@ -3996,46 +3727,46 @@ unittest()
 	char *buf = (char *)malloc(len);
 
 	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555555), 0, 32);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55), 0, 8);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x55550555), 0, 32);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "6M4D8M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0x5555f555), 0, 32);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "6M4I8M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaaa0555), 0, 33);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "6M5D8M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaabf555), 0, 33);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "6M5I8M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_forward)(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "2D5M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	#undef _arr
@@ -4048,46 +3779,46 @@ unittest()
 	char *buf = (char *)malloc(len);
 
 	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555555), 0, 32);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55), 0, 8);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x55550555), 0, 32);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "8M4D6M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0x5555f555), 0, 32);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "8M4I6M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaaa0555), 0, 33);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "8M5D6M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaabf555), 0, 33);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "8M5I6M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
-	_export(gaba_dp_dump_cigar_reverse)(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I5M2D") == 0, "%s", buf);
 
 	#undef _arr
