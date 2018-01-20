@@ -10,8 +10,8 @@
 #include "arch/arch.h"
 
 #if defined(__x86_64__)
-	int sse41_main(int argc, char *argv[]);
-	int avx2_main(int argc, char *argv[]);
+	int main_sse41(int argc, char *argv[]);
+	int main_avx2(int argc, char *argv[]);
 #elif defined(AARCH64)
 #elif defined(PPC64)
 #endif
@@ -20,10 +20,10 @@ int main(int argc, char *argv[], char *envp[])
 {
 	#if defined(__x86_64__)
 	if((arch_cap() & ARCH_CAP_AVX2) != 0) {
-		return(avx2_main(argc, argv));
+		return(main_avx2(argc, argv));
 	}
 	if((arch_cap() & ARCH_CAP_SSE41) != 0) {
-		return(sse41_main(argc, argv));
+		return(main_sse41(argc, argv));
 	}
 	#elif defined(AARCH64)
 	#elif defined(PPC64)

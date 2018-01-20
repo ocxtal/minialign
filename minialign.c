@@ -77,7 +77,7 @@
 #  ifdef NAMESPACE
 #    define _export_cat(x, y)		x##_##y
 #    define _export_cat2(x, y)		_export_cat(x, y)
-#    define _export(_base)			_export_cat2(NAMESPACE, _base)
+#    define _export(_base)			_export_cat2(_base, NAMESPACE)
 #  else
 #    define _export(_base)			_base
 #  endif
