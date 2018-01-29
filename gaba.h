@@ -216,11 +216,16 @@ typedef struct gaba_alignment_s gaba_alignment_t;
  * @struct gaba_score_s
  */
 struct gaba_score_s {
+	/* score and identity */
 	int64_t score;
 	double identity;
-	uint32_t agcnt, bgcnt;
-	uint32_t mcnt, xcnt;
-	uint32_t aicnt, bicnt;
+
+	/* match and gap counts */
+	uint32_t agcnt, bgcnt;		/* a-side and b-side gap bases */
+	uint32_t mcnt, xcnt;		/* match and mismatch counts */
+	uint32_t aicnt, bicnt;		/* gap region counts */
+
+	/* short-gap counts */
 	uint32_t afgcnt, bfgcnt;
 	uint32_t aficnt, bficnt;
 	uint64_t _reserved;
