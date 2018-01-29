@@ -158,13 +158,13 @@ typedef struct v2i64_s {
 )
 
 /* debug print */
-#ifdef _LOG_H_INCLUDED
+// #ifdef _LOG_H_INCLUDED
 #define _print_v2i64(a) { \
 	debug("(v2i64_t) %s(%lx, %lx)", #a, _ext_v2i64(a, 1), _ext_v2i64(a, 0)); \
 }
-#else
-#define _print_v2i64(x)		;
-#endif
+// #else
+// #define _print_v2i64(x)		;
+// #endif
 
 #endif /* _V2I64_H_INCLUDED */
 /**

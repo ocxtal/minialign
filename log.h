@@ -44,6 +44,7 @@
  * @macro dbprintf
  */
 #ifdef DEBUG
+#undef trap
 #undef debug
 #undef debug_impl
 #undef dbprintf
@@ -117,6 +118,12 @@
 })
 #endif
 #else
+#undef trap
+#undef debug
+#undef debug_impl
+#undef dbprintf
+#undef print_lane
+
 #define trap() {}
 #define debug(...) {}
 #define dbprintf(fmt, ...) {}

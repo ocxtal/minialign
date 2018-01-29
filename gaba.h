@@ -82,8 +82,8 @@ struct gaba_params_s {
 	uint8_t filter_thresh;		/** popcnt filter threshold, set zero if you want to disable it */
 
 	/** output options */
-	uint32_t head_margin;		/** margin at the head of gaba_res_t */
-	uint32_t tail_margin;		/** margin at the tail of gaba_res_t */
+	uint32_t head_margin;		/** margin at the head of gaba_alignment_t */
+	uint32_t tail_margin;		/** margin at the tail of gaba_alignment_t */
 
 	/* internal */
 	void *reserved;
@@ -135,7 +135,18 @@ typedef struct gaba_section_s gaba_section_t;
 		.len = (_len) \
 	} \
 )
-#define gaba_rev(pos, len)		( (len) + (uint64_t)(len) - (uint64_t)(pos) - 1 )
+/**
+ * @macro GABA_EOU
+ * @brief end-of-userland pointer. Any input sequence pointer p that points to an address
+ * after the end-of-userland is regarded as "phantom array". The actual sequence is fetched
+ * from an array located at 2 * GABA_EQU - p (that is, the pointer p is mirrored at the
+ * GABA_EOU)
+ */
+#define GABA_EOU						( (uint8_t const *)0x800000000000 )
+#define gaba_mirror(base, len)			( GABA_EOU + (uint64_t)GABA_EOU - (uint64_t)(base) - (uint64_t)(len) )
+
+/* gaba_rev is deprecated */
+#define gaba_rev(pos, len)				( (len) + (uint64_t)(len) - (uint64_t)(pos) - 1 )
 
 /**
  * @type gaba_dp_t
@@ -154,7 +165,7 @@ struct gaba_fill_s {
 	uint32_t ascnt, bscnt;		/** (8) aligned section counts */
 	uint64_t apos, bpos;		/** (16) #fetched bases from the head (ppos = apos + bpos) */
 	int64_t max;				/** (8) max score in the entire band */
-	uint32_t stat;				/** (4) status (section update flags) */
+	uint32_t status;			/** (4) status (section update flags) */
 	// int32_t ppos;				/** (8) #vectors from the head (FIXME: should be 64bit int) */
 	uint32_t reserved[5];
 };
@@ -187,19 +198,34 @@ typedef struct gaba_segment_s gaba_path_section_t;
 struct gaba_alignment_s {
 	/* reserved for internal use */
 	void *reserved1[2];
-	uint32_t reserved2;
+
+	int64_t score;				/** score */
+	double identity;			/** estimated percent identity over the entire alignment, match_count / (match_count + mismatch_count) */
+	uint32_t agcnt, bgcnt;		/** #gap bases on seq a and seq b */
+	uint32_t dcnt;				/** #diagonals (match and mismatch) */
 
 	uint32_t slen;				/* segment length */
 	struct gaba_segment_s const *seg;
 
 	uint64_t plen;				/* path length */
-	int64_t score;				/** score */
-	// uint32_t mcnt, xcnt;		/** #matches, #mismatches */
-	// uint32_t gicnt, gecnt;		/** #gap opens, #gap bases */
-	uint32_t reserved3[4];
 	uint32_t path[];
 };
 typedef struct gaba_alignment_s gaba_alignment_t;
+
+/**
+ * @struct gaba_score_s
+ */
+struct gaba_score_s {
+	int64_t score;
+	double identity;
+	uint32_t agcnt, bgcnt;
+	uint32_t mcnt, xcnt;
+	uint32_t aicnt, bicnt;
+	uint32_t afgcnt, bfgcnt;
+	uint32_t aficnt, bficnt;
+	uint64_t _reserved;
+};
+typedef struct gaba_score_s gaba_score_t;
 
 /**
  * @fn gaba_init
@@ -222,10 +248,7 @@ void gaba_clean(gaba_t *ctx);
  * the tails of sequence arrays.
  */
 GABA_EXPORT_LEVEL
-gaba_dp_t *gaba_dp_init(
-	gaba_t const *ctx,
-	uint8_t const *alim,
-	uint8_t const *blim);
+gaba_dp_t *gaba_dp_init(gaba_t const *ctx);
 
 /**
  * @fn gaba_dp_flush
@@ -317,7 +340,20 @@ gaba_alignment_t *gaba_dp_trace(
  */
 GABA_EXPORT_LEVEL
 void gaba_dp_res_free(
+	gaba_dp_t *dp,
 	gaba_alignment_t *aln);
+
+/**
+ * @fn gaba_dp_calc_score
+ * @brief calculate score, match count, mismatch count, and gap counts for the section
+ */
+GABA_EXPORT_LEVEL
+gaba_score_t *gaba_dp_calc_score(
+	gaba_dp_t *dp,
+	uint32_t const *path,
+	gaba_path_section_t const *s,
+	gaba_section_t const *a,
+	gaba_section_t const *b);
 
 #endif  /* #ifndef _GABA_H_INCLUDED */
 

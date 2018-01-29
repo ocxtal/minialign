@@ -83,7 +83,7 @@ void *lmm_clean(
 	lmm_t *lmm)
 {
 	if(lmm != NULL && lmm->need_free == 1) {
-		free(lmm);
+		free((void *)lmm);
 		return(NULL);
 	}
 	return((void *)lmm);
@@ -209,7 +209,7 @@ char *lmm_strdup(
 	char const *str)
 {
 	int64_t len = strlen(str);
-	char *s = lmm_malloc(lmm, len + 1);
+	char *s = (char *)lmm_malloc(lmm, len + 1);
 	memcpy(s, str, len + 1);
 	return(s);
 }
@@ -258,7 +258,7 @@ lmm_pool_t *lmm_pool_init(
 	uint64_t init_object_cnt)
 {
 	object_size = _lmm_roundup(object_size, sizeof(struct lmm_pool_object_s));
-	struct lmm_pool_s *pool = lmm_malloc(lmm,
+	struct lmm_pool_s *pool = (struct lmm_pool_s *)lmm_malloc(lmm,
 		  sizeof(struct lmm_pool_s) + sizeof(struct lmm_pool_block_s)
 		+ init_object_cnt * object_size);
 	if(pool == NULL) {
@@ -482,8 +482,8 @@ int main() {
  * basic vectors (kv_*)
  */
 #define lmm_kvec_t(type)		struct { uint64_t n, m; type *a; }
-#define lmm_kv_init(lmm, v)		({ (v).n = 0; (v).m = LMM_KVEC_INIT_SIZE; (v).a = lmm_malloc((lmm), (v).m * sizeof(*(v).a)); (v); })
-#define lmm_kv_destroy(lmm, v)	{ lmm_free((lmm), (v).a); (v).a = NULL; }
+#define lmm_kv_init(lmm, v)		({ (v).n = 0; (v).m = LMM_KVEC_INIT_SIZE; (v).a = (type *)lmm_malloc((lmm), (v).m * sizeof(*(v).a)); (v); })
+#define lmm_kv_destroy(lmm, v)	{ lmm_free((void *)(lmm), (v).a); (v).a = NULL; }
 // #define lmm_kv_A(v, i)      ( (v).a[(i)] )
 #define lmm_kv_pop(lmm, v)		( (v).a[--(v).n] )
 #define lmm_kv_size(v)			( (v).n )
@@ -494,11 +494,11 @@ int main() {
 	uint64_t _size = LMM_MAX2(LMM_KVEC_INIT_SIZE, (s)); \
 	(v).m = _size; \
 	(v).n = LMM_MIN2((v).n, _size); \
-	(v).a = lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m); \
+	(v).a = (type *)lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m); \
 })
 
 #define lmm_kv_reserve(lmm, v, s) ( \
-	(v).m > (s) ? 0 : ((v).m = (s), (v).a = lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m), 0) )
+	(v).m > (s) ? 0 : ((v).m = (s), (v).a = (type *)lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m), 0) )
 
 #define lmm_kv_copy(lmm, v1, v0) do {								\
 		if ((v1).m < (v0).n) lmm_kv_resize(lmm, v1, (v0).n);			\
@@ -509,7 +509,7 @@ int main() {
 #define lmm_kv_push(lmm, v, x) do {									\
 		if ((v).n == (v).m) {								\
 			(v).m = (v).m * 2;								\
-			(v).a = lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m);	\
+			(v).a = (type *)lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m);	\
 		}													\
 		(v).a[(v).n++] = (x);								\
 	} while (0)
@@ -517,7 +517,7 @@ int main() {
 #define lmm_kv_pushp(lmm, v) ( \
 	((v).n == (v).m) ?									\
 	((v).m = (v).m * 2,									\
-	 (v).a = lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m), 0)	\
+	 (v).a = (type *)lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m), 0)	\
 	: 0), ( (v).a + ((v).n++) )
 
 /* lmm_kv_pusha will not check the alignment of elem_t */
@@ -525,7 +525,7 @@ int main() {
 		uint64_t size = lmm_kv_roundup(sizeof(elem_t), sizeof(*(v).a)); \
 		if(sizeof(*(v).a) * ((v).m - (v).n) < size) { \
 			(v).m = LMM_MAX2((v).m * 2, (v).n + (size));				\
-			(v).a = lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m);	\
+			(v).a = (type *)lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m);	\
 		} \
 		*((elem_t *)&((v).a[(v).n])) = (x); \
 		(v).n += size / sizeof(*(v).a); \
@@ -534,7 +534,7 @@ int main() {
 #define lmm_kv_pushm(lmm, v, arr, size) do { \
 		if(sizeof(*(v).a) * ((v).m - (v).n) < (uint64_t)(size)) { \
 			(v).m = LMM_MAX2((v).m * 2, (v).n + (size));				\
-			(v).a = lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m);	\
+			(v).a = (type *)lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m);	\
 		} \
 		for(uint64_t _i = 0; _i < (uint64_t)(size); _i++) { \
 			(v).a[(v).n + _i] = (arr)[_i]; \
@@ -545,7 +545,7 @@ int main() {
 #define lmm_kv_a(lmm, v, i) ( \
 	((v).m <= (size_t)(i) ? \
 	((v).m = (v).n = (i) + 1, lmm_kv_roundup((v).m, 32), \
-	 (v).a = lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m), 0) \
+	 (v).a = (type *)lmm_realloc((lmm), (v).a, sizeof(*(v).a) * (v).m), 0) \
 	: (v).n <= (size_t)(i) ? (v).n = (i) + 1 \
 	: 0), (v).a[(i)])
 
@@ -608,8 +608,8 @@ int main() {
 #define lmm_kpv_mask(v, e)			( (e) & ((1<<_BITS) - 1) )
 
 #define lmm_kpvec_t(type)			struct { uint64_t n, m; type *a; }
-#define lmm_kpv_init(lmm, v)		( (v).n = 0, (v).m = LMM_KVEC_INIT_SIZE * lmm_kpv_elems(v), (v).a = lmm_malloc(lmm, (v).m * sizeof(*(v).a)) )
-#define lmm_kpv_destroy(lmm, v)		{ free(lmm, (v).a); (v).a = NULL; }
+#define lmm_kpv_init(lmm, v)		( (v).n = 0, (v).m = LMM_KVEC_INIT_SIZE * lmm_kpv_elems(v), (v).a = (type *)lmm_malloc(lmm, (v).m * sizeof(*(v).a)) )
+#define lmm_kpv_destroy(lmm, v)		{ free((void *)lmm, (v).a); (v).a = NULL; }
 
 // #define lmm_kpv_A(v, i) ( lmm_kpv_mask(v, (v).a[(i) / lmm_kpv_elems(v)]>>lmm_kpv_base(v, i)) )
 #define lmm_kpv_pop(lmm, v) 		( (v).n--, lmm_kpv_mask(v, (v).a[(v).n / lmm_kpv_elems(v)]>>lmm_kpv_base(v, (v).n)) )
@@ -627,11 +627,11 @@ int main() {
 	uint64_t _size = LMM_MAX2(LMM_KVEC_INIT_SIZE, (s)); \
 	(v).m = _size; \
 	(v).n = LMM_MIN2((v).n, _size); \
-	(v).a = lmm_realloc((lmm), (v).a, sizeof(*(v).a) * lmm_kpv_amax(v)); \
+	(v).a = (type *)lmm_realloc((lmm), (v).a, sizeof(*(v).a) * lmm_kpv_amax(v)); \
 })
 
 #define lmm_kpv_reserve(lmm, v, s) ( \
-	(v).m > (s) ? 0 : ((v).m = (s), (v).a = lmm_realloc(lmm, (v).a, sizeof(*(v).a) * lmm_kpv_amax(v)), 0) )
+	(v).m > (s) ? 0 : ((v).m = (s), (v).a = (type *)lmm_realloc(lmm, (v).a, sizeof(*(v).a) * lmm_kpv_amax(v)), 0) )
 
 #define lmm_kpv_copy(lmm, v1, v0) do {							\
 		if ((v1).m < (v0).n) lmm_kpv_resize(lmm, v1, (v0).n);	\
@@ -640,7 +640,7 @@ int main() {
 	} while (0)
 #define lmm_kpv_push(lmm, v, x) do {								\
 		if ((v).n == (v).m) {							\
-			(v).a = lmm_realloc(lmm, (v).a, 2 * sizeof(*(v).a) * lmm_kpv_amax(v)); \
+			(v).a = (type *)lmm_realloc(lmm, (v).a, 2 * sizeof(*(v).a) * lmm_kpv_amax(v)); \
 			memset((v).a + lmm_kpv_amax(v), 0, lmm_kpv_amax(v));	\
 			(v).m = (v).m * 2;							\
 		}												\
@@ -653,7 +653,7 @@ int main() {
 #define lmm_kpv_a(lmm, v, i) ( \
 	((v).m <= (size_t)(i)? \
 	((v).m = (v).n = (i) + 1, lmm_kv_roundup((v).m, 32), \
-	 (v).a = lmm_realloc(lmm, (v).a, sizeof(*(v).a) * (v).m), 0) \
+	 (v).a = (type *)lmm_realloc(lmm, (v).a, sizeof(*(v).a) * (v).m), 0) \
 	: (v).n <= (size_t)(i)? (v).n = (i) + 1 \
 	: 0), lmm_kpv_mask(v, (v).a[(i) / lmm_kpv_elems(v)]>>lmm_kpv_base(v, i)) )
 

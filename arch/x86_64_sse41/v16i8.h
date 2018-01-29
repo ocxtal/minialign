@@ -81,13 +81,19 @@ typedef struct v16i8_s {
 
 /* swap (reverse) */
 #define _swap_idx_v16i8() ( \
-	_mm_set_epi8( \
-		0, 1, 2, 3, 4, 5, 6, 7, \
-		8, 9, 10, 11, 12, 13, 14, 15) \
+	_mm_set_epi8(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15) \
 )
 #define _swap_v16i8(a) ( \
 	(v16i8_t) { \
 		_mm_shuffle_epi8((a).v1, _swap_idx_v16i8()) \
+	} \
+)
+#define _swapn_idx_v16i8() ( \
+	_mm_set_epi8(-16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1) \
+)
+#define _swapn_v16i8(a, l) ( \
+	(v16i8_t) { \
+		_mm_shuffle_epi8((a).v1, _mm_add_epi8(_swapn_idx_v16i8(), _mm_set1_epi8(l))) \
 	} \
 )
 

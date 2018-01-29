@@ -1356,6 +1356,7 @@ void ut_print_help(void)
 		"  Options:\n"
 		"    -g, --group [STR,...]    specify group names\n"
 		"    -t, --test  [STR,...]    specify test names\n"
+		"    -s, --seed  [INT]        invoke libc::srand with the seed\n"
 		"    -o, --stdout             redirect to stdout\n"
 		"    -j, --json               print result in json\n"
 		"    -h, --help               show this message\n"
@@ -1385,6 +1386,7 @@ int ut_modify_test_config(
 	static struct option const opts_long[] = {
 		{ "group", required_argument, NULL, 'g' },
 		{ "test", required_argument, NULL, 't' },
+		{ "seed", required_argument, NULL, 's' },
 		{ "stdout", no_argument, NULL, 'o' },
 		{ "json", no_argument, NULL, 'j' },
 		{ "help", no_argument, NULL, 'h' },
@@ -1398,6 +1400,7 @@ int ut_modify_test_config(
 		switch(c) {
 			case 'g': group_arg = optarg; break;
 			case 't': test_arg = optarg; break;
+			case 's': srand((unsigned int)atol(optarg)); break;
 			case 'j': params->printer = ut_json_printer; break;
 			case 'o': params->fp = stdout; break;
 			case 'h': ut_print_help(); return(1);

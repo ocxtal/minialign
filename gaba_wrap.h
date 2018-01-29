@@ -15,14 +15,15 @@
 #define _GABA_WRAP_H_INCLUDED
 
 /* combined gap penalty is not implemented yet */
-#define DISABLE_COMBINED
+// #define DISABLE_COMBINED
 
 /* import unittest */
-#ifndef UNITTEST_UNIQUE_ID
-#  define UNITTEST_UNIQUE_ID		30
+#ifdef UNITTEST
+#  ifndef UNITTEST_UNIQUE_ID
+#    define UNITTEST_UNIQUE_ID		30
+#  endif
+#  include  "unittest.h"
 #endif
-#include  "unittest.h"
-
 
 /**
  * @struct redefinition of gaba_dp_context_s
@@ -31,17 +32,22 @@
 typedef struct gaba_api_s gaba_dp_t;	/** (64) [0] for 32-cell, [1] for 16-cell */
 
 
-#include <stdint.h>							/* uint32_t, uint64_t, ... */
+#include <stdint.h>						/* uint32_t, uint64_t, ... */
 #include "gaba.h"
-#include "sassert.h"
+#include "gaba_parse.h"
 #include "arch/arch.h"
+
+/* static assertion macro */
+#define _sa_cat_intl(x, y) 		x##y
+#define _sa_cat(x, y)			_sa_cat_intl(x, y)
+#define _static_assert(expr)	typedef char _sa_cat(_st, __LINE__)[(expr) ? 1 : -1]
 
 
 /* bandwidth-related macros (see gaba.c) */
-#define DP_CTX_MAX					( 3 )
-// #define _dp_ctx_index(_bw)			( DP_CTX_MAX - ((_bw)>>4) )
-#define _dp_ctx_index(_bw)			( ((_bw) == 64) ? 0 : (((_bw) == 32) ? 1 : 2) )
-_static_assert(_dp_ctx_index(64) == 0);		/* assume 64-cell has the smallest index */
+#define GABA_DP_CTX_MAX					( 3 )
+// #define _gaba_dp_ctx_index(_bw)			( GABA_DP_CTX_MAX - ((_bw)>>4) )
+#define _gaba_dp_ctx_index(_bw)			( ((_bw) == 64) ? 0 : (((_bw) == 32) ? 1 : 2) )
+_static_assert(_gaba_dp_ctx_index(64) == 0);		/* assume 64-cell has the smallest index */
 
 
 /* add namespace for arch wrapper (see main.c) */
@@ -57,9 +63,9 @@ _static_assert(_dp_ctx_index(64) == 0);		/* assume 64-cell has the smallest inde
 
 
 /* gap penalty model (linear or affine) */
-#define LINEAR 						1
-#define AFFINE						2
-#define COMBINED					3
+#define GABA_LINEAR 				0
+#define GABA_AFFINE					1
+#define GABA_COMBINED				2
 
 /**
  * @struct gaba_api_s
@@ -104,7 +110,7 @@ struct gaba_api_s {
 };
 _static_assert(sizeof(struct gaba_api_s) == 8 * sizeof(void *));		/* must be consistent to gaba_opaque_s */
 #define _api(_dp)				( (struct gaba_api_s const *)(_dp) )
-#define _api_array(_ctx)		( (struct gaba_api_s const (*)[DP_CTX_MAX])(_ctx) )
+#define _api_array(_ctx)		( (struct gaba_api_s const (*)[GABA_DP_CTX_MAX])(_ctx) )
 
 
 /* forward declarations */
@@ -123,7 +129,7 @@ _static_assert(sizeof(struct gaba_api_s) == 8 * sizeof(void *));		/* must be con
 
 _decl(gaba_t *, gaba_init, gaba_params_t const *params);
 _decl(void, gaba_clean, gaba_t *ctx);
-_decl(gaba_dp_t *, gaba_dp_init, gaba_t const *ctx, uint8_t const *alim, uint8_t const *blim);
+_decl(gaba_dp_t *, gaba_dp_init, gaba_t const *ctx);
 _decl(void, gaba_dp_flush, gaba_dp_t *self);
 _decl(gaba_stack_t const *, gaba_dp_save_stack, gaba_dp_t *self);
 _decl(void, gaba_dp_flush_stack, gaba_dp_t *self, gaba_stack_t const *stack);
@@ -133,7 +139,7 @@ _decl(gaba_fill_t *, gaba_dp_fill, gaba_dp_t *self, gaba_fill_t const *prev_sec,
 _decl(gaba_fill_t *, gaba_dp_merge, gaba_dp_t *self, gaba_fill_t const *const *sec, uint8_t const *qofs, uint32_t cnt);
 _decl(gaba_pos_pair_t *, gaba_dp_search_max, gaba_dp_t *self, gaba_fill_t const *sec);
 _decl(gaba_alignment_t *, gaba_dp_trace, gaba_dp_t *self, gaba_fill_t const *tail, gaba_alloc_t const *alloc);
-_decl(void, gaba_dp_res_free, gaba_alignment_t *res);
+_decl(void, gaba_dp_res_free, gaba_dp_t *dp, gaba_alignment_t *res);
 // _decl(int64_t, gaba_dp_print_cigar_forward, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
 // _decl(int64_t, gaba_dp_print_cigar_reverse, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
 // _decl(int64_t, gaba_dp_dump_cigar_forward, char *buf, uint64_t buf_size, uint32_t const *path, uint32_t offset, uint32_t len);
@@ -142,8 +148,14 @@ _decl(void, gaba_dp_res_free, gaba_alignment_t *res);
 #undef _decl
 
 /* function table */
+_static_assert(GABA_LINEAR == 0);
+_static_assert(GABA_AFFINE == 1);
+_static_assert(GABA_COMBINED == 2);
+_static_assert(_gaba_dp_ctx_index(64) == 0);
+_static_assert(_gaba_dp_ctx_index(32) == 1);
+_static_assert(_gaba_dp_ctx_index(16) == 2);
 static
-struct gaba_api_s const api_table[][DP_CTX_MAX] __attribute__(( aligned(32) )) = {
+struct gaba_api_s const api_table[][GABA_DP_CTX_MAX] __attribute__(( aligned(32) )) = {
 	#define _table_elems(_model, _bw) { \
 		.dp_fill_root = _import(_decl_cat3(gaba_dp_fill_root, _model, _bw)), \
 		.dp_fill = _import(_decl_cat3(gaba_dp_fill, _model, _bw)), \
@@ -152,24 +164,31 @@ struct gaba_api_s const api_table[][DP_CTX_MAX] __attribute__(( aligned(32) )) =
 		.dp_trace = _import(_decl_cat3(gaba_dp_trace, _model, _bw)) \
 	}
 
-	[LINEAR] = {
-		[_dp_ctx_index(16)] = _table_elems(linear, 16),
-		[_dp_ctx_index(32)] = _table_elems(linear, 32),
-		[_dp_ctx_index(64)] = _table_elems(linear, 64)
-	},
-	[AFFINE] = {
-		[_dp_ctx_index(16)] = _table_elems(affine, 16),
-		[_dp_ctx_index(32)] = _table_elems(affine, 32),
-		[_dp_ctx_index(64)] = _table_elems(affine, 64)
-	},
+	{ _table_elems(linear, 64), _table_elems(linear, 32), _table_elems(linear, 16) },
+	{ _table_elems(affine, 64), _table_elems(affine, 32), _table_elems(affine, 16) },
 	#ifndef DISABLE_COMBINED
-	[COMBINED] = {
-		[_dp_ctx_index(16)] = _table_elems(combined, 16),
-		[_dp_ctx_index(32)] = _table_elems(combined, 32),
-		[_dp_ctx_index(64)] = _table_elems(combined, 64)
-	}
+	{ _table_elems(combined, 64), _table_elems(combined, 32), _table_elems(combined, 16) }
 	#endif
 
+	/*
+	[GABA_LINEAR] = {
+		[_gaba_dp_ctx_index(16)] = _table_elems(linear, 16),
+		[_gaba_dp_ctx_index(32)] = _table_elems(linear, 32),
+		[_gaba_dp_ctx_index(64)] = _table_elems(linear, 64)
+	},
+	[GABA_AFFINE] = {
+		[_gaba_dp_ctx_index(16)] = _table_elems(affine, 16),
+		[_gaba_dp_ctx_index(32)] = _table_elems(affine, 32),
+		[_gaba_dp_ctx_index(64)] = _table_elems(affine, 64)
+	},
+	#ifndef DISABLE_COMBINED
+	[GABA_COMBINED] = {
+		[_gaba_dp_ctx_index(16)] = _table_elems(combined, 16),
+		[_gaba_dp_ctx_index(32)] = _table_elems(combined, 32),
+		[_gaba_dp_ctx_index(64)] = _table_elems(combined, 64)
+	}
+	#endif
+	*/
 	#undef _table_elems
 };
 
@@ -181,16 +200,16 @@ int64_t gaba_init_get_index(
 	struct gaba_params_s const *params)
 {
 	if(params == NULL) {
-		return(AFFINE);
+		return(GABA_AFFINE);
 	}
 
 	if(params->gi != 0) {
 		if(params->gfa != 0 && params->gfb != 0) {
-			return(COMBINED);
+			return(GABA_COMBINED);
 		}
-		return(AFFINE);
+		return(GABA_AFFINE);
 	}
-	return(LINEAR);
+	return(GABA_LINEAR);
 }
 
 /**
@@ -199,12 +218,12 @@ int64_t gaba_init_get_index(
 static inline
 void *gaba_set_api(
 	void *ctx,
-	struct gaba_api_s const (*api)[DP_CTX_MAX])
+	struct gaba_api_s const (*api)[GABA_DP_CTX_MAX])
 {
 	if(ctx == NULL) { return(NULL); }
 	struct gaba_api_s *dst = (struct gaba_api_s *)ctx;
 
-	for(uint64_t i = 0; i < DP_CTX_MAX; i++) {
+	for(uint64_t i = 0; i < GABA_DP_CTX_MAX; i++) {
 		_memcpy_blk_aa(&dst[i], &((struct gaba_api_s const *)api)[i], sizeof(struct gaba_api_s));
 	}
 	return((void *)dst);
@@ -222,36 +241,47 @@ gaba_t *gaba_init(
 	}
 
 	uint64_t idx = gaba_init_get_index(params);
-	struct gaba_api_s const (*api)[DP_CTX_MAX] = &api_table[idx];
-	gaba_t *(*init_table[][DP_CTX_MAX])(gaba_params_t const *params) = {
-		[LINEAR] = {
-			[_dp_ctx_index(16)] = _import(gaba_init_linear_16),
-			[_dp_ctx_index(32)] = _import(gaba_init_linear_32),
-			[_dp_ctx_index(64)] = _import(gaba_init_linear_64)
+	struct gaba_api_s const (*api)[GABA_DP_CTX_MAX] = &api_table[idx];
+
+	static gaba_t *(*const init_table[][GABA_DP_CTX_MAX])(gaba_params_t const *params) = {
+		{ _import(gaba_init_linear_64), _import(gaba_init_linear_32), _import(gaba_init_linear_16) },
+		{ _import(gaba_init_affine_64), _import(gaba_init_affine_32), _import(gaba_init_affine_16) },
+		#ifndef DISABLE_COMBINED
+		{ _import(gaba_init_combined_64), _import(gaba_init_combined_32), _import(gaba_init_combined_16) }
+		#endif
+	};
+
+	/*
+	static gaba_t *(*const init_table[][GABA_DP_CTX_MAX])(gaba_params_t const *params) = {
+		[GABA_LINEAR] = {
+			[_gaba_dp_ctx_index(16)] = _import(gaba_init_linear_16),
+			[_gaba_dp_ctx_index(32)] = _import(gaba_init_linear_32),
+			[_gaba_dp_ctx_index(64)] = _import(gaba_init_linear_64)
 		},
-		[AFFINE] = {
-			[_dp_ctx_index(16)] = _import(gaba_init_affine_16),
-			[_dp_ctx_index(32)] = _import(gaba_init_affine_32),
-			[_dp_ctx_index(64)] = _import(gaba_init_affine_64)
+		[GABA_AFFINE] = {
+			[_gaba_dp_ctx_index(16)] = _import(gaba_init_affine_16),
+			[_gaba_dp_ctx_index(32)] = _import(gaba_init_affine_32),
+			[_gaba_dp_ctx_index(64)] = _import(gaba_init_affine_64)
 		},
 		#ifndef DISABLE_COMBINED
-		[COMBINED] = {
-			[_dp_ctx_index(16)] = _import(gaba_init_combined_16),
-			[_dp_ctx_index(32)] = _import(gaba_init_combined_32),
-			[_dp_ctx_index(64)] = _import(gaba_init_combined_64)
+		[GABA_COMBINED] = {
+			[_gaba_dp_ctx_index(16)] = _import(gaba_init_combined_16),
+			[_gaba_dp_ctx_index(32)] = _import(gaba_init_combined_32),
+			[_gaba_dp_ctx_index(64)] = _import(gaba_init_combined_64)
 		}
 		#endif
 	};
+	*/
 
 	/* create context */
 	gaba_params_t p = *params;
 	gaba_t *ctx = NULL;
-	ctx = init_table[idx][_dp_ctx_index(16)](&p);
+	ctx = init_table[idx][_gaba_dp_ctx_index(16)](&p);
 
 	/* init 32-cell and 64-cell wide root blocks */
 	p.reserved = (void *)ctx;
-	ctx = init_table[idx][_dp_ctx_index(32)](&p);
-	ctx = init_table[idx][_dp_ctx_index(64)](&p);
+	ctx = init_table[idx][_gaba_dp_ctx_index(32)](&p);
+	ctx = init_table[idx][_gaba_dp_ctx_index(64)](&p);
 	return((gaba_t *)gaba_set_api((void *)ctx, api));
 }
 
@@ -272,11 +302,9 @@ void gaba_clean(
  */
 static inline
 gaba_dp_t *gaba_dp_init(
-	gaba_t const *ctx,
-	uint8_t const *alim,
-	uint8_t const *blim)
+	gaba_t const *ctx)
 {
-	return((gaba_dp_t *)gaba_set_api((void *)_import(gaba_dp_init_linear_64)(ctx, alim, blim), _api_array(ctx)));
+	return((gaba_dp_t *)gaba_set_api((void *)_import(gaba_dp_init_linear_64)(ctx), _api_array(ctx)));
 }
 
 /**
@@ -395,9 +423,10 @@ gaba_alignment_t *gaba_dp_trace(
  */
 static inline
 void gaba_dp_res_free(
+	gaba_dp_t *dp,
 	gaba_alignment_t *res)
 {
-	_import(gaba_dp_res_free_linear_64)(res);
+	_import(gaba_dp_res_free_linear_64)(dp, res);
 	return;
 }
 
@@ -460,7 +489,7 @@ uint64_t gaba_dp_dump_cigar_reverse(
 #endif
 
 /* unittests */
-#if UNITTEST != 0
+#if defined(UNITTEST) && UNITTEST != 0
 
 /**
  * @struct unittest_seqs_s
@@ -639,8 +668,7 @@ unittest()
 	gaba_t *c = gaba_init(GABA_PARAMS(GABA_SCORE_SIMPLE(1, 1, 0, 1)));
 	assert(c != NULL);
 
-	void const *lim = (void const *)0x800000000000;
-	gaba_dp_t *d = gaba_dp_init(c, lim, lim);
+	gaba_dp_t *d = gaba_dp_init(c);
 	assert(d != NULL);
 
 	gaba_dp_clean(d);
@@ -651,9 +679,8 @@ unittest(with_seq_pair("GGAAAAAAAA", "AAAAAAAA"))
 {
 	omajinai();
 
-	void const *lim = (void const *)0x800000000000;
 	gaba_t *c = gaba_init(GABA_PARAMS(GABA_SCORE_SIMPLE(1, 1, 0, 1)));
-	gaba_dp_t *d = gaba_dp_init(c, lim, lim);
+	gaba_dp_t *d = gaba_dp_init(c);
 
 
 	/* check fill functions and resulting scores */
@@ -676,8 +703,7 @@ unittest()
 	gaba_t *c = gaba_init(GABA_PARAMS(GABA_SCORE_SIMPLE(1, 1, 1, 1)));
 	assert(c != NULL);
 
-	void const *lim = (void const *)0x800000000000;
-	gaba_dp_t *d = gaba_dp_init(c, lim, lim);
+	gaba_dp_t *d = gaba_dp_init(c);
 	assert(d != NULL);
 
 	gaba_dp_clean(d);
@@ -688,9 +714,8 @@ unittest(with_seq_pair("GGAAAAAAAA", "AAAAAAAA"))
 {
 	omajinai();
 
-	void const *lim = (void const *)0x800000000000;
 	gaba_t *c = gaba_init(GABA_PARAMS(GABA_SCORE_SIMPLE(1, 1, 1, 1)));
-	gaba_dp_t *d = gaba_dp_init(c, lim, lim);
+	gaba_dp_t *d = gaba_dp_init(c);
 
 
 	/* check fill functions and resulting scores */

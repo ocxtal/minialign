@@ -9,6 +9,13 @@
  * @license Apache v2
  */
 
+/*
+ * debug print configuration: -DDEBUG to enable debug print, -DDEBUG_ALL to print all the vectors, arrays, and bitmasks
+ * NOTE: dumping all the vectors sometimes raises SEGV due to a stack shortage. use `ulimit -s 65536' to avoid it.
+ */
+#if defined(DEBUG_ALL) && !defined(DEBUG)
+#  define DEBUG
+#endif
 #ifdef DEBUG
 #  define REDEFINE_DEBUG
 #endif
@@ -30,7 +37,6 @@
 #include "gaba.h"
 #include "gaba_parse.h"
 #include "log.h"
-#include "sassert.h"
 #include "arch/arch.h"			/* architecture dependents */
 
 
@@ -40,9 +46,9 @@
  *   affine:   g(k) =     gi + ge * k          where gi > 0,      ge > 0
  *   combined: g(k) = min(gi + ge * k, gf * k) where gi > 0, gf > ge > 0
  */
-#define LINEAR 						1
-#define AFFINE						2
-#define COMBINED					3
+#define LINEAR 						0
+#define AFFINE						1
+#define COMBINED					2
 
 #ifdef MODEL
 #  if !(MODEL == LINEAR || MODEL == AFFINE || MODEL == COMBINED)
@@ -54,10 +60,13 @@
 
 #if MODEL == LINEAR
 #  define MODEL_LABEL				linear
+#  define MODEL_STR					"linear"
 #elif MODEL == AFFINE
 #  define MODEL_LABEL				affine
+#  define MODEL_STR					"affine"
 #else
 #  define MODEL_LABEL				combined
+#  define MODEL_STR					"combined"
 #endif
 
 #ifdef BIT
@@ -152,15 +161,28 @@
 #include  "unittest.h"
 
 
+/* static assertion macros */
+#define _sa_cat_intl(x, y) 		x##y
+#define _sa_cat(x, y)			_sa_cat_intl(x, y)
+#define _static_assert(expr)	typedef char _sa_cat(_st, __LINE__)[(expr) ? 1 : -1]
+
+
 /* internal constants */
 #define BLK_BASE					( 5 )
 #define BLK 						( 0x01<<BLK_BASE )
 
-#define MIN_BULK_BLOCKS				( 32 )
-#define MEM_ALIGN_SIZE				( 32 )		/* 32byte aligned for AVX2 environments */
-#define MEM_INIT_SIZE				( (uint64_t)256 * 1024 * 1024 )
-#define MEM_MARGIN_SIZE				( 2048 )	/* tail margin of internal memory blocks */
-// #define GP_INIT						( 1 )		/* global p coordinate where total fetched sequence length becomes BW */
+#ifdef DEBUG_MEM
+#  define MIN_BULK_BLOCKS			( 0 )
+#  define MEM_ALIGN_SIZE			( 32 )		/* 32byte aligned for AVX2 environments */
+#  define MEM_INIT_SIZE				( (uint64_t)4 * 1024 )
+#  define MEM_MARGIN_SIZE			( 4096 )	/* tail margin of internal memory blocks */
+#else
+#  define MIN_BULK_BLOCKS			( 32 )
+#  define MEM_ALIGN_SIZE			( 32 )		/* 32byte aligned for AVX2 environments */
+#  define MEM_INIT_SIZE				( (uint64_t)256 * 1024 * 1024  )
+#  define MEM_MARGIN_SIZE			( 4096 )	/* tail margin of internal memory blocks */
+#endif
+
 #define INIT_FETCH_APOS				( -1 )
 #define INIT_FETCH_BPOS				( -1 )
 
@@ -241,6 +263,7 @@ struct gaba_mask_pair_s {
 };
 _static_assert(sizeof(struct gaba_mask_pair_s) == _W / 2);
 #endif
+#define _mask_u64(_m)				( ((nvec_masku_t){ .mask = (_m) }).all )
 
 /**
  * @struct gaba_diff_vec_s
@@ -293,6 +316,11 @@ _static_assert(sizeof(struct gaba_block_s) % 16 == 0);
 _static_assert(sizeof(struct gaba_phantom_s) % 16 == 0);
 #define _last_block(x)				( (struct gaba_block_s *)(x) - 1 )
 #define _last_phantom(x)			( (struct gaba_phantom_s *)(x) - 1 )
+#define _phantom(x)					( _last_phantom((struct gaba_block_s *)(x) + 1) )
+
+#define MEM_INIT_VECANCY			( sizeof(struct gaba_phantom_s) + MIN_BULK_BLOCKS * sizeof(struct gaba_block_s) )
+_static_assert(2 * sizeof(struct gaba_block_s) < MEM_MARGIN_SIZE);
+_static_assert(MEM_INIT_VECANCY < MEM_INIT_SIZE);
 
 /**
  * @struct gaba_merge_s
@@ -411,24 +439,23 @@ struct gaba_aln_intl_s {
 	/* memory management */
 	void *opaque;						/** (8) opaque (context pointer) */
 	gaba_lfree_t lfree;					/** (8) local free */
-
-	uint32_t head_margin;				/** (8) margin size at the head of an alignment object, must be multiple of 8 */
-	uint32_t slen;						/** (8) section length */
-	struct gaba_segment_s *seg;			/** (8) */
-	uint64_t plen;						/** (8) path length (psum) */
-	int64_t score;						/** (8) score */
-	// uint32_t mcnt, xcnt;				/** (8) #matchs, #mismatchs */
-	// uint32_t gicnt, gecnt;				/** (8) #gap opens, #gap bases */
-	uint32_t _pad[4];
+	int64_t score;						/** (8) score (save) */
+	uint32_t aicnt, bicnt;				/** (8) gap region counters */
+	uint32_t aecnt, becnt;				/** (8) gap base counters */
+	uint32_t dcnt;						/** (4) unused in the loop */
+	uint32_t slen;						/** (4) section length (counter) */
+	struct gaba_segment_s *seg;			/** (8) section ptr */
+	uint64_t plen;						/** (8) path length (psum; save) */
 };
+
 _static_assert(sizeof(struct gaba_alignment_s) == sizeof(struct gaba_aln_intl_s));
+_static_assert(offsetof(struct gaba_alignment_s, score) == offsetof(struct gaba_aln_intl_s, score));
+_static_assert(offsetof(struct gaba_alignment_s, dcnt) == offsetof(struct gaba_aln_intl_s, dcnt));
 _static_assert(offsetof(struct gaba_alignment_s, slen) == offsetof(struct gaba_aln_intl_s, slen));
 _static_assert(offsetof(struct gaba_alignment_s, seg) == offsetof(struct gaba_aln_intl_s, seg));
 _static_assert(offsetof(struct gaba_alignment_s, plen) == offsetof(struct gaba_aln_intl_s, plen));
-// _static_assert(offsetof(struct gaba_alignment_s, mcnt) == offsetof(struct gaba_aln_intl_s, mcnt));
-// _static_assert(offsetof(struct gaba_alignment_s, xcnt) == offsetof(struct gaba_aln_intl_s, xcnt));
-// _static_assert(offsetof(struct gaba_alignment_s, gicnt) == offsetof(struct gaba_aln_intl_s, gicnt));
-// _static_assert(offsetof(struct gaba_alignment_s, gecnt) == offsetof(struct gaba_aln_intl_s, gecnt));
+_static_assert(offsetof(struct gaba_alignment_s, agcnt) == offsetof(struct gaba_aln_intl_s, aecnt));
+_static_assert(offsetof(struct gaba_alignment_s, bgcnt) == offsetof(struct gaba_aln_intl_s, becnt));
 
 /**
  * @struct gaba_leaf_s
@@ -448,14 +475,13 @@ struct gaba_leaf_s {
  */
 struct gaba_writer_work_s {
 	/** local context */
-	struct gaba_aln_intl_s a;			/** (48) working buffer, copied to the result object */
+	struct gaba_aln_intl_s a;			/** (64) working buffer, copied to the result object */
 
 	/** work */
-	uint32_t state;						/** (4) d/v0/v1/h0/h1 */
-	uint32_t ofs;						/** (4) path array offset */
+	uint32_t afcnt, bfcnt;				/** (8) */
 	uint32_t *path;						/** (8) path array pointer */
 	struct gaba_block_s const *blk;		/** (8) current block */
-	uint32_t p, q;						/** (8) local p, q-coordinate, [0, BW) */
+	uint8_t p, q, ofs, state, _pad[4];	/** (8) local p, q-coordinate, [0, BW), path offset, state */
 
 	/** save */
 	uint32_t aofs, bofs;				/** (8) ofs for bridge */
@@ -490,10 +516,10 @@ _static_assert(sizeof(struct gaba_score_vec_s) == 80);
  */
 struct gaba_mem_block_s {
 	struct gaba_mem_block_s *next;
-	struct gaba_mem_block_s *prev;
+	// struct gaba_mem_block_s *prev;
 	uint64_t size;
 };
-_static_assert(sizeof(struct gaba_mem_block_s) == 24);
+_static_assert(sizeof(struct gaba_mem_block_s) == 16);
 
 /**
  * @struct gaba_stack_s
@@ -505,6 +531,7 @@ struct gaba_stack_s {
 	uint8_t *end;
 };
 _static_assert(sizeof(struct gaba_stack_s) == 24);
+#define _stack_size(_s)					( (uint64_t)((_s)->end - (_s)->top) )
 
 /**
  * @struct gaba_dp_context_s
@@ -516,23 +543,23 @@ struct gaba_dp_context_s {
 	struct gaba_joint_tail_s const *root[4];	/** (32) root tail (phantom vectors) */
 
 	/* memory management */
-	struct gaba_mem_block_s mem;		/** (24) root memory block */
+	struct gaba_mem_block_s mem;		/** (16) root memory block */
 	struct gaba_stack_s stack;			/** (24) current stack */
-
-	/* scores */
-	int8_t tx;							/** (1) xdrop threshold */
-	int8_t tf;							/** (1) filter threshold */
-	uint8_t _pad1[6];
 
 	/** output options */
 	uint32_t head_margin;				/** (4) margin at the head of gaba_res_t */
 	uint32_t tail_margin;				/** (4) margin at the tail of gaba_res_t */
 
 	/* score constants */
+	double imx, xmx;					/** (16) 1 / (M - X), X / (M - X) (precalculated constants) */
 	struct gaba_score_vec_s scv;		/** (80) substitution matrix and gaps */
 
-	/* tail-of-userland pointers */
-	uint8_t const *alim, *blim;			/** (16) max index of seq array */
+	/* scores */
+	int8_t tx;							/** (1) xdrop threshold */
+	int8_t tf;							/** (1) filter threshold */
+	int8_t gi, ge, gfa, gfb;			/** (4) negative integers */
+	uint8_t aflen, bflen;				/** (2) short-gap length thresholds */
+	uint32_t _pad1[2];					/** (16) */
 	/** 192; 64byte aligned */
 
 	/* working buffers */
@@ -616,7 +643,8 @@ _static_assert((int32_t)TERM<<8 == (int32_t)GABA_TERM);
 /**
  * coordinate conversion macros
  */
-#define _rev(pos, len)				( (len) + (uint64_t)(len) - (uint64_t)(pos) - 1 )
+// #define _rev(pos, len)				( (len) + (uint64_t)(len) - (uint64_t)(pos) - 1 )
+#define _rev(pos)					( GABA_EOU + (uint64_t)GABA_EOU - (uint64_t)(pos) - 1 )
 #define _roundup(x, base)			( ((x) + (base) - 1) & ~((base) - 1) )
 
 /**
@@ -648,13 +676,14 @@ void *gaba_malloc(
 		debug("posix_memalign failed");
 		return(NULL);
 	}
-	debug("posix_memalign(%p)", ptr);
+	debug("posix_memalign(%p), size(%lu)", ptr, size);
 	return(ptr + MEM_MARGIN_SIZE);
 }
 static _force_inline
 void gaba_free(
 	void *ptr)
 {
+	debug("free(%p)", ptr - MEM_MARGIN_SIZE);
 	free(ptr - MEM_MARGIN_SIZE);
 	return;
 }
@@ -781,6 +810,7 @@ enum BASES { A = 0x01, C = 0x02, G = 0x04, T = 0x08, N = 0x00 };
 
 /**
  * @macro _adjust_BLK, _comp_BLK, _match_BW
+ * NOTE: _load_v16i8 and _load_v32i8 will be moved out of the loop when loading static uint8_t const[16].
  */
 #if BIT == 2
 /* 2bit encoding */
@@ -796,15 +826,24 @@ static uint8_t const compshift_mask_b[16] __attribute__(( aligned(16) )) = {
 	0x0c, 0x08, 0x04, 0x00, 0x02, 0x02, 0x02, 0x02,
 	0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02
 };
-#  define _fwa_v16i8(_v)		( _xor_v16i8((_load_v16i8(comp_mask_a)), (_v)) )
-#  define _fwa_v32i8(_v)		( _xor_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask_a))), (_v)) )
-#  define _rva_v16i8(_v)		( _swap_v16i8((_v)) )
-#  define _rva_v32i8(_v)		( _swap_v32i8((_v)) )
-#  define _fwb_v16i8(_v)		( _shuf_v16i8((_load_v16i8(shift_mask_b)), (_v)) )
-#  define _fwb_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(shift_mask_b))), (_v)) )
-#  define _rvb_v16i8(_v)		( _shuf_v16i8((_load_v16i8(compshift_mask_b)), _swap_v16i8(_v)) )
-#  define _rvb_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(compshift_mask_b))), _swap_v32i8(_v)) )
+/* q-fetch (anti-diagonal matching for vector calculation) */
+#  define _fwaq_v16i8(_v, _l)	( _xor_v16i8((_load_v16i8(comp_mask_a)), (_v)) )	/* _l is ignored */
+#  define _fwaq_v32i8(_v)		( _xor_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask_a))), (_v)) )
+#  define _rvaq_v16i8(_v, _l)	( _swapn_v16i8((_v), (_l)) )
+#  define _rvaq_v32i8(_v)		( _swap_v32i8((_v)) )
+#  define _fwbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(shift_mask_b)), (_v)) )	/* _l is ignored */
+#  define _fwbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(shift_mask_b))), (_v)) )
+#  define _rvbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(compshift_mask_b)), _swap_v16i8(_v)) )	/* _l is ignored */
+#  define _rvbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(compshift_mask_b))), _swap_v32i8(_v)) )
+
+/* p-fetch (diagonal matching for alignment refinement) */
+#  define _fwap_v16i8(_v, _l)	( (_v) )
+#  define _rvap_v16i8(_v, _l)	( _xor_v16i8((_load_v16i8(comp_mask_a)), _swapn_v16i8((_v), (_l))) )
+#  define _fwbp_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(shift_mask_b)), (_v)) )
+#  define _rvbp_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(compshift_mask_b)), _swapn_v16i8((_v), (_l))) )
+
 #  define _match_n(_a, _b)		_or_n(_a, _b)
+#  define _match_v16i8(_a, _b)	_or_v16i8(_a, _b)
 
 #else
 /* 4bit encoding */
@@ -812,15 +851,25 @@ static uint8_t const comp_mask[16] __attribute__(( aligned(16) )) = {
 	0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
 	0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
 };
-#  define _fwa_v16i8(_v)		( _shuf_v16i8((_load_v16i8(comp_mask)), (_v)) )
-#  define _fwa_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask))), (_v)) )
-#  define _rva_v16i8(_v)		( _swap_v16i8((_v)) )
-#  define _rva_v32i8(_v)		( _swap_v32i8((_v)) )
-#  define _fwb_v16i8(_v)		( (_v) )
-#  define _fwb_v32i8(_v)		( (_v) )
-#  define _rvb_v16i8(_v)		( _shuf_v16i8((_load_v16i8(comp_mask)), _swap_v16i8(_v)) )
-#  define _rvb_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask))), _swap_v32i8(_v)) )
+
+/* q-fetch (anti-diagonal matching for vector calculation) */
+#  define _fwaq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask)), (_v)) )		/* _l is ignored */
+#  define _fwaq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask))), (_v)) )
+#  define _rvaq_v16i8(_v, _l)	( _swapn_v16i8((_v), (_l)) )
+#  define _rvaq_v32i8(_v)		( _swap_v32i8((_v)) )
+#  define _fwbq_v16i8(_v, _l)	( (_v) )											/* id(x); _l is ignored */
+#  define _fwbq_v32i8(_v)		( (_v) )
+#  define _rvbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask)), _swap_v16i8(_v)) )	/* _l is ignored */
+#  define _rvbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask))), _swap_v32i8(_v)) )
+
+/* p-fetch (diagonal matching for alignment refinement) */
+#  define _fwap_v16i8(_v, _l)	( (_v) )
+#  define _rvap_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask)), _swapn_v16i8((_v), (_l))) )
+#  define _fwbp_v16i8(_v, _l)	( (_v) )
+#  define _rvbp_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask)), _swapn_v16i8((_v), (_l))) )
+
 #  define _match_n(_a, _b)		_and_n(_a, _b)
+#  define _match_v16i8(_a, _b)	_and_v16i8(_a, _b)
 #endif
 
 /**
@@ -832,16 +881,18 @@ void fill_fetch_seq_a(
 	uint8_t const *pos,
 	uint64_t len)
 {
-	if(pos < self->alim) {
+	if(pos < GABA_EOU) {
 		debug("reverse fetch a: pos(%p), len(%lu)", pos, len);
 		/* reverse fetch: 2 * alen - (2 * alen - pos) + (len - 32) */
-		v32i8_t ach = _loadu_v32i8(pos + (len - BLK));
-		_storeu_v32i8(_rd_bufa(self, _W, len), _rva_v32i8(ach));		/* reverse */
+		// v32i8_t ach = _loadu_v32i8(pos + (len - BLK));				/* this may touch the space before the array */
+		// _storeu_v32i8(_rd_bufa(self, _W, len), _rvaq_v32i8(ach));		/* reverse */
+		v32i8_t ach = _loadu_v32i8(pos);								/* this will not touch the space before the array, but will touch at most 31bytes after the array */
+		_storeu_v32i8(_rd_bufa(self, _W, BLK), _rvaq_v32i8(ach));		/* reverse */
 	} else {
 		debug("forward fetch a: pos(%p), len(%lu)", pos, len);
 		/* forward fetch: 2 * alen - pos */
-		v32i8_t ach = _loadu_v32i8(_rev(pos + (len - 1), self->alim));
-		_storeu_v32i8(_rd_bufa(self, _W, len), _fwa_v32i8(ach));		/* complement */
+		v32i8_t ach = _loadu_v32i8(_rev(pos + (len - 1)));
+		_storeu_v32i8(_rd_bufa(self, _W, len), _fwaq_v32i8(ach));		/* complement */
 	}
 	return;
 }
@@ -857,25 +908,24 @@ void fill_fetch_seq_a_n(
 	uint8_t const *pos,
 	uint64_t len)
 {
-	if(pos < self->alim) {
+	if(pos < GABA_EOU) {
 		debug("reverse fetch a: pos(%p), len(%lu)", pos, len);
 		/* reverse fetch: 2 * alen - (2 * alen - pos) + (len - 32) */
 		pos += len; ofs += len;		/* fetch in reverse direction */
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);
-			v16i8_t ach = _loadu_v16i8(pos - 16);
-			_storeu_v16i8(_rd_bufa(self, ofs - l, l), _rva_v16i8(ach));	/* reverse */
+			v16i8_t ach = _loadu_v16i8(pos - l);
+			_storeu_v16i8(_rd_bufa(self, ofs - l, l), _rvaq_v16i8(ach, l));	/* reverse */
 			len -= l; pos -= l; ofs -= l;
 		}
 	} else {
 		debug("forward fetch a: pos(%p), len(%lu)", pos, len);
 		/* forward fetch: 2 * alen - pos */
-		// v16i8_t const cv = _load_v16i8(comp_mask);		/* complement mask */
 		pos += len - 1; ofs += len;
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);
-			v16i8_t ach = _loadu_v16i8(_rev(pos, self->alim));
-			_storeu_v16i8(_rd_bufa(self, ofs - l, l), _fwa_v16i8(ach));	/* complement */
+			v16i8_t ach = _loadu_v16i8(_rev(pos));
+			_storeu_v16i8(_rd_bufa(self, ofs - l, l), _fwaq_v16i8(ach, l));	/* complement */
 			len -= l; pos -= l; ofs -= l;
 		}
 	}
@@ -891,16 +941,16 @@ void fill_fetch_seq_b(
 	uint8_t const *pos,
 	uint64_t len)
 {
-	if(pos < self->blim) {
+	if(pos < GABA_EOU) {
 		debug("forward fetch b: pos(%p), len(%lu)", pos, len);
 		/* forward fetch: pos */
 		v32i8_t bch = _loadu_v32i8(pos);
-		_storeu_v32i8(_rd_bufb(self, _W, len), _fwb_v32i8(bch));		/* forward */
+		_storeu_v32i8(_rd_bufb(self, _W, len), _fwbq_v32i8(bch));		/* forward */
 	} else {
 		debug("reverse fetch b: pos(%p), len(%lu)", pos, len);
 		/* reverse fetch: 2 * blen - pos + (len - 32) */
-		v32i8_t bch = _loadu_v32i8(_rev(pos, self->blim) - (BLK - 1));
-		_storeu_v32i8(_rd_bufb(self, _W, len), _rvb_v32i8(bch));		/* reverse complement */
+		v32i8_t bch = _loadu_v32i8(_rev(pos + (len - 1)));
+		_storeu_v32i8(_rd_bufb(self, _W, BLK), _rvbq_v32i8(bch));		/* reverse complement */
 	}
 	return;
 }
@@ -916,13 +966,13 @@ void fill_fetch_seq_b_n(
 	uint8_t const *pos,
 	uint64_t len)
 {
-	if(pos < self->blim) {
+	if(pos < GABA_EOU) {
 		debug("forward fetch b: pos(%p), len(%lu)", pos, len);
 		/* forward fetch: pos */
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);					/* advance length */
 			v16i8_t bch = _loadu_v16i8(pos);
-			_storeu_v16i8(_rd_bufb(self, ofs, l), _fwb_v16i8(bch));
+			_storeu_v16i8(_rd_bufb(self, ofs, l), _fwbq_v16i8(bch, l));
 			len -= l; pos += l; ofs += l;
 		}
 	} else {
@@ -930,8 +980,8 @@ void fill_fetch_seq_b_n(
 		/* reverse fetch: 2 * blen - pos + (len - 16) */
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);					/* advance length */
-			v16i8_t bch = _loadu_v16i8(_rev(pos + (16 - 1), self->blim));
-			_storeu_v16i8(_rd_bufb(self, ofs, l), _rvb_v16i8(bch));
+			v16i8_t bch = _loadu_v16i8(_rev(pos + (l - 1)));
+			_storeu_v16i8(_rd_bufb(self, ofs, l), _rvbq_v16i8(bch, l));
 			len -= l; pos += l; ofs += l;
 		}
 	}
@@ -992,7 +1042,7 @@ int64_t fill_init_fetch(
 	v2i64_t pos)
 {
 	/* calc irem (length until the init_fetch breakpoint; restore remaining head margin lengths) */
-	v2i32_t const adj = _seta_v2i32(1, 0);
+	v2i32_t const adj = _seta_v2i32(0, 1);
 	v2i32_t irem = _sub_v2i32(
 		_seta_v2i32(INIT_FETCH_BPOS, INIT_FETCH_APOS),
 		_cvt_v2i64_v2i32(pos)
@@ -1131,7 +1181,8 @@ void fill_load_section(
 static _force_inline
 struct gaba_block_s *fill_create_phantom(
 	struct gaba_dp_context_s *self,
-	struct gaba_block_s const *prev_blk)
+	struct gaba_block_s const *prev_blk,
+	uint32_t cnt)								/* (0, 0) for the first phantom, (prev_blk->bcnt, prev_blk->acnt) for middle phantom */
 {
 	struct gaba_phantom_s *ph = (struct gaba_phantom_s *)self->stack.top;
 	debug("start stack_top(%p), stack_end(%p)", self->stack.top, self->stack.end);
@@ -1140,10 +1191,10 @@ struct gaba_block_s *fill_create_phantom(
 	_memcpy_blk_uu(&ph->diff, &prev_blk->diff, sizeof(struct gaba_diff_vec_s));
 	ph->acc = prev_blk->acc;					/* just copy */
 	ph->xstat = (prev_blk->xstat & ROOT) | HEAD;/* propagate root-update flag and mark head */
-	ph->acnt = ph->bcnt = 0;					/* clear counter (a and b sequences are aligned at the head of the buffer) FIXME: intermediate seq fetch breaks consistency */
+	_store_v2i8(&ph->acnt, cnt);				/* FIXED! */
 	ph->reserved = 0;							/* overlaps with mask */
 	ph->blk = prev_blk;
-	debug("ph(%p), xstat(%x)", ph, ph->xstat);
+	debug("ph(%p), xstat(%x), prev_blk(%p), blk(%p)", ph, ph->xstat, prev_blk, (struct gaba_block_s *)(ph + 1) - 1);
 	return((struct gaba_block_s *)(ph + 1) - 1);
 }
 
@@ -1158,10 +1209,17 @@ struct gaba_joint_tail_s *fill_create_bridge(
 	v2i32_t id, v2i32_t len, v2i64_t bptr,
 	v2i32_t adv)
 {
-	struct gaba_joint_tail_s *tail = _bridge(gaba_dp_malloc(self, BRIDGE_TAIL_SIZE));
+	// struct gaba_joint_tail_s *tail = _bridge(gaba_dp_malloc(self, BRIDGE_TAIL_SIZE));
+	struct gaba_joint_tail_s *tail = gaba_dp_malloc(self, sizeof(struct gaba_joint_tail_s));
+	debug("create bridge, p(%p)", tail);
+
+	/* copy ch, xd, and md */
+	_storeu_n(tail->ch.w, _loadu_n(prev_tail->ch.w));
+	_storeu_n(tail->xd.drop, _loadu_n(prev_tail->xd.drop));
+	_storeu_w(tail->md.delta, _loadu_w(prev_tail->md.delta));
 
 	/* vector position and scores are unchanged */
-	_storeu_u64(&tail->mdrop, 0x00010000 | _loadu_u64(&prev_tail->mdrop));	/* mark istat */
+	_storeu_u64(&tail->mdrop, 0x00010000 | _loadu_u64(&prev_tail->mdrop));	/* mark istat, copy mdrop and pridx */
 
 	/* relative section pointer is moved, set advanced length */
 	_store_v2i32(&tail->aridx, _sub_v2i32(len, adv));			/* FIXME: len -> correct ridx */
@@ -1173,6 +1231,7 @@ struct gaba_joint_tail_s *fill_create_bridge(
 	_store_v2i64(&tail->atptr, _add_v2i64(bptr, _cvt_v2i32_v2i64(len)));/* correct tptr for safety (actually not required) */
 	_store_v2i32(&tail->f.aid, id);								/* correct id pair is required */
 	_memcpy_blk_uu(&tail->f.ascnt, &prev_tail->f.ascnt, 32);	/* just copy (unchanged) */
+	tail->f.status = prev_tail->f.status;
 	return(tail);
 }
 
@@ -1203,7 +1262,7 @@ struct gaba_block_s *fill_load_vectors(
 	_print_w(md);
 
 	/* extract the last block pointer, pass to fill-in loop */
-	return(fill_create_phantom(self, _last_block(tail)));
+	return(fill_create_phantom(self, _last_block(tail), 0));
 }
 
 /**
@@ -1283,7 +1342,7 @@ struct gaba_joint_tail_s *fill_save_section(
 
 	/* store max, status flag */
 	tail->f.max = _offset(prev_tail) + self->w.r.ofsd + mdrop;
-	tail->f.stat = ((xstat & (TERM | CONT))<<8) | _mask_v2i32(update);
+	tail->f.status = ((xstat & (TERM | CONT))<<8) | _mask_v2i32(update);
 	debug("prev_offset(%ld), offset(%ld), max(%d, %ld)",
 		_offset(prev_tail), _offset(prev_tail) + self->w.r.ofsd, mdrop, tail->f.max);
 	return(tail);
@@ -1389,17 +1448,17 @@ struct gaba_joint_tail_s *fill_create_tail(
 	t = _max_n(df, t); \
 	ptr->h.mask = _mask_n(_eq_n(t, de)); \
 	ptr->v.mask = _mask_n(_eq_n(t, df)); \
-	debug("mask(%lx, %lx)", (uint64_t)ptr->h.all, (uint64_t)ptr->v.all); \
 	/* update de and dh */ \
 	de = _add_n(de, _load_adjh(self->scv)); \
 	nvec_t te = _max_n(de, t); \
-	ptr->e.mask = _mask_n(_eq_n(te, de)); \
+	ptr->e.mask = _mask_n(_eq_n(te, t)); \
 	de = _add_n(te, dh); \
 	dh = _add_n(dh, t); \
 	/* update df and dv */ \
 	df = _add_n(df, _load_adjv(self->scv)); \
 	nvec_t tf = _max_n(df, t); \
-	ptr->f.mask = _mask_n(_eq_n(tf, df)); \
+	ptr->f.mask = _mask_n(_eq_n(tf, t)); \
+	debug("mask(%lx, %lx, %lx, %lx)", (uint64_t)ptr->h.all, (uint64_t)ptr->v.all, (uint64_t)ptr->e.all, (uint64_t)ptr->f.all); \
 	df = _sub_n(tf, dv); \
 	t = _sub_n(dv, t); \
 	ptr++; dv = dh; dh = t; \
@@ -1414,24 +1473,28 @@ struct gaba_joint_tail_s *fill_create_tail(
 	register nvec_t di = _add_n(dv, _load_gfv(self->scv)); \
 	register nvec_t dd = _sub_n(_load_gfh(self->scv), dh); \
 	_print_n(dd); _print_n(di); \
-	di = _max_n(di, de); dd = _max_n(dd, df); \
+	register nvec_t s = _max_n(de, df); \
 	t = _shuf_n(_load_sb(self->scv), t); \
+	s = _max_n(s, di); \
+	t = _max_n(t, dd); \
+	t = _max_n(t, s); \
 	_print_n(t); _print_n(dd); _print_n(di); \
-	t = _max_n(dd, t); t = _max_n(di, t); \
-	_print_n(t); \
-	ptr->h.mask = _mask_n(_eq_n(t, di)); \
-	ptr->v.mask = _mask_n(_eq_n(t, dd)); \
-	debug("mask(%x, %x)", ptr->h.all, ptr->v.all); \
+	uint64_t mask_gfa = _mask_u64(_mask_n(_eq_n(t, di))), mask_gh = _mask_u64(_mask_n(_eq_n(t, de))); \
+	uint64_t mask_gfb = _mask_u64(_mask_n(_eq_n(t, dd))), mask_gv = _mask_u64(_mask_n(_eq_n(t, df))); \
+	debug("mask_gfa(%lx), mask_gh(%lx), mask_gfb(%lx), mask_gv(%lx)", mask_gfa, mask_gh, mask_gfb, mask_gv); \
+	ptr->h.all = mask_gfa | mask_gh; mask_gh &= ~mask_gfa; \
+	ptr->v.all = mask_gfb | mask_gv; mask_gv &= ~mask_gfb; \
 	/* update de and dh */ \
 	de = _add_n(de, _load_adjh(self->scv)); \
 	nvec_t te = _max_n(de, t); \
-	ptr->e.mask = _mask_n(_eq_n(te, de)); \
+	ptr->e.all = mask_gh | _mask_u64(_mask_n(_eq_n(te, t))); \
 	de = _add_n(te, dh); \
 	dh = _add_n(dh, t); \
 	/* update df and dv */ \
 	df = _add_n(df, _load_adjv(self->scv)); \
 	nvec_t tf = _max_n(df, t); \
-	ptr->f.mask = _mask_n(_eq_n(tf, df)); \
+	ptr->f.all = mask_gv | _mask_u64(_mask_n(_eq_n(tf, t))); \
+	debug("mask_ge(%lx), mask_gf(%lx), mask(%lx, %lx, %lx, %lx)", (uint64_t)_mask_u64(_mask_n(_eq_n(te, t))), (uint64_t)_mask_u64(_mask_n(_eq_n(tf, t))), (uint64_t)ptr->h.all, (uint64_t)ptr->v.all, (uint64_t)ptr->e.all, (uint64_t)ptr->f.all); \
 	df = _sub_n(tf, dv); \
 	t = _sub_n(dv, t); \
 	ptr++; dv = dh; dh = t; \
@@ -1520,9 +1583,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	nvec_t prev_drop = _load_n(&self->w.r.xd); \
 	_store_n(&self->w.r.xd, drop);		/* save max delta vector */ \
 	_print_n(prev_drop); _print_n(_add_n(drop, delta)); \
-	(_blk)->max_mask = ((nvec_masku_t){ \
-		.mask = _mask_n(_gt_n(_add_n(drop, delta), prev_drop)) \
-	}).all; \
+	(_blk)->max_mask = _mask_u64(_mask_n(_gt_n(_add_n(drop, delta), prev_drop))); \
 	debug("update_mask(%lx)", (uint64_t)(_blk)->max_mask); \
 	/* update middle delta vector */ \
 	wvec_t md = _load_w(&self->w.r.md); \
@@ -1575,9 +1636,11 @@ int64_t fill_bulk_test_idx(
 	((int64_t)aptr - (int64_t)alim) | ((int64_t)blim - (int64_t)bptr) | ((int64_t)plim - (int64_t)bptr + (int64_t)aptr); \
 })
 
-#undef DEBUG
-#undef _LOG_H_INCLUDED
-#include "log.h"
+#ifndef DEBUG_ALL
+#  undef DEBUG
+#  undef _LOG_H_INCLUDED
+#  include "log.h"
+#endif
 
 /**
  * @fn fill_bulk_block
@@ -1669,9 +1732,11 @@ struct gaba_block_s *fill_bulk_seq_bounded(
 	return(blk);
 }
 
-#undef DEBUG
-#undef _LOG_H_INCLUDED
-#include "log.h"
+#ifndef DEBUG_ALL
+#  undef DEBUG
+#  undef _LOG_H_INCLUDED
+#  include "log.h"
+#endif
 
 /**
  * @fn fill_cap_seq_bounded
@@ -1735,7 +1800,7 @@ static _force_inline
 uint64_t max_blocks_mem(
 	struct gaba_dp_context_s const *self)
 {
-	uint64_t mem_size = self->stack.end - self->stack.top;
+	uint64_t mem_size = _stack_size(&self->stack);
 	uint64_t blk_cnt = mem_size / sizeof(struct gaba_block_s);
 	debug("calc_max_block_mem, stack_top(%p), stack_end(%p), mem_size(%lu), cnt(%lu)",
 		self->stack.top, self->stack.end, mem_size, (blk_cnt > 3) ? (blk_cnt - 3) : 0);
@@ -1822,9 +1887,9 @@ struct gaba_block_s *fill_section_seq_bounded(
 		}
 
 		/* memory ran out: malloc a next stack and create a new phantom head */
-		debug("add stack");
-		if(gaba_dp_add_stack(self, 0) != 0) { return(NULL); }
-		blk = fill_create_phantom(self, blk);
+		debug("add stack, blk(%p)", blk);
+		if(gaba_dp_add_stack(self, MEM_INIT_VECANCY) != 0) { return(NULL); }
+		blk = fill_create_phantom(self, blk, _load_v2i8(&blk->acnt));
 	}
 
 	/* bulk fill with seq bound check */
@@ -1864,6 +1929,7 @@ struct gaba_fill_s *_export(gaba_dp_fill_root)(
 	);
 
 	/* load sequences and extract the last block pointer */
+	if(_stack_size(&self->stack) < MEM_INIT_VECANCY) { gaba_dp_add_stack(self, MEM_INIT_VECANCY); }
 	struct gaba_block_s *blk = fill_load_vectors(self, _root(self));
 
 	/* init fetch */
@@ -1907,6 +1973,7 @@ struct gaba_fill_s *_export(gaba_dp_fill)(
 	/* load sequences and extract the last block pointer */
 	_print_v2i32(_load_v2i32(&_tail(fill)->aridx));
 	_print_v2i32(_load_v2i32(&_tail(fill)->aadv));
+	if(_stack_size(&self->stack) < MEM_INIT_VECANCY) { gaba_dp_add_stack(self, MEM_INIT_VECANCY); }
 	struct gaba_block_s *blk = fill_load_vectors(self, _tail(fill));
 
 	/* check if still in the init (head) state */
@@ -1964,10 +2031,10 @@ int64_t merge_calc_qspan(
 	self->w.m.qw = qub - qlb;
 
 	/* calc max and min indices */
-	self->w.m.uidx = lzcnt(((v16i8_masku_t){
+	self->w.m.uidx = tzcnt(((v16i8_masku_t){
 		.mask = _mask_v16i8(_eq_v16i8(qv, _set_v16i8(qub)))
 	}).all);
-	self->w.m.lidx = lzcnt(((v16i8_masku_t){
+	self->w.m.lidx = tzcnt(((v16i8_masku_t){
 		.mask = _mask_v16i8(_eq_v16i8(qv, _set_v16i8(qlb)))
 	}).all);
 
@@ -2134,7 +2201,7 @@ uint64_t merge_detect_maxpos(
 	/* calc index */
 	uint64_t qmax = MERGE_BUFFER_LENGTH;
 	for(uint64_t i = 0; i < MERGE_BUFFER_LENGTH; i += 32) {
-		uint64_t q = lzcnt(((v32i8_masku_t){
+		uint64_t q = tzcnt(((v32i8_masku_t){
 			.mask = _mask_v32i16(_eq_v32i16(cmaxv, _load_v32i16(_cb(self, i))))
 		}).all);
 		qmax = MIN2(qmax, i + (q >= 64 ? MERGE_BUFFER_LENGTH : q));
@@ -2338,21 +2405,21 @@ uint64_t leaf_load_max_mask(
 	/* load max vector, create mask */
 	nvec_t drop = _loadu_n(tail->xd.drop);
 	wvec_t md = _loadu_w(tail->md.delta);
-	uint64_t max_mask = ((nvec_masku_t){
-		.mask = _mask_w(_eq_w(
-			_set_w(tail->mdrop),
-			_add_w(md, _cvt_n_w(drop))
-		))
-	}).all;
+	uint64_t max_mask = _mask_u64(_mask_w(_eq_w(
+		_set_w(tail->mdrop),
+		_add_w(md, _cvt_n_w(drop))
+	)));
 	debug("max_mask(%lx)", max_mask);
 	_print_w(_set_w(tail->mdrop));
 	_print_w(_add_w(md, _cvt_n_w(drop)));
 	return(max_mask);
 }
 
-#undef DEBUG
-#undef _LOG_H_INCLUDED
-#include "log.h"
+#ifndef DEBUG_ALL
+#  undef DEBUG
+#  undef _LOG_H_INCLUDED
+#  include "log.h"
+#endif
 
 /**
  * @fn leaf_detect_pos
@@ -2375,7 +2442,7 @@ void leaf_detect_pos(
 		} \
 		_m++->mask = _mask_n(_gt_n(delta, max)); \
 		max = _max_n(delta, max); \
-		debug("mask(%x)", ((nvec_masku_t){ .mask = (_m - 1)->mask }).all); \
+		debug("mask(%lx)", (uint64_t)_mask_u64((_m - 1)->mask)); \
 	}
 
 	/* load contexts and overwrite max vector */
@@ -2481,14 +2548,14 @@ struct gaba_pos_pair_s *_export(gaba_dp_search_max)(
 {
 	self = _restore_dp_context(self);
 	struct gaba_joint_tail_s const *tail = _tail(fill);
-	leaf_search(self, tail);
 
+	leaf_search(self, tail);					/* may return zero */
 	v2i32_t const v11 = _seta_v2i32(1, 1);
 	v2i32_t gidx = _load_v2i32(&self->w.l.agidx), acc = _zero_v2i32();
 	v2i32_t id = _load_v2i32(&tail->f.aid);
 
 	debug("gidx(%d, %d), acc(%d, %d)", _hi32(gidx), _lo32(gidx), _hi32(acc), _lo32(acc));
-	while(1) {
+	while(tail->tail != NULL) {
 		v2i32_t update = _gt_v2i32(v11, gidx);
 		if(_test_v2i32(update, v11)) { break; }
 
@@ -2501,7 +2568,6 @@ struct gaba_pos_pair_s *_export(gaba_dp_search_max)(
 		tail = tail->tail;
 		v2i32_t ridx = _load_v2i32(&tail->aridx);
 		v2i32_t mask = _and_v2i32(update, _eq_v2i32(ridx, _zero_v2i32()));
-		_print_v2i32(update);
 
 		/* add advanced lengths */
 		gidx = _add_v2i32(gidx, _and_v2i32(mask, acc));
@@ -2512,8 +2578,8 @@ struct gaba_pos_pair_s *_export(gaba_dp_search_max)(
 
 	struct gaba_pos_pair_s *pos = gaba_dp_malloc(self, sizeof(struct gaba_pos_pair_s));
 	_store_v2i32(&pos->aid, id);
-	_store_v2i32(&pos->apos, _sub_v2i32(gidx, v11));
-	_print_v2i32(_sub_v2i32(gidx, v11));
+	_store_v2i32(&pos->apos, gidx);
+	_print_v2i32(gidx);
 	return(pos);
 }
 
@@ -2540,7 +2606,7 @@ void trace_reload_section(
 	while(gidx <= 0) {
 		do {
 			gidx += tail->istat ? 0 : _r(tail->aadv, i);
-			debug("add istat(%u), ridx(%d), adv(%d), gidx(%d), stat(%x)", tail->istat, _r(tail->aridx, i), _r(tail->aadv, i), gidx, tail->f.stat);
+			debug("add istat(%u), ridx(%d), adv(%d), gidx(%d), stat(%x)", tail->istat, _r(tail->aridx, i), _r(tail->aadv, i), gidx, tail->f.status);
 			prev_tail = tail; tail = tail->tail;
 		} while(_r(tail->aridx, i) != 0);
 	}
@@ -2598,20 +2664,33 @@ void trace_push_segment(
 /**
  * @enum ts_*
  */
-enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
+#define TS_H							( 0x01 )
+#define TS_V							( 0x02 )
+#define TS_S							( 0x04 )
+enum {
+	ts_d  = TS_H | TS_V,
+	ts_v0 = TS_V,
+	ts_v1 = TS_V | TS_S,
+	ts_h0 = TS_H,
+	ts_h1 = TS_H | TS_S
+};
 
 /**
  * @macro _trace_inc_*
  * @brief increment gap counters
  */
+
+#define _trace_inc_gi_h()				{ gi = _sub_v2i32(gi, v01); }
+#define _trace_inc_gi_v()				{ gi = _sub_v2i32(gi, v10); }
+#define _trace_inc_ge_h()				{ ge = _sub_v2i32(ge, v01); }
+#define _trace_inc_ge_v()				{ ge = _sub_v2i32(ge, v10); }
+#define _trace_inc_gf_h()				{ gf = _sub_v2i32(gf, v01); }
+#define _trace_inc_gf_v()				{ gf = _sub_v2i32(gf, v10); }
 /*
-#define _trace_inc_gi()					{ gc = _sub_v2i32(gc, v01); }
-#define _trace_inc_ge()					{ gc = _sub_v2i32(gc, v10); }
-#define _trace_inc_gf()					{ gc = _sub_v2i32(gc, v00); }
-*/
 #define _trace_inc_gi()					;
 #define _trace_inc_ge()					;
 #define _trace_inc_gf()					;
+*/
 
 /**
  * @macro _trace_*_*_test_index
@@ -2638,15 +2717,26 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
  * @brief test mask
  */
 #if MODEL == LINEAR
-#define _trace_test_diag_h()			( (mask->h.all>>q) & 0x01 )
-#define _trace_test_diag_v()			( (mask->v.all>>q) & 0x01 )
-#define _trace_test_gap_h()				( (mask->h.all>>q) & 0x01 )
-#define _trace_test_gap_v()				( (mask->v.all>>q) & 0x01 )
-#else /* MODEL == AFFINE */
-#define _trace_test_diag_h()			( (mask->h.all>>q) & 0x01 )
-#define _trace_test_diag_v()			( (mask->v.all>>q) & 0x01 )
-#define _trace_test_gap_h()				( (mask->e.all>>q) & 0x01 )
-#define _trace_test_gap_v()				( (mask->f.all>>q) & 0x01 )
+#define _trace_test_diag_h()			( ((mask->h.all>>q) & 0x01) == 0 )
+#define _trace_test_diag_v()			( ((mask->v.all>>q) & 0x01) == 0 )
+#define _trace_test_gap_h()				( ((mask->h.all>>q) & 0x01) != 0 )
+#define _trace_test_gap_v()				( ((mask->v.all>>q) & 0x01) != 0 )
+#define _trace_test_fgap_h()			( 0 )
+#define _trace_test_fgap_v()			( 0 )
+#elif MODEL == AFFINE
+#define _trace_test_diag_h()			( ((mask->h.all>>q) & 0x01) == 0 )
+#define _trace_test_diag_v()			( ((mask->v.all>>q) & 0x01) == 0 )
+#define _trace_test_gap_h()				( ((mask->e.all>>q) & 0x01) == 0 )
+#define _trace_test_gap_v()				( ((mask->f.all>>q) & 0x01) == 0 )
+#define _trace_test_fgap_h()			( 0 )
+#define _trace_test_fgap_v()			( 0 )
+#else /* MODEL == COMBINED */
+#define _trace_test_diag_h()			( ((mask->h.all>>q) & 0x01) == 0 )
+#define _trace_test_diag_v()			( ((mask->v.all>>q) & 0x01) == 0 )
+#define _trace_test_gap_h()				( (((~mask->h.all & mask->e.all)>>q) & 0x01) == 0 )
+#define _trace_test_gap_v()				( (((~mask->v.all & mask->f.all)>>q) & 0x01) == 0 )
+#define _trace_test_fgap_h()			( ((mask->e.all>>q) & 0x01) == 0 )
+#define _trace_test_fgap_v()			( ((mask->f.all>>q) & 0x01) == 0 )
 #endif
 
 /**
@@ -2672,8 +2762,8 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
  * @brief reload mask pointer and direction mask, and adjust path offset
  */
 #define _trace_load_block_rem(_cnt) ({ \
-	debug("ofs(%lu), cnt(%lu), path(%p), ofs(%lu)", \
-		ofs, (uint64_t)_cnt, path - (ofs < (_cnt)), (ofs - (_cnt)) & (BLK - 1)); \
+	debug("ofs(%u), cnt(%lu), path(%p), ofs(%u)", \
+		ofs, (uint64_t)_cnt, path - (ofs < (_cnt)), (uint32_t)(ofs - (_cnt)) & (BLK - 1)); \
 	path -= ofs < (_cnt); \
 	ofs = (ofs - (_cnt)) & (BLK - 1); \
 	_dir_mask_load(blk, (_cnt)); \
@@ -2687,7 +2777,10 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
 	/* store path (offset will be adjusted afterwards) */ \
 	_storeu_u64(path, path_array<<ofs); \
 	/* reload block pointer */ \
-	blk = _last_phantom(blk)->blk; \
+	blk--; do { \
+		debug("reload head block, blk(%p), prev_blk(%p), head(%x)", blk, _phantom(blk)->blk, _phantom(blk)->blk->xstat & HEAD); \
+		blk = _phantom(blk)->blk; \
+	} while((blk->xstat & HEAD) != 0); \
 	while(blk->xstat & MERGE) { \
 		struct gaba_merge_s const *_mg = _merge(blk); \
 		blk = _mg->blk[_mg->tidx[_vec_idx][q]]; \
@@ -2707,10 +2800,12 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
 #define _trace_reload_block() { \
 	/* store path (bulk, offset does not change here) */ \
 	_storeu_u64(path, path_array<<ofs); path--; \
-	/* reload mask and mask pointer */ \
-	mask = &(--blk)->mask[BLK - 1]; \
+	/* reload mask and mask pointer; always test the boundary */ \
+	blk--; \
+	while(_unlikely((_phantom(blk)->xstat & HEAD) != 0)) { blk = _phantom(blk)->blk; } \
+	mask = &blk->mask[BLK - 1]; \
 	dir_mask = _dir_mask_load(blk, BLK); \
-	debug("reload block, path_array(%lx), blk(%p), mask(%x)", path_array, blk, dir_mask); \
+	debug("reload block, path_array(%lx), blk(%p), head(%x), mask(%x)", path_array, blk, blk->xstat & HEAD, dir_mask); \
 }
 
 /**
@@ -2752,7 +2847,7 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
 }
 #define _trace_tail_load_n(t, _state, _jump_to) { \
 	if(_unlikely(mask < blk->mask)) { \
-		debug("test ph(%p), xstat(%x), ppos(%lu), path(%p, %p), ofs(%lu)", \
+		debug("test ph(%p), xstat(%x), ppos(%lu), path(%p, %p), ofs(%u)", \
 			_last_phantom(blk), _last_phantom(blk)->xstat, (path - self->w.l.aln->path) * 32 + ofs, path, self->w.l.aln->path, ofs); \
 		if(_last_phantom(blk)->xstat & HEAD) {	/* head (phantom) block is marked 0x4000 */ \
 			_trace_reload_tail(t, _state);		/* fetch the previous tail */ \
@@ -2768,9 +2863,11 @@ enum { ts_d = 0, ts_v0, ts_v1, ts_h0, ts_h1 };
 	} \
 }
 
-#undef DEBUG
-#undef _LOG_H_INCLUDED
-#include "log.h"
+#ifndef DEBUG_ALL
+#  undef DEBUG
+#  undef _LOG_H_INCLUDED
+#  include "log.h"
+#endif
 
 /**
  * @fn trace_core
@@ -2780,41 +2877,49 @@ void trace_core(
 	struct gaba_dp_context_s *self)
 {
 	#define _pop_vector(_c, _l, _state, _jump_to) { \
-		debug("go %s (%s, %s), dir(%x), mask_h(%lx), mask_v(%lx), p(%ld), q(%d), ptr(%p), path_array(%lx)", \
-			#_l, #_c, #_jump_to, dir_mask, (uint64_t)mask->h.all, (uint64_t)mask->v.all, (int64_t)(mask - blk->mask), (int32_t)q, mask, path_array); \
+		debug("go %s (%s, %s), dir(%x), mask(%lx, %lx), h(%lx, %lx, %lx), v(%lx, %lx, %lx), p(%ld), q(%d), ptr(%p), path_array(%lx)", \
+			#_l, #_c, #_jump_to, dir_mask, (uint64_t)mask->h.all, (uint64_t)mask->v.all, \
+			(uint64_t)_trace_test_diag_h(), (uint64_t)_trace_test_gap_h(), (uint64_t)_trace_test_fgap_h(), (uint64_t)_trace_test_diag_v(), (uint64_t)_trace_test_gap_v(), (uint64_t)_trace_test_fgap_v(), \
+			(int64_t)(mask - blk->mask), (int32_t)q, mask, path_array); \
 		_trace_##_c##_##_l##_update_index(); \
 		_trace_##_l##_update_path_q(); \
 		_trace_##_c##_load_n(t, _state, _jump_to); \
 	}
 	#define _trace_gap_loop(t, _c, _n, _l) { \
 		_trace_##_c##_##_l##_head: \
-			if(_unlikely(_trace_##_c##_##_l##_test_index())) { \
-				self->w.l.state = ts_##_l##0; goto _trace_term; \
+			if(_trace_test_fgap_##_l()) { \
+				debug("fgap detected"); \
+				if(_unlikely(_trace_##_c##_##_l##_test_index())) { \
+					self->w.l.state = ts_##_l##0; goto _trace_term; \
+				} \
+				_trace_inc_gf_##_l(); \
+				_pop_vector(_c, _l, 1, _trace_##_n##_##_l##_retd); \
+				goto _trace_##_c##_##_l##_retd; \
 			} \
-			_trace_inc_gi();		/* increment #gap regions at the head */ \
-			_pop_vector(_c, _l, 1, _trace_##_n##_##_l##_head); \
-			while(1) { \
-		_trace_##_c##_##_l##_mid: \
-				if(_trace_test_gap_##_l() == 0) { goto _trace_##_c##_d_head; } \
+			_trace_inc_gi_##_l(); \
+			do { \
 				if(_unlikely(_trace_##_c##_##_l##_test_index())) { \
 					self->w.l.state = ts_##_l##1; goto _trace_term; \
 				} \
-				_trace_inc_ge();	/* increment #gap bases on every iter */ \
-				_pop_vector(_c, _l, 1, _trace_##_n##_##_l##_head); \
-			} \
+				_trace_inc_ge_##_l();	/* increment #gap bases on every iter */ \
+				_pop_vector(_c, _l, 1, _trace_##_n##_##_l##_tail); \
+				debug("test next gap, (%x)", _trace_test_gap_##_l()); \
+			_trace_##_c##_##_l##_tail:; \
+			} while(_trace_test_gap_##_l()); \
+			goto _trace_##_c##_##_l##_retd; \
 	}
 	#define _trace_diag_loop(t, _c, _n) { \
 		while(1) { \
-		_trace_##_c##_d_head: \
-			if(_trace_test_diag_h() != 0) { goto _trace_##_c##_h_head; } \
+		_trace_##_c##_h_retd: _trace_##_c##_d_head: \
+			if(!_trace_test_diag_h()) { goto _trace_##_c##_h_head; } \
 			if(_unlikely(_trace_##_c##_d_test_index())) { \
 				self->w.l.state = ts_d; goto _trace_term; \
 			} \
 			_pop_vector(_c, h, 0, _trace_##_n##_d_mid); \
 		_trace_##_c##_d_mid: \
 			_pop_vector(_c, v, 0, _trace_##_n##_d_tail); \
-		_trace_##_c##_d_tail: \
-			if(_trace_test_diag_v() != 0) { goto _trace_##_c##_v_head; } \
+		_trace_##_c##_v_retd: _trace_##_c##_d_tail: \
+			if(!_trace_test_diag_v()) { goto _trace_##_c##_v_head; } \
 		} \
 	}
 
@@ -2826,10 +2931,12 @@ void trace_core(
 	v2i32_t const bw = _set_v2i32(_W);
 
 	/* gap counts; #gap regions in lower and #gap bases in higher */
-	// register v2i32_t gc = _load_v2i32(&self->w.l.a.gicnt);
+	register v2i32_t gi = _load_v2i32(&self->w.l.a.aicnt);
+	register v2i32_t ge = _load_v2i32(&self->w.l.a.aecnt);
+	register v2i32_t gf = _load_v2i32(&self->w.l.afcnt);
 
 	/* load path array, adjust path offset to align the head of the current block */
-	uint64_t ofs = self->w.l.ofs;	/* global p-coordinate */
+	uint32_t ofs = self->w.l.ofs;	/* global p-coordinate */
 	uint32_t *path = self->w.l.path;
 	uint64_t path_array = _loadu_u64(path)>>ofs;
 
@@ -2847,9 +2954,10 @@ void trace_core(
 	switch(self->w.l.state) {
 		case ts_d:  goto _trace_tail_d_head;
 		case ts_v0: goto _trace_tail_v_head;
-		case ts_v1: goto _trace_tail_v_mid;
+		case ts_v1: goto _trace_tail_v_tail;
 		case ts_h0: goto _trace_tail_h_head;
-		case ts_h1: goto _trace_tail_h_mid;
+		case ts_h1: goto _trace_tail_h_tail;
+		default: /* trap(); */ return;			/* broken state */
 	}
 
 	/* tail loops */ {
@@ -2869,17 +2977,19 @@ _trace_term:;
 	path += (ofs + rem) >= BLK;
 	ofs = (ofs + rem) & (BLK - 1);
 	_storeu_u64(path, path_array<<ofs);
-	debug("rem(%lu), path(%p), arr(%lx), ofs(%lu)", rem, path, path_array<<ofs, ofs);
+	debug("rem(%lu), path(%p), arr(%lx), ofs(%u)", rem, path, path_array<<ofs, ofs);
 
 	/* save gap counts */
-	// _store_v2i32(&self->w.l.a.gicnt, gc);
+	_store_v2i32(&self->w.l.a.aicnt, gi);
+	_store_v2i32(&self->w.l.a.aecnt, ge);
+	_store_v2i32(&self->w.l.afcnt, gf);
 
 	/* store pointers and coordinates */
-	self->w.l.ofs = ofs;			/* global p-coordinate */
 	self->w.l.path = path;
 	self->w.l.blk = blk;
 	self->w.l.p = mask - blk->mask;	/* local p-coordinate */
 	self->w.l.q = q;				/* q coordinate */
+	self->w.l.ofs = ofs;			/* global p-coordinate */
 	_store_v2i32(&self->w.l.agidx, gidx);
 	_print_v2i32(gidx);
 	return;
@@ -2918,25 +3028,21 @@ void trace_init(
 	self->w.l.aln = alloc->lmalloc(alloc->opaque, size) + self->head_margin;
 	self->w.l.a.opaque = alloc->opaque;					/* save opaque pointer */
 	self->w.l.a.lfree = alloc->lfree;
-	self->w.l.a.head_margin = self->head_margin;		/* required when free the object */
 
 	/* use gaba_alignment_s buffer instead in the traceback loop */
-	self->w.l.a.plen = plen;
 	self->w.l.a.score = tail->f.max;					/* just copy */
-	// self->w.l.a.mcnt = 0;
-	// self->w.l.a.xcnt = 0;
-	// self->w.l.a.gicnt = 0;
-	// self->w.l.a.gecnt = 0;
+	_store_v2i32(&self->w.l.a.aicnt, _zero_v2i32());	/* clear counters */
+	_store_v2i32(&self->w.l.a.aecnt, _zero_v2i32());
+	self->w.l.a.dcnt = 0;
 
-	/* section */
+	/* section and path */
 	self->w.l.a.slen = 0;
 	self->w.l.a.seg = sn + (struct gaba_segment_s *)(self->w.l.aln->path + _roundup(pn, 8)),
-
-	/* clear state */
-	self->w.l.state = ts_d;
+	self->w.l.a.plen = plen;							/* save path length */
 
 	/* store block and coordinates */
 	self->w.l.ofs = plen & (32 - 1);
+	self->w.l.state = ts_d;								/* clear state, the traceback always starts with a match */
 	self->w.l.path = self->w.l.aln->path + plen / 32;
 	debug("sn(%lu), seg(%p), pn(%lu), path(%p)", sn, self->w.l.a.seg, pn, self->w.l.path);
 
@@ -2963,10 +3069,14 @@ struct gaba_alignment_s *trace_body(
 
 	/* blockwise traceback loop, until ppos reaches the root */
 	while(self->w.l.path + self->w.l.ofs > self->w.l.aln->path) {	/* !(self->w.l.path == self->w.l.aln->path && self->w.l.ofs == 0) */
-		/* update section info */
+		/* update section info; check the next direction */
 		debug("gidx(%d, %d)", self->w.l.bgidx, self->w.l.agidx);
-		if((int32_t)self->w.l.agidx <= 0) { trace_reload_section(self, 0); }
-		if((int32_t)self->w.l.bgidx <= 0) { trace_reload_section(self, 1); }
+		if((int32_t)self->w.l.agidx < (int32_t)((self->w.l.state & TS_H) != 0)) {
+			trace_reload_section(self, 0);
+		}
+		if((int32_t)self->w.l.bgidx < (int32_t)((self->w.l.state & TS_V) != 0)) {
+			trace_reload_section(self, 1);
+		}
 
 		/* fragment trace: q must be inside [0, BW) */
 		trace_core(self);
@@ -2974,7 +3084,7 @@ struct gaba_alignment_s *trace_body(
 		if(_unlikely(self->w.l.q >= _W)) {
 			/* out of band: abort */
 			self->w.l.a.lfree(self->w.l.a.opaque,
-				(void *)((uint8_t *)self->w.l.aln - self->w.l.a.head_margin)
+				(void *)((uint8_t *)self->w.l.aln - self->head_margin)
 			);
 			return(NULL);
 		}
@@ -2983,27 +3093,30 @@ struct gaba_alignment_s *trace_body(
 		trace_push_segment(self);
 	}
 
-	/* calc mismatch and match counts */
-	// self->w.l.a.xcnt = 0;
-	self->w.l.a._pad[0] = 0;
-	self->w.l.a._pad[1] = 0;
-	self->w.l.a._pad[2] = 0;
-	self->w.l.a._pad[3] = 0;
-	/*
-	self->w.l.a.xcnt = ((int64_t)self->m * ((self->w.l.a.plen - self->w.l.a.gecnt)>>1)
-		- (self->w.l.a.score - (int64_t)self->gi * self->w.l.a.gicnt - (int64_t)self->ge * self->w.l.a.gecnt)
-	) / (self->m - self->x);
-	self->w.l.a.mcnt = ((self->w.l.a.plen - self->w.l.a.gecnt)>>1) - self->w.l.a.xcnt;
-	debug("sc(%d, %d, %d, %d), score(%ld), plen(%ld), gic(%u), gec(%u), dcnt(%u), esc(%ld), div(%d), xcnt(%u)",
-		self->m, self->x, self->gi, self->ge, self->w.l.a.score,
-		self->w.l.a.plen, self->w.l.a.gicnt, self->w.l.a.gecnt,
-		(uint32_t)(self->w.l.a.plen - self->w.l.a.gecnt)>>1,
-		self->w.l.a.score - (int64_t)self->gi * self->w.l.a.gicnt - (int64_t)self->ge * self->w.l.a.gecnt,
-		self->m - self->x, self->w.l.a.xcnt);
-	*/
+	/* estimate alignment identity */
+	v2i32_t gicnt = _load_v2i32(&self->w.l.a.aicnt);
+	v2i32_t gecnt = _load_v2i32(&self->w.l.a.aecnt);
+	v2i32_t gfcnt = _load_v2i32(&self->w.l.afcnt);
+	v2i32_t gcnt = _add_v2i32(gecnt, gfcnt);
+
+	v2i32_t gi = _set_v2i32((int32_t)self->gi), ge = _set_v2i32((int32_t)self->ge);
+	v2i32_t gf = _cvt_v2i8_v2i32(_load_v2i8(&self->gfa));
+	v2i32_t g = _add_v2i32(_add_v2i32(
+		_mul_v2i32(gi, gicnt),
+		_mul_v2i32(ge, gecnt)),
+		_mul_v2i32(gf, gfcnt)
+	);
+
+	uint64_t dlen = (self->w.l.a.plen - _hi32(gcnt) - _lo32(gcnt))>>1;
+	int64_t dsc = self->w.l.a.score - _hi32(g) - _lo32(g);
+	// debug("plen(%lu), g(%ld, %ld, %ld, %ld), gcnt(%ld, %ld, %ld, %ld), dlen(%ld), sc(%ld, %ld), mc(%f), id(%f)",
+		// plen, gi, ge, ga, gb, gic, gec, gac, gbc, dlen, sc, dsc, dsc * self->imx - self->xmx * dlen, id);
 
 	/* copy */
 	_memcpy_blk_ua(self->w.l.aln, &self->w.l.a, sizeof(struct gaba_alignment_s));
+	self->w.l.aln->identity = dlen == 0 ? 0.0 : (((double)dsc / (double)dlen) * self->imx - self->xmx);
+	_store_v2i32(&self->w.l.aln->agcnt, gcnt);
+	self->w.l.aln->dcnt = dlen;
 	return(self->w.l.aln);
 }
 
@@ -3037,14 +3150,119 @@ struct gaba_alignment_s *_export(gaba_dp_trace)(
  * @fn gaba_dp_res_free
  */
 void _export(gaba_dp_res_free)(
+	struct gaba_dp_context_s *self,
 	struct gaba_alignment_s *aln)
 {
 	struct gaba_aln_intl_s *a = (struct gaba_aln_intl_s *)aln;
-	debug("free mem, ptr(%p), lmm(%p)", (void *)a - a->head_margin, a->opaque);
-	a->lfree(a->opaque, (void *)((uint8_t *)a - a->head_margin));
+	debug("free mem, ptr(%p), lmm(%p)", (void *)a - self->head_margin, a->opaque);
+	a->lfree(a->opaque, (void *)((uint8_t *)a - self->head_margin));
 	return;
 }
 
+
+/* score accumulation auxiliary macros */
+/**
+ * @macro _hadd_v16i8
+ */
+#define _hadd_v16i8(_v) ({ \
+	v16i8_t v = (_v); \
+	v = _add_v16i8(v, _bsr_v16i8(v, 8)); \
+	v = _add_v16i8(v, _bsr_v16i8(v, 4)); \
+	v = _add_v16i8(v, _bsr_v16i8(v, 2)); \
+	_ext_v16i8(v, 1) + _ext_v16i8(v, 0); \
+})
+#define _del(_c) { \
+	v2i32_t cnt = _seta_v2i32((_c) > 0, _c); \
+	gbc = _add_v2i32(gbc, cnt); fbc = (_c) > self->bflen ? fbc : _add_v2i32(fbc, cnt); \
+}
+#define _del_f(_c) { ap += (_c); _del(_c); }
+#define _del_r(_c) { ap -= (_c); _del(_c); }
+#define _ins(_c) { \
+	v2i32_t cnt = _seta_v2i32((_c) > 0, _c); \
+	gac = _add_v2i32(gac, cnt); fac = (_c) > self->aflen ? fac : _add_v2i32(fac, cnt); \
+}
+#define _ins_f(_c) { bp += (_c); _ins(_c); }
+#define _ins_r(_c) { bp -= (_c); _ins(_c); }
+#define _match_core(_rv, _qv, _c) { \
+	v16i8_t sp = _swapn_v16i8(_shuf_v16i8(sb, _match_v16i8((_rv), (_qv))), (_c));				/* masked score profile */ \
+	score += _hadd_v16i8(sp); xc += popcnt(((v16i8_masku_t){ .mask = _mask_v16i8(sp) }).all);	/* count mismatches */ \
+}
+#define _match_ff(_c) { \
+	v16i8_t av = _fwap_v16i8(_loadu_v16i8(ap), (_c)), bv = _fwbp_v16i8(_loadu_v16i8(bp), (_c)); \
+	dc += (_c); ap += (_c); bp += (_c); _match_core(av, bv, _c); \
+}
+#define _match_fr(_c) { \
+	v16i8_t av = _fwap_v16i8(_loadu_v16i8(ap), (_c)), bv = _rvbp_v16i8(_loadu_v16i8(bp - (_c)), (_c)); \
+	dc += (_c); ap += (_c); bp -= (_c); _match_core(av, bv, _c); \
+}
+#define _match_rf(_c) { \
+	v16i8_t av = _rvap_v16i8(_loadu_v16i8(ap - (_c)), (_c)), bv = _fwbp_v16i8(_loadu_v16i8(bp), (_c)); \
+	dc += (_c); ap -= (_c); bp += (_c); _match_core(av, bv, _c); \
+}
+#define _match_rr(_c) { \
+	v16i8_t av = _rvap_v16i8(_loadu_v16i8(ap - (_c)), (_c)), bv = _rvbp_v16i8(_loadu_v16i8(bp - (_c)), (_c)); \
+	dc += (_c); ap -= (_c); bp -= (_c); _match_core(av, bv, _c); \
+}
+#define _nop(_c) { (void)(_c); }
+
+/**
+ * @fn gaba_dp_calc_score
+ * @brief calculate score, match count, mismatch count, and gap counts for the section
+ * NOTE: this function depends on the _parser_init_* and _parser_loop_* macros defined in gaba_parse.h
+ */
+gaba_score_t *_export(gaba_dp_calc_score)(
+	struct gaba_dp_context_s *self,
+	uint32_t const *path,
+	gaba_path_section_t const *s,
+	gaba_section_t const *a,
+	gaba_section_t const *b)
+{
+	self = _restore_dp_context(self);
+
+	v16i8_t sb = _to_v16i8_n(_load_sb(self->scv));
+	v2i32_t gac = _zero_v2i32(), fac = _zero_v2i32(), gbc = _zero_v2i32(), fbc = _zero_v2i32();
+	uint64_t xc = 0, dc = 0;
+	int64_t score = 0;
+
+	uint8_t const *ap = a->base < GABA_EOU ? &a->base[s->apos] : gaba_mirror(&a->base[s->apos], 0);
+	uint8_t const *bp = b->base < GABA_EOU ? &b->base[s->bpos] : gaba_mirror(&b->base[s->bpos], 0);
+	_parser_init_fw(path, s->ppos, gaba_plen(s));
+	switch(((a->base < GABA_EOU)<<1) | (b->base < GABA_EOU)) {
+		case 0x00: _parser_loop_fw(_del_f, _ins_f, _match_ff, _nop); break;
+		case 0x01: _parser_loop_fw(_del_f, _ins_r, _match_fr, _nop); break;
+		case 0x02: _parser_loop_fw(_del_r, _ins_f, _match_rf, _nop); break;
+		case 0x03: _parser_loop_fw(_del_r, _ins_r, _match_rr, _nop); break;
+		default: break;
+	}
+
+	struct gaba_score_s *sc = gaba_dp_malloc(self, sizeof(struct gaba_score_s));
+	sc->score = score;
+	sc->identity = (double)xc / (double)dc;
+	_store_v2i32(&sc->agcnt, _lo_v2i32(gbc, gac));
+	sc->mcnt = dc - xc; sc->xcnt = xc;
+	_store_v2i32(&sc->aicnt, _hi_v2i32(gbc, gac));
+	_store_v2i32(&sc->afgcnt, _lo_v2i32(fbc, fac));
+	_store_v2i32(&sc->aficnt, _hi_v2i32(fbc, fac));
+	return(sc);
+}
+
+/* cleanup macros */
+#undef _hadd_v16i8
+#undef _del
+#undef _del_f
+#undef _del_r
+#undef _ins
+#undef _ins_f
+#undef _ins_r
+#undef _match_core
+#undef _match_ff
+#undef _match_fr
+#undef _match_rf
+#undef _match_rr
+#undef _nop
+
+
+/* context initializations */
 /**
  * @fn gaba_init_restore_default
  */
@@ -3204,7 +3422,7 @@ struct gaba_diff_vec_s gaba_init_diff_vectors(
 static _force_inline
 void gaba_init_phantom(
 	struct gaba_root_block_s *ph,
-	struct gaba_params_s *p)
+	struct gaba_params_s const *p)
 {
 	/* 192 bytes are reserved for phantom block */
 	*_last_phantom(&ph->tail) = (struct gaba_phantom_s){
@@ -3214,12 +3432,21 @@ void gaba_init_phantom(
 		.diff = gaba_init_diff_vectors(p)
 	};
 
-	/* fill root tail object */
+	/*
+	 * fill root tail object
+	 * note on max, mdrop and xd.drop: The max-tracking variables are initialized to keep
+	 * values that correspond to the initial vector at p = -1. This configuration result in
+	 * the first maximum value update occurring at (i, j) = (0, 0) or the origin.
+	 * The max_mask and maximum value are correctly set here and they serve as sentinels
+	 * in the dp_search_max and trace_reload_section loop, especially for non-matching input
+	 * sequences.
+	 */
+	int64_t init_max = -(_max_match(p) + _gap_h(p, 1));
 	ph->tail = (struct gaba_joint_tail_s){
 		/* fill object: coordinate and status */
 		.f = {
-			.max = 0,
-			.stat = CONT | GABA_UPDATE_A | GABA_UPDATE_B,
+			.max = init_max,
+			.status = CONT | GABA_UPDATE_A | GABA_UPDATE_B,
 			.ascnt = 0,    .bscnt = 0,
 			.apos = -_W/2, .bpos = -_W/2,
 			.aid = 0,      .bid = 0,
@@ -3233,9 +3460,9 @@ void gaba_init_phantom(
 		.abrk = 0,     .bbrk = 0,		/* no breakpoint set */
 
 		/* score and vectors */
-		.mdrop = 0,
+		.mdrop = init_max,
 		.ch.w = { [0] = _max_match_base_a(p), [_W-1] = _max_match_base_b(p)<<4 },
-		.xd.drop = { [_W / 2] = _max_match(p) - _gap_v(p, 1) },
+		.xd.drop = { 0 /*[_W / 2] = _max_match(p) - _gap_v(p, 1)*/ },
 		.md = gaba_init_middle_delta(p)
 	};
 
@@ -3248,19 +3475,40 @@ void gaba_init_phantom(
 }
 
 /**
+ * @fn gaba_init_accumulate_score
+ */
+static _force_inline
+v2i64_t gaba_init_accumulate_score(
+	struct gaba_params_s const *p)
+{
+	int64_t acc[2] = { 0, 0 };
+	for(uint64_t i = 0; i < 16; i++) {
+		acc[(i & 0x03) == (i>>2)] += (int64_t)p->score_matrix[i];
+	}
+	return(_loadu_v2i64(acc));
+}
+
+/**
  * @fn gaba_init_dp_context
  */
 static _force_inline
 void gaba_init_dp_context(
 	struct gaba_context_s *ctx,
-	struct gaba_params_s *p)
+	struct gaba_params_s const *p)
 {
+	v2i64_t acc = gaba_init_accumulate_score(p);
+	double m = (double)_hi64(acc) / 4.0, x = (double)_lo64(acc) / 12.0;
+	debug("m(%f), x(%f), xmx(%f)", m, x, x / (m - x));
+
 	/* initialize template, see also: "loaded on init" mark and GABA_DP_CONTEXT_LOAD_OFFSET */
 	ctx->dp = (struct gaba_dp_context_s){
 		/* score vectors */
 		.scv = gaba_init_score_vector(p),
 		.tx = p->xdrop - 128,
 		.tf = p->filter_thresh,
+
+		.gi = -p->gi, .ge = -p->ge, .gfa = -p->gfa, .gfb = -p->gfb,
+		.imx = 1 / (m - x), .xmx = x / (m - x),
 
 		/* input and output options */
 		.head_margin = _roundup(p->head_margin, MEM_ALIGN_SIZE),
@@ -3273,6 +3521,9 @@ void gaba_init_dp_context(
 			[_dp_ctx_index(64)] = &_proot(ctx, 64)->tail
 		}
 	};
+	debug("g(%d, %d, %d, %d), g(%d, %d, %d, %d)",
+		p->gi, p->ge, p->gfa, p->gfb,
+		ctx->dp.gi, ctx->dp.ge, ctx->dp.gfa, ctx->dp.gfb);
 	return;
 }
 
@@ -3288,20 +3539,22 @@ gaba_t *_export(gaba_init)(
 		? *p
 		: (struct gaba_params_s){ { 0 }, 0 }
 	);
-	gaba_init_restore_default(&pi);				/* restore defaults */
-	if(gaba_init_check_score(&pi) != 0) {		/* check the scores are applicable */
-		return(NULL);
-	}
 
 	/* malloc gaba_context_s */
 	struct gaba_context_s *ctx = NULL;
 	if(pi.reserved == NULL) {
+		/* create new context */
+		gaba_init_restore_default(&pi);			/* restore defaults */
+		if(gaba_init_check_score(&pi) != 0) {	/* check the scores are applicable */
+			return(NULL);						/* cannot be instanciated with the score param */
+		}
+
 		if((ctx = gaba_malloc(sizeof(struct gaba_context_s))) == NULL) {
 			return(NULL);
 		}
 		gaba_init_dp_context(ctx, &pi);
 	} else {
-		/* fill phantom objects of existing dp context */
+		/* reuse the previous dp context: fill phantom objects of the context */
 		ctx = (struct gaba_context_s *)pi.reserved;
 	}
 
@@ -3325,9 +3578,7 @@ void _export(gaba_clean)(
  * @fn gaba_dp_init
  */
 struct gaba_dp_context_s *_export(gaba_dp_init)(
-	struct gaba_context_s const *ctx,
-	uint8_t const *alim,
-	uint8_t const *blim)
+	struct gaba_context_s const *ctx)
 {
 	/* malloc stack memory */
 	struct gaba_dp_context_s *self = gaba_malloc(sizeof(struct gaba_dp_context_s) + MEM_INIT_SIZE);
@@ -3354,13 +3605,8 @@ struct gaba_dp_context_s *_export(gaba_dp_init)(
 	/* init mem object */
 	self->mem = (struct gaba_mem_block_s){
 		.next = NULL,
-		.prev = NULL,
 		.size = MEM_INIT_SIZE
 	};
-
-	/* init seq lims */
-	self->alim = alim;
-	self->blim = blim;
 
 	/* return offsetted pointer */
 	return(_export_dp_context(self));
@@ -3375,6 +3621,7 @@ int64_t gaba_dp_add_stack(
 	struct gaba_dp_context_s *self,
 	uint64_t size)
 {
+	debug("add_stack, ptr(%p)", self->stack.mem->next);
 	if(self->stack.mem->next == NULL) {
 		/* current stack is the tail of the memory block chain, add new block */
 		size = MAX2(
@@ -3382,6 +3629,7 @@ int64_t gaba_dp_add_stack(
 			2 * self->stack.mem->size
 		);
 		struct gaba_mem_block_s *mem = gaba_malloc(size);
+		debug("malloc called, mem(%p)", mem);
 		if(mem == NULL) { return(-1); }
 
 		/* link new node to the tail of the current chain */
@@ -3458,7 +3706,7 @@ void *gaba_dp_malloc(
 
 	/* malloc */
 	debug("self(%p), stack_top(%p), size(%lu)", self, self->stack.top, size);
-	if((uint64_t)(self->stack.end - self->stack.top) < size) {
+	if(_stack_size(&self->stack) < size) {
 		if(gaba_dp_add_stack(self, size) != 0) {
 			return(NULL);
 		}
@@ -3494,9 +3742,11 @@ void _export(gaba_dp_clean)(
 	self = _restore_dp_context(self);
 
 	struct gaba_mem_block_s *m = self->mem.next;
+	debug("cleanup memory chain, m(%p)", m);
 	while(m != NULL) {
 		struct gaba_mem_block_s *mnext = m->next;
-		free(m); m = mnext;
+		debug("free m(%p), mnext(%p)", m, mnext);
+		gaba_free(m); m = mnext;
 	}
 	gaba_free(_export_dp_context_global(self));
 	return;
@@ -3504,6 +3754,10 @@ void _export(gaba_dp_clean)(
 
 /* unittests */
 #if UNITTEST == 1
+
+#define UNITTEST_SEQ_MARGIN			( 8 )			/* add margin to avoid warnings in the glibc strlen */
+#define UNITTEST_GABA_HEAD_MARGIN	( 0 )
+#define UNITTEST_GABA_TAIL_MARGIN	( 64 )
 
 #include <string.h>
 #include <sys/types.h>
@@ -3569,9 +3823,8 @@ unittest()
  */
 unittest()
 {
-	uint8_t const *lim = (uint8_t const *)0x800000000000;
 	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx;
-	struct gaba_dp_context_s *d = _export(gaba_dp_init)(c, lim, lim);
+	struct gaba_dp_context_s *d = _export(gaba_dp_init)(c);
 
 	assert(d != NULL, "%p", d);
 	_export(gaba_dp_clean)(d);
@@ -3590,68 +3843,67 @@ int ut_printer(
 	return(len);
 }
 
+#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0, 0, 0 } + 2 )
 unittest()
 {
 	char *buf = (char *)malloc(16384);
 	char *p = buf;
 
-	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55), 0, 8);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "6M4D8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "6M4I8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "6M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "6M5I8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_print_cigar_forward(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "2D5M5I8M1I5M5D8M") == 0, "%s", buf);
 
-	#undef _arr
 	free(buf);
 }
 
@@ -3660,63 +3912,61 @@ unittest()
 	char *buf = (char *)malloc(16384);
 	char *p = buf;
 
-	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55), 0, 8);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "8M4D6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "8M4I6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "8M5D6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
 	p = buf;
-	gaba_dp_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_print_cigar_reverse(ut_printer, (void *)&p, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I5M2D") == 0, "%s", buf);
 
-	#undef _arr
 	free(buf);
 }
 
@@ -3726,50 +3976,48 @@ unittest()
 	uint64_t const len = 16384;
 	char *buf = (char *)malloc(len);
 
-	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555), 0, 32);
+	gaba_dump_cigar_forward(buf, len, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
+	gaba_dump_cigar_forward(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	gaba_dump_cigar_forward(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	gaba_dump_cigar_forward(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	gaba_dump_cigar_forward(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55), 0, 8);
+	gaba_dump_cigar_forward(buf, len, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	gaba_dump_cigar_forward(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x55550555), 0, 32);
+	gaba_dump_cigar_forward(buf, len, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "6M4D8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0x5555f555), 0, 32);
+	gaba_dump_cigar_forward(buf, len, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "6M4I8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaaa0555), 0, 33);
+	gaba_dump_cigar_forward(buf, len, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "6M5D8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555), 0, 33);
+	gaba_dump_cigar_forward(buf, len, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "6M5I8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	gaba_dump_cigar_forward(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dump_cigar_forward(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "6M5I8M1I5M5D8M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_forward(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dump_cigar_forward(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "2D5M5I8M1I5M5D8M") == 0, "%s", buf);
 
-	#undef _arr
 	free(buf);
 }
 
@@ -3778,52 +4026,51 @@ unittest()
 	uint64_t const len = 16384;
 	char *buf = (char *)malloc(len);
 
-	#define _arr(...)		( (uint32_t const []){ 0, 0, __VA_ARGS__, 0, 0 } + 2 )
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555), 0, 32);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x55555555), 0, 32);
 	assert(strcmp(buf, "16M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x55555555, 0x55555555), 0, 64);
 	assert(strcmp(buf, "32M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x55555555, 0x55555555, 0x55555555, 0x55555555), 0, 128);
 	assert(strcmp(buf, "64M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x55550000, 0x55555555, 0x55555555, 0x55555555), 16, 112);
 	assert(strcmp(buf, "56M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55555555), 12, 116);
 	assert(strcmp(buf, "58M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55), 0, 8);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x55), 0, 8);
 	assert(strcmp(buf, "4M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x55555000, 0x55555555, 0x55555555, 0x55), 12, 92);
 	assert(strcmp(buf, "46M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x55550555), 0, 32);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x55550555), 0, 32);
 	assert(strcmp(buf, "8M4D6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0x5555f555), 0, 32);
+	gaba_dump_cigar_reverse(buf, len, _arr(0x5555f555), 0, 32);
 	assert(strcmp(buf, "8M4I6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaaa0555), 0, 33);
+	gaba_dump_cigar_reverse(buf, len, _arr(0xaaaa0555), 0, 33);
 	assert(strcmp(buf, "8M5D6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555), 0, 33);
+	gaba_dump_cigar_reverse(buf, len, _arr(0xaaabf555), 0, 33);
 	assert(strcmp(buf, "8M5I6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
+	gaba_dump_cigar_reverse(buf, len, _arr(0xaaabf555, 0xaaaa0556), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dump_cigar_reverse(buf, len, _arr(0xaaabf555, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I6M") == 0, "%s", buf);
 
-	gaba_dp_dump_cigar_reverse(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
+	gaba_dump_cigar_reverse(buf, len, _arr(0xaaabf554, 0xaaaa0556, 0xaaaaaaaa), 0, 65);
 	assert(strcmp(buf, "8M5D5M1I8M5I5M2D") == 0, "%s", buf);
 
-	#undef _arr
 	free(buf);
 }
+#undef _arr
 
 /* cross tests */
 /**
@@ -3868,8 +4115,8 @@ void unittest_naive_init_section(
 
 	/* calc length */
 	uint64_t acnt = 0, bcnt = 0;
-	while(*++abnd != 0) { acnt++; } w->abnd = abnd - 1;
-	while(*++bbnd != 0) { bcnt++; } w->bbnd = bbnd - 1;
+	while(abnd[0] < apos && abnd[1] != 0) { debug("acnt(%lu), abnd(%lu, %lu, %lu), apos(%lu)", acnt, abnd[0], abnd[1], abnd[2], apos); abnd++; acnt++; } w->abnd = abnd;
+	while(bbnd[0] < bpos && bbnd[1] != 0) { debug("bcnt(%lu), bbnd(%lu, %lu, %lu), bpos(%lu)", bcnt, bbnd[0], bbnd[1], bbnd[2], bpos); bbnd++; bcnt++; } w->bbnd = bbnd;
 
 	w->aid = acnt - 1;
 	w->bid = bcnt - 1;
@@ -3886,6 +4133,7 @@ void unittest_naive_test_section(
 	uint64_t aadv, uint64_t badv)
 {
 	if(pos.apos - aadv < w->abnd[-1] || pos.bpos - badv < w->bbnd[-1]) {
+		debug("advance sec, a(%lu, %lu, %lu, %lu), b(%lu, %lu, %lu, %lu)", pos.apos, aadv, w->abnd[-1], w->appos, pos.bpos, badv, w->bbnd[-1], w->bppos);
 		*w->ptr-- = (struct unittest_naive_section_pair_s){
 			.aid = w->aid, .apos = pos.apos - w->abnd[-1], .alen = w->appos - pos.apos,
 			.bid = w->bid, .bpos = pos.bpos - w->bbnd[-1], .blen = w->bppos - pos.bpos,
@@ -3895,8 +4143,8 @@ void unittest_naive_test_section(
 
 		w->appos = pos.apos;
 		w->bppos = pos.bpos;
-		if(pos.apos <= w->abnd[-1]) { w->abnd--; w->aid--; }
-		if(pos.bpos <= w->bbnd[-1]) { w->bbnd--; w->bid--; }
+		if(pos.apos - aadv < w->abnd[-1]) { w->abnd--; w->aid--; }
+		if(pos.bpos - badv < w->bbnd[-1]) { w->bbnd--; w->bid--; }
 	}
 	return;
 }
@@ -3916,6 +4164,7 @@ struct unittest_naive_section_pair_s *unittest_naive_finalize_section(
 	memmove(w->sec, w->ptr, w->scnt * sizeof(struct unittest_naive_section_pair_s));
 	w->sec[w->scnt] = (struct unittest_naive_section_pair_s){ 0 };
 	*cnt = w->scnt;
+	debug("scnt(%lu)", w->scnt);
 	return(w->sec);
 }
 
@@ -3935,14 +4184,13 @@ struct unittest_naive_section_pair_s *unittest_naive_finalize_section(
  * @brief naive implementation of the forward semi-global alignment algorithm
  * left-aligned gap and left-aligned deletion
  */
-#define UNITTEST_SEQ_MARGIN			( 8 )			/* add margin to avoid warnings in the glibc strlen */
 static
 struct unittest_naive_result_s unittest_naive(
 	struct gaba_params_s const *sc,
 	char const *a, char const *b,
 	uint64_t const *abnd, uint64_t const *bbnd)
 {
-	debug("a(%s), b(%s)", a, b);
+	// debug("a(%s), b(%s)", a, b);
 	/* utils */
 	#define _a(p, q, plen)	( (q) * ((plen) + 1) + (p) )
 	#define s(p, q)			_a(p, 3*(q), alen)
@@ -3956,8 +4204,8 @@ struct unittest_naive_result_s unittest_naive(
 	int8_t x = -_hmax_v16i8(_sub_v16i8(_zero_v16i8(), scv));
 	int8_t gi = -sc->gi;
 	int8_t ge = -sc->ge;
-	int8_t gfa = sc->gfa == 0 ? gi + ge : -sc->gfa;
-	int8_t gfb = sc->gfb == 0 ? gi + ge : -sc->gfb;
+	int8_t gfa = sc->gfa == 0 ? gi + 2 * ge : -sc->gfa;
+	int8_t gfb = sc->gfb == 0 ? gi + 2 * ge : -sc->gfb;
 
 	/* calc lengths */
 	uint64_t alen = strlen(a);
@@ -3968,7 +4216,9 @@ struct unittest_naive_result_s unittest_naive(
 
 	/* malloc matrix */
 	int64_t *mat = (int64_t *)malloc(
-		3 * (alen + 1) * (blen + 1) * sizeof(int64_t));
+		3 * (alen + 1) * (blen + 1) * sizeof(int64_t)
+	);
+	if(mat == NULL) { trap(); }
 
 	/* init */
 	struct unittest_pos_score_s max = { 0, 0, 0 };
@@ -4029,7 +4279,8 @@ struct unittest_naive_result_s unittest_naive(
 			curr.bpos--;
 			result.path[--path_index] = 'D';
 		} else if(mat[s(curr.apos, curr.bpos)] == mat[f(curr.apos, curr.bpos)]) {
-			while(curr.bpos > 1 && mat[f(curr.apos, curr.bpos)] == mat[f(curr.apos, curr.bpos - 1)] + ge) {
+			while(curr.bpos > 1 && mat[f(curr.apos, curr.bpos)] != mat[s(curr.apos, curr.bpos - 1)] + gi + ge) {
+			// while(curr.bpos > 1 && mat[f(curr.apos, curr.bpos)] == mat[f(curr.apos, curr.bpos - 1)] + ge) {
 				unittest_naive_test_section(&w, curr, 0, 1);
 				curr.bpos--;
 				result.path[--path_index] = 'D';
@@ -4042,7 +4293,8 @@ struct unittest_naive_result_s unittest_naive(
 			curr.apos--;
 			result.path[--path_index] = 'R';
 		} else if(mat[s(curr.apos, curr.bpos)] == mat[e(curr.apos, curr.bpos)]) {
-			while(curr.apos > 1 && mat[e(curr.apos, curr.bpos)] == mat[e(curr.apos - 1, curr.bpos)] + ge) {
+			while(curr.apos > 1 && mat[e(curr.apos, curr.bpos)] != mat[s(curr.apos - 1, curr.bpos)] + gi + ge) {
+			// while(curr.apos > 1 && mat[e(curr.apos, curr.bpos)] == mat[e(curr.apos - 1, curr.bpos)] + ge) {
 				unittest_naive_test_section(&w, curr, 1, 0);
 				curr.apos--;
 				result.path[--path_index] = 'R';
@@ -4076,7 +4328,7 @@ struct unittest_naive_result_s unittest_naive(
 }
 
 #if MODEL == LINEAR
-unittest()
+unittest( .name = "naive" )
 {
 	struct gaba_params_s const *p = unittest_default_params;
 	struct unittest_naive_result_s n;
@@ -4106,7 +4358,7 @@ unittest()
 	free(n.path); free(n.sec);
 }
 #elif MODEL == AFFINE
-unittest()
+unittest( .name = "naive" )
 {
 	struct gaba_params_s const *p = unittest_default_params;
 	struct unittest_naive_result_s n;
@@ -4141,7 +4393,7 @@ unittest()
 	free(n.path); free(n.sec);
 }
 #else /* COMBINED */
-unittest()
+unittest( .name = "naive" )
 {
 	struct gaba_params_s const *p = unittest_default_params;
 	struct unittest_naive_result_s n;
@@ -4260,16 +4512,20 @@ uint64_t *unittest_build_section_array(char const *const *p)
 }
 
 static
-struct gaba_section_s *unittest_build_section_forward(char const *const *p)
+struct gaba_section_s *unittest_build_section_forward(char const *const *p, uint64_t pos)
 {
 	struct gaba_section_s *s = calloc(UNITTEST_MAX_SEQ_CNT + 1, sizeof(struct gaba_section_s));
 
-	uint64_t len = 256;
+	uint64_t len = pos + UNITTEST_GABA_HEAD_MARGIN + UNITTEST_GABA_TAIL_MARGIN;
 	for(char const *const *q = p; *q != NULL; q++) { len += strlen(*q) + 1; }
-	char *b = calloc(1, len), *a = b; a += 128;
+	char *a = calloc(1, len); a += pos + UNITTEST_GABA_HEAD_MARGIN;
 	uint64_t i = 0;
 	while(p[i] != NULL) {
-		s[i] = gaba_build_section(i * 2, a, strlen(p[i]));
+		if(i == 0) {
+			s[i] = gaba_build_section(i * 2, a - pos, strlen(p[i]) + pos);
+		} else {
+			s[i] = gaba_build_section(i * 2, a, strlen(p[i]));
+		}
 		for(char const *r = p[i]; *r != '\0'; r++) {
 			*a++ = unittest_encode_base(*r);
 		}
@@ -4281,16 +4537,20 @@ struct gaba_section_s *unittest_build_section_forward(char const *const *p)
 }
 
 static
-struct gaba_section_s *unittest_build_section_reverse(char const *const *p)
+struct gaba_section_s *unittest_build_section_reverse(char const *const *p, uint64_t pos)
 {
 	struct gaba_section_s *s = calloc(UNITTEST_MAX_SEQ_CNT + 1, sizeof(struct gaba_section_s));
 
-	uint64_t len = 256;
+	uint64_t len = pos + UNITTEST_GABA_HEAD_MARGIN + UNITTEST_GABA_TAIL_MARGIN;
 	for(char const *const *q = p; *q != NULL; q++) { len += strlen(*q) + 1; }
-	char *b = calloc(1, len), *a = b; a += 128;
+	char *a = calloc(1, len); a += pos + UNITTEST_GABA_HEAD_MARGIN;
 	uint64_t i = 0;
 	while(p[i] != NULL) {
-		s[i] = gaba_build_section(i * 2 + 1, a, strlen(p[i]));
+		if(i == 0) {
+			s[i] = gaba_build_section(i * 2 + 1, a - pos, strlen(p[i]) + pos);
+		} else {
+			s[i] = gaba_build_section(i * 2 + 1, a, strlen(p[i]));
+		}
 		for(char const *r = p[i] + strlen(p[i]); r > p[i]; r--) {
 			*a++ = unittest_encode_base(r[-1]);
 		}
@@ -4304,8 +4564,8 @@ struct gaba_section_s *unittest_build_section_reverse(char const *const *p)
 static
 void unittest_clean_section(struct unittest_sec_pair_s *s)
 {
-	free((char *)s->a[0].base + s->apos - 128);
-	free((char *)s->b[0].base + s->bpos - 128);
+	free((char *)s->a[0].base - UNITTEST_GABA_HEAD_MARGIN);
+	free((char *)s->b[0].base - UNITTEST_GABA_HEAD_MARGIN);
 	free(s->a); free(s->b);
 	free(s);
 	return;
@@ -4314,11 +4574,11 @@ void unittest_clean_section(struct unittest_sec_pair_s *s)
 static
 struct unittest_sec_pair_s *unittest_build_section(
 	struct unittest_seq_pair_s const *p,
-	struct gaba_section_s *(*build_section)(char const *const *))
+	struct gaba_section_s *(*build_section)(char const *const *, uint64_t))
 {
 	struct unittest_sec_pair_s *s = malloc(sizeof(struct unittest_sec_pair_s));
-	s->a = build_section(p->a); s->apos = rand() % 64; s->a[0].base -= s->apos; s->a[0].len += s->apos;
-	s->b = build_section(p->b); s->bpos = rand() % 64; s->b[0].base -= s->bpos; s->b[0].len += s->bpos;
+	s->apos = rand() % 64; s->a = build_section(p->a, s->apos);
+	s->bpos = rand() % 64; s->b = build_section(p->b, s->bpos);
 	return(s);
 }
 
@@ -4332,12 +4592,12 @@ struct gaba_fill_s const *unittest_dp_extend(
 	struct gaba_fill_s const *f = _export(gaba_dp_fill_root)(dp, a, p->apos, b, p->bpos, 0);
 
 	gaba_fill_t const *m = f;
-	while((f->stat & GABA_TERM) == 0) {
-		if(f->stat & GABA_UPDATE_A) {
+	while((f->status & GABA_TERM) == 0) {
+		if(f->status & GABA_UPDATE_A) {
 			a++;
 			debug("update a(%u, %u, %p, %s)", a->id, a->len, a->base, a->base);
 		}
-		if(f->stat & GABA_UPDATE_B) {
+		if(f->status & GABA_UPDATE_B) {
 			b++;
 			debug("update b(%u, %u, %p, %s)", b->id, b->len, b->base, b->base);
 		}
@@ -4350,15 +4610,16 @@ struct gaba_fill_s const *unittest_dp_extend(
 
 static
 int unittest_check_maxpos(
-	uint32_t id,
-	uint32_t pos,
-	uint64_t ofs,
-	uint64_t len,
+	uint32_t id,				/* pos->id */
+	uint32_t pos,				/* pos->pos */
+	uint64_t ofs,				/* length before head */
+	uint64_t len,				/* nr.len */
 	struct gaba_section_s const *sec)
 {
 	int64_t acc = 0;
+	debug("id(%u), pos(%u), ofs(%lu), len(%lu)", id, pos, ofs, len);
 	while(acc + sec->len < ofs + len) { acc += sec++->len; }
-	return((id == sec->id && ofs + len - 1 == pos + acc) ? 1 : 0);
+	return((id == sec->id && ofs + len/* - 1*/ == pos + acc) ? 1 : 0);
 }
 
 static
@@ -4436,8 +4697,70 @@ int unittest_check_section(
 		if(aln->seg[i].blen != sec[i].blen) { rc = 0; }
 		if(aln->seg[i].ppos != sec[i].ppos) { rc = 0; }
 	}
+	for(uint64_t i = scnt; i < aln->slen; i++) {
+		debug("gaba rem, a(%u, %u, %u), b(%u, %u, %u), p(%lu)",
+			aln->seg[i].aid, aln->seg[i].apos, aln->seg[i].alen, aln->seg[i].bid, aln->seg[i].bpos, aln->seg[i].blen, aln->seg[i].ppos);
+	}
+	for(uint64_t i = aln->slen; i < scnt; i++) {
+		debug("naive rem, a(%lu, %lu, %lu), b(%lu, %lu, %lu), p(%lu)",
+			sec[i].aid, sec[i].apos, sec[i].alen, sec[i].bid, sec[i].bpos, sec[i].blen, sec[i].ppos);
+	}
 	return(rc);
 }
+
+static
+char *string_pair_diff(
+	char const *a,
+	char const *b)
+{
+	uint64_t len = 2 * (strlen(a) + strlen(b));
+	char *base = malloc(len);
+	char *ptr = base, *tail = base + len - 1;
+	uint64_t state = 0;
+
+	#define push(ch) { \
+		*ptr++ = (ch); \
+		if(ptr == tail) { \
+			base = realloc(base, 2 * len); \
+			ptr = base + len; \
+			tail = base + 2 * len; \
+			len *= 2; \
+		} \
+	}
+	#define push_str(str) { \
+		for(uint64_t i = 0; i < strlen(str); i++) { \
+			push(str[i]); \
+		} \
+	}
+
+	uint64_t i;
+	for(i = 0; i < MIN2(strlen(a), strlen(b)); i++) {
+		if(state == 0 && a[i] != b[i]) {
+			push_str("\x1b[31m"); state = 1;
+		} else if(state == 1 && a[i] == b[i]) {
+			push_str("\x1b[39m"); state = 0;
+		}
+		push(a[i]);
+	}
+	if(state == 1) { push_str("\x1b[39m"); state = 0; }
+	for(; i < strlen(a); i++) { push(a[i]); }
+
+	push('\n');
+	for(uint64_t i = 0; i < strlen(b); i++) {
+		push(b[i]);
+	}
+
+	push('\0');
+	return(base);
+}
+#define format_string_pair_diff(_a, _b) ({ \
+	char *str = string_pair_diff(_a, _b); \
+	char *copy = alloca(strlen(str) + 1); \
+	strcpy(copy, str); \
+	free(str); \
+	copy; \
+})
+#define print_string_pair_diff(_a, _b)		"\n%s", format_string_pair_diff(_a, _b)
 
 static
 void unittest_test_pair(
@@ -4445,9 +4768,12 @@ void unittest_test_pair(
 	struct gaba_dp_context_s *dp,
 	struct unittest_seq_pair_s const *pair)
 {
+	#define FMT			"[%s:%d] { .a = { \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\" }, .b = { \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\" } }"
+	#define ARG			MODEL_STR, _W, pair->a[0], pair->a[1], pair->a[2], pair->a[3], pair->a[4], pair->a[5], pair->b[0], pair->b[1], pair->b[2], pair->b[3], pair->b[4], pair->b[5]
+
 	/* prepare sequences */
-	char *a = unittest_cat_seq(pair->a); debug("a(%s)", a);
-	char *b = unittest_cat_seq(pair->b); debug("b(%s)", b);
+	char *a = unittest_cat_seq(pair->a);
+	char *b = unittest_cat_seq(pair->b);
 
 	uint64_t *asec = unittest_build_section_array(pair->a);
 	uint64_t *bsec = unittest_build_section_array(pair->b);
@@ -4471,21 +4797,24 @@ void unittest_test_pair(
 	struct gaba_fill_s const *m = unittest_dp_extend(dp, s);
 
 	assert(m != NULL);
-	assert(m->max == nr.score, "a(%s), b(%s), m->max(%ld), nr.score(%d)", a, b, m->max, nr.score);
+	assert(m->max == nr.score, FMT ", m->max(%ld), nr.score(%d)", ARG, m->max, nr.score);
 
 	/* test max pos */
 	struct gaba_pos_pair_s const *p = _export(gaba_dp_search_max)(dp, m);
 	assert(p != NULL);
-	assert(unittest_check_maxpos(p->aid, p->apos, s->apos, nr.alen, s->a), "a(%s), b(%s)", a, b);
-	assert(unittest_check_maxpos(p->bid, p->bpos, s->bpos, nr.blen, s->b), "a(%s), b(%s)", a, b);
+	assert(unittest_check_maxpos(p->aid, p->apos, s->apos, nr.alen, s->a), FMT, ARG);
+	assert(unittest_check_maxpos(p->bid, p->bpos, s->bpos, nr.blen, s->b), FMT, ARG);
 
 	/* test path */
 	struct gaba_alignment_s const *r = _export(gaba_dp_trace)(dp, m, NULL);
 
 	assert(r != NULL);
-	assert(r->plen == nr.path_length, "a(%s), b(%s), m->plen(%lu), nr.path_length(%u)", a, b, r->plen, nr.path_length);
-	assert(unittest_check_path(r, nr.path), "a(%s), b(%s), r->path(%s), nr.path(%s)", a, b, unittest_decode_path(r), nr.path);
-	assert(unittest_check_section(r, nr.sec, nr.scnt), "a(%s), b(%s)", a, b);
+	assert(r->plen == nr.path_length, FMT ", m->plen(%lu), nr.path_length(%u)", ARG, r->plen, nr.path_length);
+	assert(unittest_check_path(r, nr.path), "\n%s", ARG, format_string_pair_diff(unittest_decode_path(r), nr.path));
+	assert(unittest_check_section(r, nr.sec, nr.scnt), FMT, ARG);
+
+	/* calc score */
+	struct gaba_score_s const *c = _export(gaba_dp_calc_score)(dp, r->path, &r->seg[0], &s->a[0], &s->a[0]);
 
 	/* cleanup everything */
 	unittest_clean_section(s);
@@ -4496,9 +4825,12 @@ void unittest_test_pair(
 	free(nr.path);
 	free(nr.sec);
 	return;
+
+	#undef FMT
+	#undef ARG
 }
 
-unittest()
+unittest( .name = "base" )
 {
 	struct unittest_seq_pair_s pairs[] = {
 		/**
@@ -4580,12 +4912,170 @@ unittest()
 		{
 			.a = { "AAGGGTCGCCAATTG" },
 			.b = { "AAGGGTCGCCAATTG" }
+		},
+		/* non-matching sequences */
+		{
+			.a = { "TCTGCGGTAACATCCGCTAC" },
+			.b = { "CACGAGGTTCATCGGGTACT" }
+		},
+		{
+			.a = { "CCTACTGAGTTT" },
+			.b = { "ACATGGCAGTTT" }
+		},
+		/* collection of SEGVd sequences */
+		{
+			.a = { "TAGGTGTACCGAG" },
+			.b = { "CCTGTATACCGGC" }
+		},
+		{
+			.a = { "TGTATGCACGGATGATCCAGCTCTAATGGATGG" },
+			.b = { "TATACGGGATGGGTGTGATCCACTCTAATGGAT" }
+		},
+		{
+			.a = { "GCAGATGGTCCCTCCTAATGAAGCTCGCTGACT" },
+			.b = { "GGTAGAGGTCCCTCCTAATGAAGCTCGCTGACT" }
+		},
+		{
+			.a = { "GAATTTGGCCGGCGGATGCTTATGGATGGTTATTTGGCATGTGACAACG" },
+			.b = { "GAATTGCCTGGCGGATGTTATGATGTTTTTTGGCTTGTGACATACGATA" }
+		},
+		{
+			.a = { "GGAGTCCCGAATTGCTAAGGCGTCATGAAATGGTAGACTTGTGCCTAGAGACAT" },
+			.b = { "GGAGTCCGAGTTGTAAGGCGTCATGGAATGGAGACTTGTGCCTAGAGACATCCG" }
+		},
+		{
+			.a = { "CGCGGTAACTACGCAACTGACCGTTAAGGTCTCGGTCGTTCTATCCTGACGCGA" },
+			.b = { "CGCGGTCACCACGCAACTGACTGTTAAGGTCTCGGTCGTTCTAACTGAGCGACC" }
+		},
+		{
+			.a = { "GGTGGGTTACTGAGCATCCTCCCTAAGTTCACTTTCCGAGATAACCAATCAATCTTG" },
+			.b = { "GGGGGGTTTCCTGAGCTACTCCCTCCAGTTCCCCATTCACCGAGATAGCCAATCAAT" }
+		},
+		{
+			.a = { "GTCTTACGAACAGAGACGT" },
+			.b = { "GACTTCTCTGGACTGACACGT" }
+		},
+		{
+			.a = { "TGGTAGTAGTCGCATACAGTACCTCTAGTCTTACGAACAGAGACGT" },
+			.b = { "TGCTAGTAGTGGCATACAGTAGCCTCCTGACTTCTCTGGACTGACACGT" }
+		},
+		{
+			.a = { "GGATCGAGCAACCTGGTAGTAGTCGCATACAGTACCTCTAGTCTTACGAACAGAGACGTGTAATAGATTTACTCAGCGACGGGAGAAAGTGGTGCAACTAATCTC" },
+			.b = { "GGATCGGGCTACTGCTAGTAGTGGCATACAGTAGCCTCCTGACTTCTCTGGACTGACACGTCGGTACTAGATTTACTAGCGACGGGAGAAAAAGTCACATACTCA" }
+		},
+		/* debugging memory */
+		{
+			.a = { "GCTCTGACCGTGTTGAGAATATCGGGTTTCGGGCTCATGCCCTACGATGCGTA" },
+			.b = { "GGTTGACCGTGTTGAGAATATCGGGTTTCGGGCTCATGCCCTACATGCTTTAA" }
+		},
+		/* debugging section boundaries; non-matching sequence (eaten as a gap) at the head */
+		{
+			.a = {
+				"G",
+				"TAGGACACTCAGAAGAGCTTGGATATTATGGGGAAGCCTAGTTGTCGCGCAAACAAATAACGGTGTCAAAAGTTATAGAGACTAGTAGGCGATCTGACGACGGCGGA",
+				"AACACAATTCG",
+				"GACCCCTCGCCTATAGCAAGCCGGCTGAAAGGATTGATTGACGAAGGGTTAAAGGGCAGCAATCATTAGGTGTCTATCGGAGGCACTGCCTGGT",
+				"GGGGAACG",
+				"GCAGTGATATAAATGCCGTTCGCTATTCCCCTTCCGTGCTCGTCCGGGAGCCAGACGTGTATGTAACTGTGTCCAGTGCTAGACCAGTTAGATATTACGGAACCCCTCAAAATCCACTTCTCCGCACGCTACTGGCTGGTGGACTCCCCAGACTTTTACCACGTTCATTGGCCGTAAACCCTCGGACGCGTCACATGCGCTCTATGCTGGATGGGAGTGTGCAGTCCCGATCCGGAATAGCAGTGAACTGACACTTGCAACTCGCTGCGGAATGTCGTGC"
+			},
+			.b = {
+				"T",
+				"GTCGGGAACTCAGAAGATCTCTGATATATTTATGGGGAAGCTAGTTGTCCGCAGACAAATAAAGGTGTCAAAAGTTATAGAGACTAGTAGGGATCTGACGACTGGCG",
+				"AAACAATTCGA",
+				"AACCCCTCGCCTTAAAAGCCGGCTGAAATGATTGATTGACGAAGGGTTCATGGGCAGCAATCCATTTCAGGTGTTATCGGAGCAAATGTCTGGT",
+				"GTGGAAAC",
+				"GCAGTGATAGAAATCATGTTCTCTATTCCCCTTCCGTGCTCGTCCGGTGCTAGACGAGTTTGTTACTGTGTCCAATGCTAGACCAGTTTGAGATTACTAAACCCCCAAACTCCACTTCTCCGACGCTAAGTGCTGGCGGACTCCCCAGACGTTTACCCCGTTCATTGGCGTAAACCCTCGTGATGCGTGCACACGCGCTCTATACTGCATGGAGTGCGCAGTCCCGAATCGGAATAGCAATGTACCTGTAACATGCAGCTCACTGCGGAATATACGTGCC"
+			}
+		},
+		/* debugging init_fetch (BW = 64) */
+		{
+			.a = { "GGGGCTAGCAGCATCATTCTGTCCCGGAAA" },
+			.b = { "GGGCGCGAGCAGCGAAATTCGGCCAAAAA" }
+		},
+		/* debugging section boundaries */
+		{
+			.a = {
+				"T",
+				"AGGCACTCCCGTACTGGG",
+				"TGA",
+				"CGGGGGGTTACAAGTCAAATACGGTCCTTCAAAGTGACCTCGACATTAATAAAGTTTAGTCGTCAGTCTAAAGAGTACTAATAAGTTCTGACAAGCGGGGGGGCTAATCTTCTTCCTCGGTTTTTGACAGTGCGTAGTTATGCGCTTAAC",
+				"TAGGTATCACATGGGGCGCCCTGTCCGCCTAAATTTTGAATCTGTCAATGCACATGCCAT",
+				"AT"
+			},
+			.b = {
+				"T",
+				"AGGCACTCTCCGTACATTGTG",
+				"TGA",
+				"CGCAGGGTTACAAGTCAATGCGGTTCCTTCAAAGGATTCTCACATTATAAAGGGTTGGTCGCGTCTAAAGATGTACTAATAAGCTCTGACACGCGGGGGAGCTAATCGTCTTCCTAGTGTCTTTAACAGTCGCGTAATGATGCGCTTAAC",
+				"TTGGGATCACAGGGGCGCTGTCGCCTAAATTTTGAATCTGTCAATGCACATGCCACT",
+				"AT"
+			}
+		},
+		{
+			.a = {
+				"CTCACTGCCACACACGGTTCG",
+				"ACCCACTTTAGCATATCC",
+				"GCCTTTCG",
+				"GCTTGAAGGTCCAAGATGTATTTCAGATTGGGTCCGGCAAAGCAGACCGAGGTCTTTTTGCCACGCTAGTATCGTTGACACTGAACATATCGAGTGTGTGCTCTCAGTCTAGGGGGAGCACTGCCCAATTGCGTAAAGTCGTTAGCTGAAGCTCTAGTCGGTTATTATCAATTTACATTATGGTTCTCAATGAGGTCTGTTGGGCGACCTGCCAAACTGCACTAACTCACATTTGACGCTCTATTATATCCTTATTGGAGTCGGAAGCGAATTAGTAGTATCTGCTCTCGGCTATTAGAGGCCCCAAGGAGCCCAGACGGTATGAGCAAGGGTTAATAGCAATCGTAGAGAAGTGGGAGGGACCTCCTCAAGATTGGTCTCCTTCCCTCTCTTGATTGGCGGTGGGCAGGTTTGTAAATCACCTTCGTTAACTTACCCCTTCTGTGTTGGCGTGGTTAGTCGAACACGCGGATCTTTGGCATAACGT",
+				"GCATTATACAGGTATGCGCAAAGATGACATGGAGGTGCTTGGGCGCTATCATCGTAAACATTTACCTAGTTACCCTGCTCGAATGATTAC",
+				"TAGTGTTG"
+			},
+			.b = {
+				"GTGTCGCTGCCCTCACACCGCTCG",
+				"ACCACTTTAGCATTCC",
+				"GCCTTTGG",
+				"GCTTGAAGGTCCAAGCTGTATTTCAGATTGGGTCGGCTAAGCAGACTGAGGTCTATTTGCACACGCTAGTATCGGTGACACTTCACATATTCGAGTGTGCGCTCTCAAGTCTAGGGGAGCACGCCGACATTGCGTAAAGTCAGTTAGATAGAAGCTCTAAGTCGGTAATTATTAAGTATCATTATGGGTCTCCAGAGGTCTGTTGGGGACCTGCCAAACTGCACTAACTCACATTTGCGCTTATTATATCACTTATTGGAATCGGAAGTGAATTAGTAGTATCTGCTCTCGGCTATTAGAGGCCCCCATGACTCAGCGCGATGAGACCAAGGTCAAGTACCAATCGTAGAGTAAGGCGAGAATCCTCCTTCAGATCGGCTCTTCCCTCTCTTGATTGGCGGTGGGCAGATTTATAATCACCTTCGTTAACCCAGCCCTTACTGTGTTGTCGATGGTAAGTCGAGACCCCGGATCTTTGGCATAAGT",
+				"GCATTATACAGGGATGGCCAAGTTGACACGGAGTGCTGGGCGCATTTTCGTAAACATTTACCTAGATTACCATGCTCGAATCAGATTAAGC",
+				"TAGTGGTTG"
+			}
+		},
+		{
+			.a = {
+				"TCACCTCG",
+				"CG",
+				"CTCAACGCAC",
+				"TTTGCTTAGCATGAAACGTGTGAAGCGTCTAATAGATGCCTCCCCCGTTCCTTCTCGCATACTTCGAAACCTGGAAAGTTTAGGGCTAGAATCTGGCGGCTTAGGCGGTCCTCACTCCAACATGTCACAGGTCTCTATCTATGGTACACCAGCTACCAGCGAATTGTTCATGTCAGCCTGTTAATACAATCGACGTTCTCCGTCTTTCAGTTGAACACCCCGTCTCATGTAACTCCGAGGTCGCCGGGTTTACGCAAGTGCTGTGTAAAGTTTCACTGTGCGTGAAGAGGTACCTACTACCTAAAACTGAGTGCCTCTTACGATATTCGTGTTGTTGCTACCTAGATTTGTCCTACGTGAGATCGTCAAAACCTCTTAGGTGTACTCAGTACTAGCTTCTTCAAAGTTGGCCACCCAGCTCGAAGGCCGGACTAGTGCGCTAGTCACCGGAAAAAGTGTCATGAAATGGGTCGGCTGGAAACACCCTATTCTGATGATCGCAATGCGATGCTTCACGACCTTCCTAATTCGACGTATCAGACCTTGACGGTCCAGAAGTATCACTACGCCACTGCGACTGTGTAGCATAATTCTACTCTCTAGGGTAGCTAAGTCAACTACGATGAACGTGCTCTCATTCGTGAGTCTAATGTTCCACGGACTAGGCGCCATAGATCCGCCCTACACCCATGCGGTATCCACACTAAACGGTTCTAGCCTCACGGTCGTGTTAAATAAAGGGCGTAGCCACGAGATGCCCACAACCTCCTTACAGCCAGGATCCGCAATCCTGCTTGGCAGAATCGAGGTATGCAATAAGCCCATATCGACACCAGTAAGTACGGCGCCTTGAAGTAGCGGGTTATCTTCCTGGCATTCAGATTACGATTGGGCCGATCAATTGCAGCTTCGTACTGTTCTGTCTCTAAAAATTTCTCGGCTAAACAGCTTACTCCAACAACAAATCTCTCGGGGGTGAAGAATTCATCCTGGTGGTTCAGTGACATATTCCTCAGTCCAGAGCAATTTCTCACGCCCCAAGCAAGGTTATCAGGAGGTGTGTTTCACGCCTATTACCTACGCGAAGTGGCCAAAAGACACGTCCGCGAAGCTATTAGGGATTAATAGTCGAAGGCATAAAGGTGCGGTCATATAAGAGCGCGGTATTTTATGGGATCTTGTGGTGTCTCTCGCTCCGCAGCAATGAGTTCCTAAGGTTCAGGTTCAAACCGGCGCTGATGCACCATATGCACATACTCCCGTTTCCGACCGGGTAGGAGACGCCCGTATACCACACGGCTATCGGCAACGCTAGACATGTATAAAACGTTCTGTCCACCGAGCACCGCCACCTCCAGGGCCAAATCCTGGCGCGTGACTCCAGAGTAACTCTTCTGGACAGTTTCGCCTCGACAATTCTCAAATCTCTTGACCTCTCGAATTACTAATCAACAAAGTCCGACTCAAACTCCGACTTGAGTAGCAGCGCTATTCTAGTCTGGCCGGACAAAAAGCCCGTGCTGACCCTAGGTATAGGATGCTGCGTGTGGCTCTAGACCCTAATTACCAAACAGTGGCCATGTCGTTGACTTCTGATTGAAGCAAAGGGTGCCGGTCGGGTCCACAAATGATAGTCGCTAAGGGAACCGTTCCCCGCGGAATACCTGTCCACTGTTGCCCAAGCCATGGGTGCTTGGCCTTCCGTAGGCTTGTCTCCTTTCGGGCCAATCTGTAAGCGAGCTACCAGGTCGAAAGCCGCATCGGCTCGCCCTCCAGCGAATGATGGCAAG",
+				"ATTGCGTTTCAGGGGATAAAATATCTACTTGTGCGTTCTGGTCACTACACCAACTCAATATCTCGCCCTATCT",
+				"GCAGG"
+			},
+			.b = {
+				"TCACTTCA",
+				"CG",
+				"CTACACGCAC",
+				"TTTGGTTAGGATGAAACGATGTGAAGAGTCTAATAGGTGCCTCGCCTGTTCCCTCACGATACCTCGTAGCCTGGAAGTTGAGAGCTAGAATCTGTGCGTCTTAGGCGGGCCTCACTCTAACACGCACTGCGTCTTATCTATGGTAGTCATCAGCTACAGCTGCAATTGACGCATGTGAGCCTGTTTAATGCAATCGAGGTTCTCCATCTGTCAGTTGAACACCCCGCATGCTTTAACATCCGAGGATCGCCGGGTTTACGCAAGTGCTGTGATAAGTTTCCACTTGGTGAAGAGGTTCTTACGTACCTTAAACAGAGGCCTCTTACCAAAGCTCCGTGTTGTTGCTACCTAGAGTTTCCCCTCGTGAGATCGGTCAAAACCTCTCATAAGGTGTACTCATTACTAACTTCTCAAAGGTTGGCACCCAGCTCGGGAAGGTCGGAGAGTGTACTAGCCACCGGACGAAAGTGTCCATGAAAGAGCGGGCTGGAAAACACCCTCTTCTAAGTGACTTCAATGCGATGCAGCACGACCTTCCTAATTCGACGTATCAGACCTTACGGTCCAGAAGTATCACTACGACACTGGGCTGTATCGCATAATTCTACTATTGAGGGTAGCTAAGTCAACTAGAAGATCGTGGTCTACGTTGTGAGGTCTAATGTTCACGGAGTAGGTAGGCCATAGATTCGCCCTACACCCAGGGGATCCACACTAACGGTTCTAGCCTCAAGGTCGTAAGTTAAATAAAGAGGCGTAGCCAGAGATACCCACTACTCCGTACAGTCAGGATCCTCAATCCTACTTGGCAAATGAGGTATGCAAGAAGCCCTATGACACCAGTAAATACGCTCCCTGAAGTACGCGGGTTTGATCCGTCTGGCATTCAGATTACTATTGGCCGAGCAAACCCAGCTTCGTACTGTTCTGTCTCCGAGAATTCGCGGCTAAACAGCTGATTCCACACAAAATCTCTCGGGGTGAAAAATTCATCCATAGTGGTTCATTGACAATATTCCTCAGTCCATAGCATATTTCTCACCGCCAAGCAAGGTATCCGAGAGGTGTGTTCTCACGCTCATATTCCTACGCGAAGTCGGCCAATAGAGACACGTCCGCGAGCTATCAGGGATTAATAATCGAGGGCATATAAGGTCGCGAGCAATATAAGAGCGCGGTATTTAATGGAATCTTGTCGTGTCTCTCGTCTCGCAGAAGTGAGTTCTAAGGTCCAGGCTTCAAATAGGGCTGAGCACCATATGCACATCACTGCCCGTTTTCGACTGGGTAGGAGACGCACGTATCCACACGGCTATGGTCCAACGCTGGACATGTAGAAAACGTTCTTCCCACCGAGCACCGCACCGCCAGGGCCAATCCTGGCGCTCACTCCAGAGCAAACCTTCTGGCCAGTTCGCCTCGACAATTACTCAAATCTCTTGACCTCTCGAAGAGTAAGCAACTTAAGTCCGACTCAAATCCGACTTGAGTAGCGCGCTATTCTAGTCCTCGCCGGTTCAAAAAGCCCTGATGACCCTAGGTATGGATGCCGCGTGTGGTTAGACTCTAATTTACCAAACAGTGGCCATGATCTTGACTTCTGATTAAAGCAAAGGGTGCCGGTCGGGTTCCAAAATGATGAGTCCATAGGGAACTCGGGTTCCCCGAGGAATACGTGAATCCACTGTGCCAAAGCCATGGGTGCTTGGCCTTCCTTAAGGCTTTGTCTCCTTTCGGGCCAATCTGTAAGCGAGTTACCAGGTCAAAAGCCTCATCGGCTCGCCCTCCAGCAATGATGGCAAG",
+				"GTTGCGTATCAGGGATAAAACATCTACTTGATGCGTTCTGTCACTAACTTCAACTTCAATATCCGCCCTATC",
+				"TCAGA"
+			}
+		},
+		{
+			.a = {
+				"TGC",
+				"AC",
+				"GG",
+				"AAAATCTATGAGTCCTCTCCAATCCTGGGCCGCCGATCCGTCCTTGGAGTGGTCTCCGTTTCCAGTCCAGAATCTGTCTCACTTGTATCAGACTATGCCTTCTTGGCCTATTCGGACTTGTGGACTTAAATACGTTAACTCAGGGAGATGGGACGCAGCAGAAAGTTGAACCATTTAGTTACGAGACGGTTCTTCGTAATCGACCTACCTCCCTCTTTGGGCTCAATTAAGCGGTTGTCTTGCACGTACCGTGCCTCAGGACTGTGGCGTCCCGCGAAGGGCCAGGTATGGTTCGGAAAGTCTATAGTAACGCTTACGAAAGATTGGTGGCCTACGATCCTTTCGGCTCCACTACGGTGACTCAAGGACTCAGCCATGAATAGGATCGGTGTGTTGCCTGAAGTCATCGTCGTTATGCCAATTTGGCTTACACATGAGTGGCACACCTGGTTGTGACTACACCCCATCGTAAAAGACTTACTTTGCATAAAACCCTCCAAAAAACGAGCAGTTCGCGGATGCTAGCTAGTAGAAGCTGTAGGTCTGGGATCTAATGCGGTCGCCTTGGGGGAAGGTAACATGTTTGGAAAAGTCTGCGATAGTAACTAGCCCTACGTTTTTTCGACACTAATTATTCGATTCCTCGCACAAATCTAGTCCAGATGTGTGGTCTAACGGCTGCTGTGGCGTTGCTCTTTTCGGGCGTGACATTCGCACTGTTCCAAGATCTATCTCTGTTTTGGCAACCTTAGACTCTTACGCATACGGCCCATTCTTTCTGCCTTAAGTATCCAACCGTGTATGAAGTTTGGAACTACGACCCTCGATAACAAAGACAAATGGAGTTTACTGTACAGCTTCCTGCCGGGGTCCCCTCCGCGCTCGAGAGCTTGGCAAAGGGCTTTCTAGCCATCGCCACTCCTATAATAGCTACGTGCTATAAGCGTTGAGACCACGAAGGGCGTACCCACACCGGACCGGAGTCGATGCGCTTTGTCTCCACGCACCCGAT",
+				"GTACTTTACATCACACACGATCGTGTAATATGTTTGGGTATGCTACAATGCGTTCCGCGGCCAAATTGCGGAATTACTCAGGGCCTTTACCGGCGGACAGTTGAGGATCCTTTCCAAAACCCT",
+				"TCCTTCCGAAGTGTGTAGTATAAAAACCGAACCCAAGGTTGCGAAATCGGCGGCGGGTTATTCAACCTTAGCCACGACTTTACGCTATGATCTACAGGTCGCTACAGCCCACCCTGATGGTCTTGCTATGCGTAGACACGCGTGTGAAGGGCAGAGTTGGCTAAAGACGGTTATCTCGTTAGCAACGTCACGAGTAATCTCAGCTACCGAAGGCTGTCCAGTGGCCGCCTAGTTATTCACCATAGGGCAACGTTAACGCGCGAACATACTCTAATGTCTTCACATCAATGGAATACTACCTGATGTCCAAAGACGAGTACCTCCGGGCGTGCCGCTCGCGTCATTGTCCATGTATCGCGAACGCTTCCCGTATTAGCTATTTCGTCTGGGGTTAAGTCTCTGCTCCCTCCGAATTAAGGTAAGTCGGAACCTATGCAAACCGGGGCGGTACAATTCGCGGTTCTGAATACACTGTCTCATCCTGCGTTACCTCGGTGGGGTTATCTACCAAGGTATCAGCCTAGCGGACAGATGTCGAGTAGCGCGCGGTATGAGATAAAAGAACACTATGACTTGCAATAATGCCGACGACCACGAGCACTCGGAAAACTACGTGTCGAAGGCTTTTGAATTCGCCGCCTCGCTCTTGGTGACTTCGTTGTGCAATCTAGGCATCCTAACTGCCGCGAACTTTATATATAGCCTCGAAGACGTGTCTCCTGAGCCCCACAAAGGTTATTTAACTGAAGCCCTGAATCGTTGATAGGTGCGCCGGACGATTGAGAATTGCGCTGAAAGTTTGACATCCCGACACTACGTTTCATAATAGGTGAATCTAGAGTCGACGCTCCTTCGTGCTATTGATCCGGTGAGATGCCAATCTGGCCAGACGTTGGCTATGTTCTGTAATATAACTCGTAGAGGAAACTCACATGTGGTGCTCGTGCCAACGCTACTCGGGGTGCGCTAACCTGTTAAAACCTGATTTACCGTAAAGCAGCCACATAAAACCCATCTGAATCGGCTGAAGGGAGTAGTAGTCTACGCCACCTGTCTGTTTGGCGAAGGTGAGATGCCTGCATAGTCCCCCATTCCTCTGACGGCGATTTCCTCCCATTCAAGTTTAGCTACATAGCACAAGCTTTCTGACGATCTGCCTAGCACCGGCTGCGACCTGCCGGTGCACTCGTCAACCCATGTGACGCTCTAGCGCTTCAGGGCTTCAAGAACAGCCAGACCATGGACCCCATTCGGTGTCTTGTCTACCCGGCCAACCCGGCCGTTAGCTTAGGTTCAATCGCGTGGATAGGCTAAGAGAAGAGAAGCAGACCGTAAGCTGTCTTCACGGCGAGAAGGGGCGTGAGGAATAGTCGGTGTCACTCTTCCGTTTGGCGATTCTTTGACATTTAAATCTTGACGTAACCGGACTTAGCCACATCCTCAACTTCACCACGCTAGCTCCGTGGATCCACTACAAACACGCGCGGCATCGATCTCCGGTGTGGCGGCTTTGACTGTATGCCTAGGCTAAGGTAAAGTGGGCAGGTAGTTACATCGCTGCTATGCATTTCCCGCTAATGATTCTGGGACACAACTCCGCATGCCAACATAAGTCGCAACCATGAACGCTTCGCGTCGAGCAGATAGCAGGCGCTGCAAGTTTCCCAGTCACCTCCTTGTCAATGACTAGGACCCGTGCGTCTAAACTTTGAATTGTCCTTTTACCTATAGGCGGGGACGTAGTTGCGTTCGGCGTGCTCCGTTACCGCGACGTACCGTACCGTGATAGGCTAAGACTTTGTAAGAGTGCTTGCTAGGAAACTCCGCTCAGTAGAGGGGCTCAGTTGCCTCGAATGGACACTTCCTTTCCACTCTGACTGAAACATTTTATATGCAGCTTGAACCTTCCGTCGTGTGCGGCCGATAACCACTACCCCAGGTGTCCGAATGGCTACTAGACGCCG"
+			},
+			.b = {
+				"TGC",
+				"CC",
+				"GG",
+				"TAAAATCTATTAGTCCTAACCCAATCCTGGGCCGCCTGATCCGCCTTCCAGTGTGTCTCCGTATCCAGTCCAGAATCATGTCTCCCCTTGTATGAACTTGCTCTGCTTGGCCTATCGGACTTGTGGGAATTAAAATTACGTTAGCTCAGGGAGCTCGGCATCCAGTAGAAATGGAACCATTTAGTTACGAACGAGTTCTTCGATTCTACTACCCCTTCTTTGGGCTCAAGTTCAAGCGGTTGTCTTGCACGTACTCCGTACTCTCAGGATTGGACGACCCGCGAAGGGACACGTATGATGCGAATGTTTATAGTAACGCTTACAGAAAGATTGGTGGCCTACGATTCTTTCGGCTGCCAATACGGCGAGCTCAAGGACTCAGCCATAATGGTTCGGTGTGAGGCCGGAAATCATCGTCCTTAGACCCATTTGGTCTTACAGGTGAGTGCCCCACCTGGTTGTGACACACCCGATCGTAACAGACTTATTCGCATAAAACCCTCCAAGATACAGAGCGGTTCGCGCGTTGCTAGCTTAGTAACGCTGTAGGTCTGAGATCTAAAGCGGTCCCTTGGGGGAAGGTCAAATGTCTGGCAAAGTCGGCGATAGTAAGCTTCGCCGCTAGTATGATGCGAACAACGGAATTATGGAGGTCCTGGCCAACTCTAGTCCAGATGTGTCGTCTCCGGCTGATGTGGCGTTGCTTTTTCGGCGTGACATCGCAGTGGTCCAAGATCTATCTCTGTTTTGCCACCTTAACTAGTTACGCATACGGCCCATTCTTTCTGCCCAAATATCCAACAGATGTATGAAGTTTGGATCTCCCGCCCCTCAGTAACAAAGACAACTTGGATTTACTGTACAGTTCTGCCGGGGTGTCCCTCCGCGCTCGAGGGCTTGGGCAAAGAGCTTTCTAGCCATCGCCATACCTTATAATAGCTGCATGGCATAAGCCAGAGACGACAAAGGGCGTGCCCACACCGGACGGAGTCGATGCGCTTTGTCTTCCACGTACCCCAT",
+				"GGACTTTACATGCACACAGACTTGAGTAATCAGTTTGGCTTATGCTACAATGAGTTCCGCGGCCAAATTGCGGAATACTCGGTATCTGTACCGGCGGACAGTTGAAGAGCCTTTTCCAAACCCT",
+				"ACCTTACGAAGTCGTGTATTATAAAACCGAACCAACGGTTTGCGTAACGGGCCGGCGGGTTTTTCAACCTAGCCACGACTTTCGCTATGATCTATAGGTTCGCTACATCCCCGCCTGAGGTCTTGTATGCGTAGAACGCGCGGAGGGGCATAGTTGGCAAAGAGGATTAGCTCGCATAGCGACGAACACGAGTAATCCAGGGACCGAAGCCGTCCCAGTGGAAGCCTAGTTCAGTCCCACAGGGGAACGTTAACGCGCGAACATCTCTCTAAGTCTTCACCTCGATGGAATTACACCCTGATGCCAAAGACGAGTACCTCCCGGCGTGGCGCTCGCTCATTGTCCATGTACCGCGAGCGCTTCCCTTATTAGCTATTTCGTCTGGGGATTAAGTCCCTGCTCACCTCCCGAATTAAAGTACGTCGAAACCTATGGCAACCGGGGCGATTACAATTCGCGGTTCTTAACCACTGTTCATCCAGCGTTAGCTCGGGGGGATATCTACCAAGGTATCATGCCTAGCGGACAGATGTCGAGTAGAGCGGTATGAGATAAAAGAAACTAGGACTTGCAAAACGCCGACGACCACCAGCCCTCGGAAAATACGTTCGAAGCCTTTTAACCGCCCGCCCGCTCTTGGTGACTACTATGTGCATCTAGGCATCCTAAACTGCCGCGAACTTTGTATATTACCCGAAGATGTGTTCCTGGGCCCCACCAGGATTATTTAACTGAAGCCCTGAATCGTTGATAGGTGGCGCGGCGATTGCGAATTAGCGCTGTCAATTTGACATCCCACACTACGTTTCATAATAGGTGAATCTAGAGTAGACGCGCCTTCGTGCCTAATTAGATCGGCGTCGCGCTGCCCAATCTGGACACAGACGTTGGCTCTGTCTGTAATATAAACACGTAGGAGGAAACTTCATTATGGTCCGATCAGTGCCATCGCTACTCGGGGTGCGCCAACCTGGTAAAGCCTGGTTTACCGTAAGCGGCACATAAGCCATCTGAATCGGCTGAAGGGAGAGTAGTCTACGCCACATGTCTGTTTGGCTGAGGTGAGATGCCTGCCTAGGGCCCCCCATTCCCCTGACGGCAAATTTCCTCCCATTCAAGGAGACGTACATAGCACAAGCTTTCATAGACGATCTGCCTACCACCGGCGGCGACCTACAGGTGCACTCGTAAACCCATGTGAGCTCTAGCGCTTAAGGGCTCAGGAACCAGACAGCACATAGACCCCATCCGGTGCCTTGTCTACCTCGGCCAACCGCCCGTTAGCTAGGTTCAATCGCGTGGATGGATAGGCCACGAGAAGCGTACCGTAGCTTTTCACAGCTGAAAGGGGCGTGAGGAGTAGTCGGTGTCACTCTTCCGTATGGCGATTCTCTGACATTTAAATCTGAGTAAGGGACTTAGTCACATCCACAACTTCACCACGCTAGTCCTTGATCCACTACAAAACACACTGCGAGTTTGATCTCCGGTGTGGGCGGTTTTGTCTGTATGCCTAGGCTAGGGTAGAGTGGGCCGGTAGTTGTACATCGGCGCTATGATTTCCCGCTACTGACTTCTGGACACAACCCGCATGCCAACATAAGTCGCAACCATGAAGCTTCGCGTCGAGCGATAGCAGGAAATGCAAGTTTCCCAGTCACCCCATGTCAAACGAATAGTACACGTGCGTCTTAAACTTTGAATTGTGCTATACCTATAGGCGGGGACGAGTTGCGTGGGCGTGCTCCGTTACCCGCGAACGTACCGTCCTTGATAGGCTAAGACTTTTTAAGAGTGCTGCGGTAGAAACTCCGCTCAGTAGAGGGCCTCAGTTGCTCGAATGTACCATTACTTTTCATTCTGACTGAAAAATTTTAACGCGCAGTGAACCTTCCGTCGTGTGCGGCCGATAACCACTACCCAGGTGTCACGAATGGCCACTAGACGCTTG"
+			}
 		}
+		/* fails for affine-16 due to the bandwidth shotage */
+#if 0
+		{
+			.a = { "CCTTTACATATACGGACCAGAGATAGGTTAAATTTAAATCTTGCCGGT" },
+			.b = { "CCCTAAGATACGGATTAGCTAACTAGCAACGGAGATACGTAAATGTTAAATCTTGCCGGT" }
+		}
+#endif
 	};
 
-	uint8_t const *lim = (uint8_t const *)0x800000000000;
 	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx;
-	struct gaba_dp_context_s *dp = _export(gaba_dp_init)(c, lim, lim);
+	struct gaba_dp_context_s *dp = _export(gaba_dp_init)(c);
 
 	for(uint64_t i = 0; i < sizeof(pairs) / sizeof(struct unittest_seq_pair_s); i++) {
 		_export(gaba_dp_flush)(dp);
@@ -4636,52 +5126,52 @@ char *unittest_generate_mutated_sequence(
 
 	int64_t wave = 0;			/** wave is q-coordinate of the alignment path */
 	int64_t len = strlen(seq);
-	char *mutated_seq = (char *)malloc(sizeof(char) * (len + UNITTEST_SEQ_MARGIN));
+	char *mutated_seq = (char *)malloc(sizeof(char) * (2 * len + UNITTEST_SEQ_MARGIN));
 	if(mutated_seq == NULL) { return NULL; }
-	for(int64_t i = 0, j = 0; i < len; i++) {
+	for(uint64_t i = 0, j = 0; j < len; i++, j++) {
 		if(((double)rand() / (double)RAND_MAX) < x) {
-			mutated_seq[i] = unittest_random_base();	j++;	/** mismatch */
+			mutated_seq[i] = unittest_random_base();/** mismatch */
 		} else if(((double)rand() / (double)RAND_MAX) < d) {
 			if(rand() & 0x01 && wave > -bw+1) {
-				mutated_seq[i] = (j < len) ? seq[j++] : unittest_random_base();
-				j++; wave--;						/** deletion */
+				mutated_seq[i] = seq[j++];			/** deletion */
+				wave--;
 			} else if(wave < bw-2) {
 				mutated_seq[i] = unittest_random_base();
-				wave++;								/** insertion */
+				j--; wave++;						/** insertion */
 			} else {
-				mutated_seq[i] = (j < len) ? seq[j++] : unittest_random_base();
+				mutated_seq[i] = seq[j];
 			}
 		} else {
-			mutated_seq[i] = (j < len) ? seq[j++] : unittest_random_base();
+			mutated_seq[i] = seq[j];
 		}
+		mutated_seq[i + 1] = '\0';
 	}
-	mutated_seq[len] = '\0';
-	return mutated_seq;
+	return(mutated_seq);
 }
 
-unittest()
+unittest( .name = "cross" )
 {
-	uint64_t const cnt = 500;
+	uint64_t const cnt = 5000;
 
-	uint8_t const *lim = (uint8_t const *)0x800000000000;
 	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx;
-	struct gaba_dp_context_s *dp = _export(gaba_dp_init)(c, lim, lim);
+	struct gaba_dp_context_s *dp = _export(gaba_dp_init)(c);
 
 	for(uint64_t i = 0; i < cnt; i++) {
 		struct unittest_seq_pair_s pair = {
 			.a = {
+				unittest_generate_random_sequence((rand() % (_W + 10)) + 1),
+				unittest_generate_random_sequence((rand() % (_W + 10)) + 1),
+				unittest_generate_random_sequence((rand() % 16) + 1),
+				unittest_generate_random_sequence((rand() % 2048) + 1),
 				unittest_generate_random_sequence((rand() % 128) + 1),
-				unittest_generate_random_sequence((rand() % 128) + 1),
-				unittest_generate_random_sequence((rand() % 128) + 1),
-				unittest_generate_random_sequence((rand() % 128) + 1),
-				unittest_generate_random_sequence((rand() % 128) + 1),
-				unittest_generate_random_sequence((rand() % 128) + 200)
+				unittest_generate_random_sequence((rand() % 2048) + 1)
+				// unittest_generate_random_sequence((rand() % 10) + TEST_LEN)
 			}
 		};
 
 		for(uint64_t j = 0; pair.a[j] != NULL; j++) {
 			// pair.b[j] = pair.a[j];
-			pair.b[j] = unittest_generate_mutated_sequence(pair.a[j], 0, 0, _W);
+			pair.b[j] = unittest_generate_mutated_sequence(pair.a[j], 0.1, 0.1, _W);
 		}
 
 		unittest_test_pair(UNITTEST_ARG_LIST, dp, &pair);
@@ -4693,236 +5183,6 @@ unittest()
 	}
 	_export(gaba_dp_clean)(dp);
 }
-
-/**
- * @fn unittest_add_tail
- */
-static
-char *unittest_add_tail(
-	char *seq,
-	char c,
-	int64_t tail_len)
-{
-	int64_t len = strlen(seq);
-	seq = realloc(seq, len + tail_len + UNITTEST_SEQ_MARGIN);
-
-	for(int64_t i = 0; i < tail_len; i++) {
-		seq[len + i] = (c == 0) ? unittest_random_base() : c;
-	}
-	seq[len + tail_len] = '\0';
-	return(seq);
-}
-
-static
-char *string_pair_diff(
-	char const *a,
-	char const *b)
-{
-	uint64_t len = 2 * (strlen(a) + strlen(b));
-	char *base = malloc(len);
-	char *ptr = base, *tail = base + len - 1;
-	uint64_t state = 0;
-
-	#define push(ch) { \
-		*ptr++ = (ch); \
-		if(ptr == tail) { \
-			base = realloc(base, 2 * len); \
-			ptr = base + len; \
-			tail = base + 2 * len; \
-			len *= 2; \
-		} \
-	}
-	#define push_str(str) { \
-		for(uint64_t i = 0; i < strlen(str); i++) { \
-			push(str[i]); \
-		} \
-	}
-
-	uint64_t i;
-	for(i = 0; i < MIN2(strlen(a), strlen(b)); i++) {
-		if(state == 0 && a[i] != b[i]) {
-			push_str("\x1b[31m"); state = 1;
-		} else if(state == 1 && a[i] == b[i]) {
-			push_str("\x1b[39m"); state = 0;
-		}
-		push(a[i]);
-	}
-	if(state == 1) { push_str("\x1b[39m"); state = 0; }
-	for(; i < strlen(a); i++) { push(a[i]); }
-
-	push('\n');
-	for(uint64_t i = 0; i < strlen(b); i++) {
-		push(b[i]);
-	}
-
-	push('\0');
-	return(base);
-}
-#define format_string_pair_diff(_a, _b) ({ \
-	char *str = string_pair_diff(_a, _b); \
-	char *copy = alloca(strlen(str) + 1); \
-	strcpy(copy, str); \
-	free(str); \
-	copy; \
-})
-#define print_string_pair_diff(_a, _b)		"\n%s", format_string_pair_diff(_a, _b)
-
-#if 0
-#if 1
-/* cross test */
-unittest()
-{
-	uint8_t const *lim = (uint8_t const *)0x800000000000;
-	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx;
-	struct gaba_params_s const *p = unittest_default_params;
-
-	/* seed rand */
-	#ifndef SEED
-	int32_t seed = getpid();
-	#else
-	int32_t seed = SEED;
-	#endif
-	srand(seed);
-
-	// int64_t cross_test_count = 10000000;
-	int64_t cross_test_count = 1000;
-	for(int64_t i = 0; i < cross_test_count; i++) {
-		/* generate sequences */
-		char *a = unittest_generate_random_sequence(1000);
-		char *b = unittest_generate_mutated_sequence(a, 0.1, 0.1, 500);
-
-		/* add random sequences at the tail */
-		a = unittest_add_tail(a, 0, 64);
-		b = unittest_add_tail(b, 0, 64);
-
-		/* add tail margin */
-		int64_t const mlen = 20;
-		a = unittest_add_tail(a, 'C', mlen);
-		b = unittest_add_tail(b, 'G', mlen);
-
-
-		/* naive */
-		struct unittest_naive_result_s nf = unittest_naive(p, a, b);
-
-		/* build section */
-		struct unittest_sections_s *sec = unittest_build_seqs(
-			&((struct unittest_seqs_s){ .a = a, .b = b }));
-
-		debug("seed(%d)\n%s", seed, format_string_pair_diff(a, b));
-
-		/* generate dp context */
-		struct gaba_dp_context_s *d = _export(gaba_dp_init)(c, lim, lim);
-
-		/* fill section */
-		struct gaba_section_s const *as = &sec->afsec;
-		struct gaba_section_s const *bs = &sec->bfsec;
-		struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, as, 0, bs, 0);
-		struct gaba_fill_s *m = f;
-
-		/* fill tail (1) */
-		as = (f->stat & GABA_UPDATE_A) ? &sec->aftail : as;
-		bs = (f->stat & GABA_UPDATE_B) ? &sec->bftail : bs;
-		struct gaba_fill_s *t1 = _export(gaba_dp_fill)(d, f, as, bs);
-		m = (t1->max > m->max) ? t1 : m;
-
-		/* fill tail (2) */
-		as = (t1->stat & GABA_UPDATE_A) ? &sec->aftail : as;
-		bs = (t1->stat & GABA_UPDATE_B) ? &sec->bftail : bs;
-		struct gaba_fill_s *t2 = _export(gaba_dp_fill)(d, t1, as, bs);
-		m = (t2->max > m->max) ? t2 : m;
-
-		/* check max */
-		assert(m->max == nf.score, "m->max(%ld), f(%ld, %u), t1->max(%ld, %u), t2->max(%ld, %u), n.score(%d)",
-			m->max, f->max, f->stat, t1->max, t1->stat, t2->max, t2->stat, nf.score);
-		if(m->max != nf.score) {
-			struct gaba_fill_s *f2 = _export(gaba_dp_fill_root)(d, &sec->afsec, 0, &sec->bfsec, 0);
-			(void)f2;
-			debug("refill f2(%ld, %u)", f2->max, f2->stat);
-		}
-
-		/* forward trace */
-		struct gaba_alignment_s *rf = _export(gaba_dp_trace)(d, m, NULL);
-
-		/* check results */
-		assert(rf->score == nf.score, "m->max(%ld), rf->score(%ld), nf.score(%d)",
-			m->max, rf->score, nf.score);
-		assert(rf->seg[0].apos == nf.apos, "apos(%u, %ld)", rf->seg[0].apos, nf.apos);
-		assert(rf->seg[0].bpos == nf.bpos, "bpos(%u, %ld)", rf->seg[0].bpos, nf.bpos);
-		assert(rf->seg[0].alen == nf.alen, "alen(%u, %ld)", rf->seg[0].alen, nf.alen);
-		assert(rf->seg[0].blen == nf.blen, "blen(%u, %ld)", rf->seg[0].blen, nf.blen);
-		assert(check_path(rf, nf.path), "\n%s\n%s\n%s",
-			a, b, format_string_pair_diff(decode_path(rf), nf.path));
-
-		int64_t acnt = 0, bcnt = 0;
-		for(int64_t i = 0; i < rf->plen; i++) {
-			if(((rf->path[i / 32]>>(i & 31)) & 0x01) == 0) {
-				acnt++;
-			} else {
-				bcnt++;
-			}
-		}
-		assert(acnt == rf->seg[0].alen, "acnt(%ld), alen(%u)", acnt, rf->seg[0].alen);
-		assert(bcnt == rf->seg[0].blen, "bcnt(%ld), blen(%u)", bcnt, rf->seg[0].blen);
-
-		debug("score(%ld, %d), alen(%ld), blen(%ld)\n%s",
-			rf->score, nf.score, nf.alen, nf.blen,
-			format_string_pair_diff(decode_path(rf), nf.path));
-
-		/* cleanup */
-		_export(gaba_dp_clean)(d);
-		free(sec);
-		free(nf.path);
-		free(a);
-		free(b);
-	}
-}
-#else
-/* for debugging */
-unittest(with_seq_pair(
-"CTGCGCGAGTCTGCCATGAAATCGAGCTTACAATCCCGATCTTCTCAGCCCTATTGCGGATAGTAGTATATTCA",
-"ACGTGCGCGGTGGTTGCTCTTCTGGACGCGTTCGACACGTATTACGAAGTCCTTACCGCTATAAATCACAACGC"))
-{
-	omajinai();
-	struct gaba_params_s const *p = unittest_default_params;
-
-	/* fill section */
-	struct gaba_section_s const *as = &s->afsec;
-	struct gaba_section_s const *bs = &s->bfsec;
-	struct gaba_fill_s *f = _export(gaba_dp_fill_root)(d, as, 0, bs, 0);
-
-	/* fill tail (1) */
-	as = (f->stat & GABA_UPDATE_A) ? &s->aftail : as;
-	bs = (f->stat & GABA_UPDATE_B) ? &s->bftail : bs;
-	struct gaba_fill_s *t1 = _export(gaba_dp_fill)(d, f, as, bs);
-	f = (t1->max > f->max) ? t1 : f;
-
-	/* fill tail (2) */
-	as = (f->stat & GABA_UPDATE_A) ? &s->aftail : as;
-	bs = (f->stat & GABA_UPDATE_B) ? &s->bftail : bs;
-	struct gaba_fill_s *t2 = _export(gaba_dp_fill)(d, t1, as, bs);
-	f = (t2->max > f->max) ? t2 : f;
-	struct gaba_result_s *r = _export(gaba_dp_trace)(d, f, NULL, NULL);
-
-	/* naive */
-	char const *a = (char const *)s->a;
-	char const *b = (char const *)s->b;
-	struct unittest_naive_result_s n = unittest_naive(p, a, b);
-
-	/* check scores */
-	assert(r->score == n.score, "f->max(%ld), r->score(%ld), n.score(%d)",
-		f->max, r->score, n.score);
-	assert(check_path(r, n.path), "\n%s\n%s\n%s",
-		a, b, format_string_pair_diff(decode_path(r), n.path));
-
-	debug("score(%ld, %d), alen(%ld), blen(%ld)\n%s",
-		r->score, n.score, n.alen, n.blen,
-		format_string_pair_diff(decode_path(r), n.path));
-
-	/* cleanup */
-	_export(gaba_dp_clean)(d);
-}
-#endif
-#endif
 
 #endif /* UNITTEST */
 

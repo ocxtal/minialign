@@ -210,7 +210,7 @@ typedef struct v64i8_s {
 )
 
 /* debug print */
-#ifdef _LOG_H_INCLUDED
+// #ifdef _LOG_H_INCLUDED
 #define _print_v64i8(a) { \
 	debug("(v64i8_t) %s(%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, " \
 				 "%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, " \
@@ -282,9 +282,9 @@ typedef struct v64i8_s {
 		_ext_v64i8(a, 1), \
 		_ext_v64i8(a, 0)); \
 }
-#else
-#define _print_v64i8(x)		;
-#endif
+// #else
+// #define _print_v64i8(x)		;
+// #endif
 
 #endif /* _V64I8_H_INCLUDED */
 /**
