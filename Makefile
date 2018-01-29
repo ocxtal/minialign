@@ -17,11 +17,15 @@ TARGET = minialign
 all: native
 
 native:
-	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)'
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)' all
 	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba.*.o $(LDFLAGS)
 
+nowrap:
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)' nowrap
+	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba.o $(LDFLAGS)
+
 sse41 avx2:
-	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) -DUNITTEST=0' ARCH=`echo $@ | tr a-z A-Z` NAMESPACE=$@
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS) -DUNITTEST=0' ARCH=`echo $@ | tr a-z A-Z` NAMESPACE=$@ all
 
 universal: sse41 avx2
 	$(CC) -o $(TARGET) $(CFLAGS) -mtune=generic universal.c minialign.*.o gaba.*.o $(LDFLAGS)

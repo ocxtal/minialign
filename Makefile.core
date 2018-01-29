@@ -27,6 +27,10 @@ $(MINIALIGN_OBJS): minialign.c
 $(GABA_OBJS): gaba.c
 	$(CC) -c -o $@ $(CFLAGS_INTL) -DMODEL=`echo $@ | cut -d'.' -f2 | tr a-z A-Z` -DBW=`echo $@ | cut -d'.' -f3` -DSUFFIX -DBIT=2 $<
 
+nowrap: minialign.c gaba.c
+	$(CC) -c -o minialign.o $(CFLAGS_INTL) -DGABA_NOWRAP minialign.c
+	$(CC) -c -o gaba.o $(CFLAGS_INTL) -DMODEL=AFFINE -DBW=32 -DBIT=2 gaba.c
+
 gaba.c: gaba.h log.h unittest.h sassert.h
 minialign.c: kvec.h ksort.h gaba_wrap.h gaba.h lmm.h unittest.h sassert.h
 gaba_wrap.h: gaba.h log.h unittest.h sassert.h
