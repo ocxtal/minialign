@@ -2690,9 +2690,9 @@ void trace_push_segment(
 	// v2i32_t mask = _eq_v2i32(gidx, _zero_v2i32());/* add bridged length if the traceback pointer has reached the head */
 	// v2i32_t pos = _add_v2i32(_and_v2i32(mask, ofs), gidx), len = _sub_v2i32(sgidx, gidx);
 	v2i32_t pos = _add_v2i32(ofs, gidx), len = _sub_v2i32(sgidx, gidx);		/* add bridged length, is this correct? */
+	_store_v2i32(&self->w.l.a.seg->aid, id);
 	_store_v2i32(&self->w.l.a.seg->apos, pos);
 	_store_v2i32(&self->w.l.a.seg->alen, len);
-	_store_v2i32(&self->w.l.a.seg->aid, id);
 	self->w.l.a.seg->ppos = ppos;
 
 	/* update rsgidx */
@@ -3055,7 +3055,7 @@ void trace_init(
 	self->w.l.btail = tail;
 
 	/* malloc container */
-	uint64_t sn = tail->f.ascnt + tail->f.bscnt, pn = (plen + 31) / 32 + 2;
+	uint64_t sn = tail->f.ascnt + tail->f.bscnt + 2, pn = (plen + 31) / 32 + 2;
 	uint64_t size = (
 		  sizeof(struct gaba_alignment_s)				/* base */
 		+ sizeof(uint32_t) * _roundup(pn, 8)			/* path array and its margin */
