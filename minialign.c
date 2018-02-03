@@ -1,4 +1,4 @@
-
+#define DEBUG
 /**
  * @file minialign.c
  *
@@ -652,8 +652,8 @@ typedef struct {
 #define kh_str_cnt(_h)					( kh_cnt(&(_h)->h) )
 #define kh_str_init_static(_h, _size)	{ (_h)->s = (uint8_v){ 0 }; kh_init_static(&(_h)->h, _size); }
 #define kh_str_init(_size)				({ kh_str_t *h = calloc(1, sizeof(kh_str_t)); kh_init_static(h, _size); h; })
-#define kh_str_destroy_static(_h)		{ free(((kh_t *)_h)->h.a); free(((kh_t *)_h)->h.s.a); }
-#define kh_str_destroy(_h)				{ kh_str_destroy(_h); free(_h); }
+#define kh_str_destroy_static(_h)		{ kh_destroy_static(&((kh_str_t *)_h)->h); free(((kh_str_t *)_h)->s.a); }
+#define kh_str_destroy(_h)				{ kh_destroy(_h); free(_h); }
 
 /**
  * @fn kh_str_put, kh_str_get
@@ -2340,7 +2340,7 @@ void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k, uint64_v *b)
  * and lower 8bit contains local index of the length-w bin. direction is encoded in the 7-th bit.
  */
 #define _loop_init(_len, _cap) \
-	uint64_t const kk = sk->k, shift1 = 2*kk, mask = (1ULL<<2*sk->k) - 1, w = sk->w; \
+	uint64_t const kk = sk->k - 1, shift1 = 2*kk, mask = (1ULL<<2*sk->k) - 1, w = sk->w; \
 	kv_reserve(uint64_t, *sk->b, sk->b->n + 4 * (_len) / w);	/* reserve buffer for minimizers, expected number will be 2 * len / w */ \
 	uint64_t *q = sk->b->a + sk->b->n; \
 	uint8_t const *p = seq, *t = &seq[_len]; \
@@ -2348,18 +2348,19 @@ void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k, uint64_v *b)
 
 #define _push_kmer() { \
 	uint64_t c = *p++; \
-	k0 = (k0 << 2 | c) & mask; k1 = (k1 >> 2) | ((3ULL^c) << shift1); /* debug("c(%c), i(%lu), fw(%lx), rv(%lx)", "ACGT"[c], i, k0, k1); */ \
+	k0 = (k0 << 2 | c) & mask; k1 = (k1 >> 2) | ((3ULL^c) << shift1); \
 }
 #define _loop_core() ({ \
 	_push_kmer(); \
 	uint64_t km = k0 < k1 ? k0 : k1, kx = k0 < k1 ? k1 : k0, m = k0 < k1 ? 0 : 0x80; \
 	uint64_t h = hash64(km, kx, mask)<<8 | i | m; f = MIN2(f, h); uint64_t v = MIN2(f, sk->r[i + 1]); \
-	if((v == h) | (v - u)) { /*debug("push(%lx)", v);*/ *q++ = v; } \
+	/* debug("c(%c), i(%lu), m(%lu), km(%lu), fw(%lx), rv(%lx)", "ACGT"[p[-1]], i, m, km, k0, k1); */ \
+	if((v == h) | (v - u)) { /* debug("push(%lx)", v); */ *q++ = v; } \
 	u = v; h; \
 })
 #define _push_cap(_i) ({ \
 	mm_sketch_cap_t *cap = (mm_sketch_cap_t *)q; \
-	*cap = (mm_sketch_cap_t){ .i = 0xffffffffffff0000 |  (_i), .u = u, .k0 = k0, .k1 = k1 }; \
+	*cap = (mm_sketch_cap_t){ .i = (((int64_t)-1)<<16) |  (_i), .u = u, .k0 = k0, .k1 = k1 }; \
 	sk->b->n = (uint64_t *)(cap + 1) - sk->b->a; \
 	cap; \
 })
@@ -2629,7 +2630,7 @@ typedef struct {
 	kvec_t(mm_idx_seq_t) svec;
 	kvec_t(mm_idx_mem_t) mvec;
 	kvec_t(v4u32_t) hq;
-	uint32_v *cnt;					/* jagged array, counting minimizer occurrences */
+	uint32_v cnt[];					/* jagged array, counting minimizer occurrences */
 } mm_idx_intl_t;
 
 /**
@@ -2637,7 +2638,7 @@ typedef struct {
  * @brief first-stage data container of double hash table
  */
 struct mm_idx_bkt_s {
-	union { kh_t h; mm_mini_v a;} w;						/* 2nd stage hash table, and minimizer array for sorting */
+	union { kh_t h; mm_mini_v a; } w;						/* 2nd stage hash table, and minimizer array for sorting */
 	union { uint64_t *p; struct { uint32_t keys, single; } n; } v;	/* last stage table (size in p[0]), #keys and #single-element keys */
 };
 _static_assert(sizeof(mm_idx_bkt_t) == 32);
@@ -2779,7 +2780,7 @@ void mm_idx_drain_intl(mm_idx_intl_t *mii, mm_idx_step_t *s)
 			for(; !mm_sketch_is_cap(*p); p++) {
 				uint64_t u = *p & 0x7f, fr = (*p>>7) & 0x01, h = *p>>8;
 				base += u <= v ? w : 0; v = u;
-				// debug("u(%lu), h(%lx), base(%lu), pos(%ld, %ld)", u, h, base, (-fr) ^ (base + u), ((-fr) ^ (base + u)) - ((-fr) & mii->mi.k));
+				// debug("base(%lu), u(%lu), pos(%lu), fr(%lu), h(%lx)", base, u, base + u, fr, h);
 				kv_push(mm_mini_t, bkt[h & mask].w.a, ((mm_mini_t){
 					.hrem = h>>b, .pos = base + u, .rid = (mii->svec.n<<1) + fr
 				}));
@@ -2881,7 +2882,7 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 		#undef _fill_body
 
 		/* shrink table */
-		r[0] = n_arr - b->v.n.single;							/* table size saved at p[0] (for use in index serialization) */
+		r[0] = n_arr - b->v.n.single;								/* table size saved at p[0] (for use in index serialization) */
 		b->v.p = realloc(r, sizeof(uint64_t) * (n_arr - b->v.n.single + 1));	/* shrink array (is this an overhead?) */
 		// b->v.p = r;
 	}
@@ -2896,14 +2897,14 @@ static _force_inline
 mm_idx_t *mm_idx_gen(mm_idx_params_t const *o, bseq_file_t *fp, pt_t *pt)
 {
 	uint8_t b = MIN2(o->k * 2, o->b);		/* clip bucket size */
-	mm_idx_intl_t *mmi = calloc(1, sizeof(mm_idx_intl_t));
+	mm_idx_intl_t *mmi = calloc(1, sizeof(mm_idx_intl_t) + pt_nth(pt) * sizeof(uint32_v));
 	*mmi = (mm_idx_intl_t){					/* init pipeline context */
 		.mi = (mm_idx_t){
-			.bkt = malloc(sizeof(mm_idx_bkt_t) * (1ULL<<b)),
+			.bkt = calloc(sizeof(mm_idx_bkt_t), 1ULL<<b),			/* cleared before use */
 			.mask = (1ULL<<b) - 1, .b = b, .w = o->w, .k = o->k, .n_occ = o->n_frq
 		},
 		.fp = fp, .nth = pt_nth(pt),
-		.cnt   = calloc(pt_nth(pt), sizeof(uint32_v)),
+		// .cnt   = calloc(pt_nth(pt), sizeof(uint32_v)),
 		.circ  = &o->circ,
 		.call  = kh_str_ptr(&o->circ) && kh_str_cnt(&o->circ) == 0,	/* mark all sequences as circular if array is instanciated but no entry found */
 		.ctest = kh_str_ptr(&o->circ) && kh_str_cnt(&o->circ) > 0
@@ -2930,6 +2931,7 @@ mm_idx_t *mm_idx_gen(mm_idx_params_t const *o, bseq_file_t *fp, pt_t *pt)
 		);
 	}
 	free(mmi->cnt[0].a);
+	// free(mmi->cnt);
 
 	/* build hash table */
 	pt_parallel(pt, mmi, mm_idx_build_hash);
@@ -3373,7 +3375,7 @@ void mm_expand(
 			.vpos = _v(_rs, _qs),
 			.rid = rid>>1, .lid = INT32_MAX	/* first prev node is initialized with zero */
 		};
-		debug("n(%lu), abpos(%d, %d), pos(%d, %d), uvpos(%d, %d)", self->seed.n, rs, qs, _rs, _qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
+		// debug("n(%lu), abpos(%d, %d), pos(%d, %d), uvpos(%d, %d)", self->seed.n, rs, qs, _rs, _qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
 	}
 	return;
 }
@@ -3406,11 +3408,11 @@ void mm_collect_seed(
 		/* first calculate pos for the current one */
 		uint64_t u = *p & 0x7f, fr = (*p>>7) & 0x01, h = *p>>8;
 		base += u <= v ? w : 0; v = u;
-		// debug("base(%lu), u(%lu), pos(%lu)", base, u, base + u);
 
 		/* get minimizer matched on the ref at the current query pos */
 		uint32_t n;
 		v2u32_t const *r = mm_idx_get(&self->mi, h, &n);
+		// debug("base(%lu), u(%lu), pos(%lu), fr(%lu), h(%lx), n(%u), r(%p), max_occ(%u)", base, u, base + u, fr, h, n, r, max_occ);
 		if(n > max_occ) { continue; }			/* skip if exceeds repetitive threshold */
 		uint32_t const pos = (base + u + (self->mi.k & -fr)) ^ -fr;
 		if(n > resc_occ) {						/* save if less than max but exceeds current threshold */
@@ -3437,7 +3439,7 @@ uint64_t mm_seed(
 	debug("seed iteration i(%lu)", cnt);
 	if(cnt == 0) {
 		/* push head sentinel */
-		self->seed.n = 0;
+		self->seed.n = 0; self->n_seed = 0;
 		mm_collect_seed(self);					/* first collect seeds */
 
 	} else {
@@ -3464,11 +3466,11 @@ uint64_t mm_seed(
 	kv_push(mm_seed_t, self->seed, ((mm_seed_t){ .rid = INT32_MAX, .upos = INT32_MIN, .vpos = INT32_MIN, .lid = INT32_MAX }));
 
 	/* sort seed array */
-	debug("sort seed, n(%zu)", self->seed.n);
+/*	debug("sort seed, n(%zu)", self->seed.n);
 	radix_sort_128x((v4u32_t *)self->seed.a, self->seed.n);
 	for(uint64_t i = 0; i < self->seed.n; i++) {
 		debug("rid(%u), uv(%d, %d), ab(%d, %d)", self->seed.a[i].rid, _bare(self->seed.a[i].upos), _bare(self->seed.a[i].vpos), _as(&self->seed.a[i]), _bs(&self->seed.a[i]));
-	}
+	}*/
 	return(self->seed.n);						/* report #seeds found */
 }
 
@@ -3486,51 +3488,57 @@ uint64_t mm_chain_seeds(
 	uint32_t ncid = 0, nlid = self->n_seed + 1;		/* keep sentinel untouched */
 	uint32_t bsid = 0, nlsid = 0, tsid = self->n_seed;
 	v4i32_t tv = _window(self->twlen);
-	do {
-		uint32_t lid = nlid++, cid = ncid++;		/* open new leaf for the new branch */
-		c[cid] = (mm_root_t){ .lid = lid, .plen = _ofs(0) };
-		_l(s)[lid] = (mm_leaf_t){ .rsid = nlsid, .lsid = nlsid, .rid = s[nlsid].rid };
+	while(nlsid < tsid) {
+		uint32_t lid = nlid++;						/* open new leaf for the new branch */
+		_l(s)[lid] = (mm_leaf_t){ .rsid = nlsid, .lsid = nlsid, .rid = s[nlsid].rid, .cid = UINT32_MAX };
 
 		int32_t plen = _ps(&s[nlsid]);
 		uint64_t nrsid = nlsid; nlsid = UINT32_MAX;	/* root seed id */
 		while(1) {
 			uint32_t rsid = nrsid; nrsid = 0;		/* front seed id, extract lower 32bit */
 			v4i32_t wv = _load_wv(&s[rsid], tv);	/* root pos vector */
-			_print_seed("base seed at rsid(%u)", wv, rsid);
+			// _print_seed("base seed at rsid(%u)", wv, rsid);
 			for(uint32_t sid = rsid + 1; ; sid++) {
 				v4i32_t fv = _load_pv(&s[sid]);
-				_print_seed("candidate at sid(%u)", fv, sid);
+				// _print_seed("candidate at sid(%u)", fv, sid);
 				if(!_inside_wv(wv, fv)) {
 					nlsid = MIN2(nlsid, sid);		/* update first unchained seed index */
-					debug("skip, sid(%u), update nlsid(%u)", sid, nlsid);
+					// debug("skip, sid(%u), update nlsid(%u)", sid, nlsid);
 					if(_inside_uub(wv, fv)) { continue; }
-					debug("terminate, sid(%u)", sid);
+					// debug("terminate, sid(%u)", sid);
 					break;							/* no seed found inside ub boundary, finalize the next seed */
 				}
 
 				/* here wub > fupos and wvb > fvpos are ensured */
 				wv = _update_wv(wv, fv);			/* update window */
-				_print_seed("link sid(%u) and update", wv, sid);
+				// _print_seed("link sid(%u) and update", wv, sid);
 				int64_t di = ((uint64_t)(_pdiff_v4i32(wv, fv))<<32) | sid;
 				nrsid = MAX2(nrsid, di);			/* update next root */
 			}
 			/* terminate if no linkable seed is found, or hit at the middle of an existing chain */
-			if(nrsid == 0) { debug("no chainable seed remains, nrsid(%lu)", _lo32(nrsid)); nrsid = rsid; break; }
+			if(nrsid == 0) { /* debug("no chainable seed remains, nrsid(%lu)", _lo32(nrsid)); */ nrsid = rsid; break; }
 			if(s[_lo32(nrsid)].lid != INT32_MAX) { nrsid = _lo32(nrsid); break; }
 			s[_lo32(nrsid)].lid = lid;				/* mark the seed chained */
 			if(nlsid <= nrsid) { nlsid = UINT32_MAX; }
 		}
+		if(nrsid == _l(s)[lid].lsid) { continue; }
 
 		/* here nrsid is the last chained seed, extract chain id if merging path */
-		if(s[nrsid].lid < lid) {						/* if already evaluated */
+		uint32_t cid = UINT32_MAX;
+		if(s[nrsid].lid < lid) {					/* if already evaluated */
 			debug("hit existing, curr lid(%u), dst lid(%u), rsid(%u), cid(%u), hrsid(%u)",
 				lid, s[nrsid].lid, _l(s)[s[nrsid].lid].rsid, _l(s)[s[_l(s)[s[nrsid].lid].rsid].lid].cid, _l(s)[s[nrsid].lid].rsid
 			);
 			nrsid = _l(s)[s[nrsid].lid].rsid;
-			cid = _l(s)[s[nrsid].lid].cid; ncid--;
+			cid = _l(s)[s[nrsid].lid].cid;			/* may UINT32_MAX */
+		}
+		if(cid == UINT32_MAX) {
+			cid = ncid++;							/* open new chain bin */
+			c[cid] = (mm_root_t){ .lid = lid, .plen = _ofs(0) };
 		}
 
 		/* finalize leaf */
+		_l(s)[lid].cid = cid;
 		_l(s)[lid].rsid = nrsid;
 
 		/* update chain length */
@@ -3540,7 +3548,7 @@ uint64_t mm_chain_seeds(
 			c[cid] = (mm_root_t){ .plen = plen, .lid = lid };
 			debug("update plen for cid(%u), plen(%d), lid(%u)", cid, _ofs(plen), lid);
 		}
-	} while(nlsid < tsid);
+	}
 	self->root.n = ncid;
 	self->seed.n = nlid;
 	debug("reached tail, nlsid(%u), tsid(%u), ncid(%u), nlid(%u)", nlsid, tsid, ncid, nlid);
@@ -3564,7 +3572,7 @@ void mm_circularize(
 	for(uint32_t rcid = 0; rcid < self->root.n; rcid++) {
 		uint32_t rlid = c[rcid].lid;
 		uint32_t rsid = _l(s)[rlid].rsid, rid = _l(s)[rlid].rid;
-		if(self->mi.s[rid].circular == 0) { continue; }
+		if(self->mi.s[rid].circular == 0 || self->mi.s[rid].l_seq - _as(&s[rsid]) > self->twlen) { continue; }
 		uint32_t rlen = self->mi.s[rid].l_seq;
 		int32_t uofs = _ud(rlen, 0), vofs = _vd(rlen, 0);
 		v4i32_t ov = _seta_v4i32(vofs, vofs, 0, uofs);
@@ -3590,13 +3598,13 @@ void mm_circularize(
 			if(!_inside_wv(rv, lv)) { debug("not linkable, lid(%u)", lid); continue; }
 
 			/* circularize: first extract cid and lid */
-			uint32_t plen = c[_l(s)[_lo32(lid)].cid].plen;
-			if(plen & 0x80000000) { continue; }
-			llid = MIN2(llid, (((uint64_t)plen)<<32) | lid);
+			uint32_t cid = _l(s)[_lo32(lid)].cid;				/* test if seed bin is allocated, otherwise length is zero */
+			if(cid == UINT32_MAX || c[cid].plen & 0x80000000) { continue; }
+			llid = MIN2(llid, (((uint64_t)c[cid].plen)<<32) | lid);
 			debug("linkable, rcid(%u), rlid(%u) ab(%d, %d) -> lcid(%u), llid(%u), ab(%d, %d), updated plen(%d + %d = %d), llid(%lx)",
 				rcid, c[rcid].lid, _as(&s[_l(s)[c[rcid].lid].rsid]), _bs(&s[_l(s)[c[rcid].lid].rsid]),
 				_l(s)[_lo32(lid)].cid, lid, _as(&s[_l(s)[lid].lsid]), _bs(&s[_l(s)[lid].lsid]),
-				_ofs(c[rcid].plen), _ofs(plen), _ofs(c[rcid].plen - _ofs(plen)),
+				_ofs(c[rcid].plen), _ofs(c[cid].plen), _ofs(c[rcid].plen - _ofs(c[cid].plen)),
 				llid
 			);
 		}
@@ -3632,6 +3640,9 @@ uint64_t mm_root_pos(
 	int32_t plen = _ofs(self->root.a[cid].plen);
 	debug("plen(%u), mcoef(%d), min_score(%d)", plen, self->mcoef, self->min_score);
 	if(plen * self->mcoef < self->min_score) { return(2); }
+
+	/* clear next array */
+	self->next.n = 0;
 
 	/* load seed positions and sequence ids */
 	uint32_t rsid = _l(s)[lid].rsid;
@@ -3675,14 +3686,13 @@ uint64_t mm_next_pos(
 	uint64_t plim = ofs - cp->pacc;
 	for(uint64_t i = 0; i < ncnt; i++) {
 		debug("update next array, sid(%lu), pdiff(%lu), plim(%lu)", n[i]>>32, _lo32(n[i]), plim);
-		if(_lo32(n[i]) > plim) { debug("strip next array, ncnt(%lu)", i); ncnt = i; break; }
+		if(_lo32(n[i]) >= plim) { debug("strip next array, ncnt(%lu)", i); ncnt = i; break; }
 		n[i] += cp->pacc;
 	}
-	cp->pacc = 0;
 
 	/* append new seeds */
-	uint32_t rsid = cp->sid;			/* previous search base */
-	for(uint64_t sid = rsid, rcnt = 3 * rem; sid > 0 && rcnt > 0; sid--) {
+	uint64_t sid = cp->sid;				/* previous search base */
+	for(uint64_t rcnt = 2 * rem; sid > 0 && rcnt > 0; sid--) {
 		v4i32_t wv = _load_wv(&s[sid], tv);
 		v4i32_t zv = _load_wv(&s[sid], ev);
 		_print_seed("test seed at sid(%lu), mask(%x, %x)", wv, sid, _inside_mask(wv, fv), _inside_mask(zv, fv));
@@ -3695,6 +3705,8 @@ uint64_t mm_next_pos(
 		debug("sid(%lu), pdiff(%lu, %lx)", sid, (ofs - _pdiff_v4i32(wv, fv)), pdiff);
 		n[ncnt++] = pdiff; rcnt--;
 	}
+	cp->sid = sid;						/* write back sid for next search */
+	cp->pacc = 0;
 
 	self->next.n = ncnt;
 	if(ncnt == 0) { return(0); }
@@ -3702,15 +3714,12 @@ uint64_t mm_next_pos(
 	radix_sort_64x((v2u32_t *)n, ncnt);
 
 	/* extract next */
-	uint32_t nsid = n[ncnt - 1]>>32;
+	uint32_t nsid = n[--self->next.n]>>32;
 	mm_seed_t const *p = &s[nsid];		/* load tail */
 	cp->apos = _as(p);
 	cp->bpos = _bs(p);
-	cp->pacc = ofs - _lo32(n[ncnt - 1]);
-	cp->sid = nsid;
-
-	uint32_t rev = _smask(cp->bpos);
-	if(rev) { cp->bpos = self->qlen + cp->bpos; }
+	cp->pacc = ofs - _lo32(n[self->next.n]);
+	if((int32_t)cp->bpos < 0) { cp->bpos = self->qlen + cp->bpos; }
 
 	debug("load next, sid(%u), id(%u, %u), bare(%d, %d), cp(%d, %d), prem(%d)",
 		cp->sid, cp->aid, cp->bid,
@@ -3769,8 +3778,8 @@ int64_t mm_test_pos(
 	v2u32_t *h = (v2u32_t *)kh_get_ptr(&self->pos, _key(_loadu_u64(&cp->apos), _loadu_u64(&cp->aid)));
 	debug("pos(%u, %u), key(%lx), h(%p)", cp->apos, cp->bpos, _key(_loadu_u64(&cp->apos), _loadu_u64(&cp->aid)), h);
 	if(h == NULL) { return(-1); }						/* not existing */
-	debug("key(%lx)", kh_key(h));
-	if(kh_val(h) == KH_INIT_VAL) { return(0); }			/* key exists but no val found */
+	debug("key(%lx)", h[-1].u64[0]);
+	if(h->u64[0] == KH_INIT_VAL) { return(0); }			/* key exists but no val found */
 
 	/* res_id in lower, aln_id (global) in higher */
 	return(((gaba_alignment_t const **)self->bin.a)[h->u32[1]]->score);
@@ -3818,9 +3827,7 @@ v4u32_t mm_update_pos(
 	uint64_t hkey = _key(_cvt_v2i32_u64(hp), id);
 	uint64_t tkey = _key(_cvt_v2i32_u64(tp), id);
 	debug("adjusted prem(%d), plen(%lu), hash key, h(%lx), t(%lx)", cp->prem, a->plen, hkey, tkey);
-	return((v4u32_t){
-		.u64 = { hkey, tkey }
-	});
+	return((v4u32_t){ .u64 = { hkey, tkey } });
 }
 
 /**
@@ -4017,21 +4024,16 @@ uint64_t mm_extend(
 					.bpos = self->q[0].len - tp.bpos
 				})
 			);
-			if(t->max < self->min_score) {		/* max == 0 indicates alignment was not found */
-				debug("no significant alignment found, mark pos: (%u, %u)", tp.apos, tp.bpos);
+			gaba_alignment_t const *a = NULL;	/* lmm is contained in self->trace */
+			if(t->max < self->min_score || (a = gaba_dp_trace(_dp(0), t, &self->alloc)) == NULL) {
+				/* max == 0 indicates alignment was not found */
+				debug("not significant or failed traceback: len(%u, %u), score(%ld), <- (%u, %u)", self->r[0].len, self->q[0].len, t->max, tp.apos, tp.bpos);
 				mm_mark_pos(self, &tp);			/* mark "evaluated but not found" */
 				continue;
 			}
-
 			/* generate alignment: coordinates are reversed again, gaps are left-aligned in the resulting path */
-			gaba_alignment_t const *a = gaba_dp_trace(_dp(0), t, &self->alloc);		/* lmm is contained in self->trace */
-			if(a == NULL) {
-				debug("failed to generate trace: len(%u, %u), plen(%lu), score(%ld), <- (%u, %u)", self->r[0].len, self->q[0].len, a->plen, t->max, tp.apos, tp.bpos);
-				continue;						/* something is wrong... */
-			}
 			debug("slen(%u), len(%u, %u), score(%ld), (%u, %u) <- (%u, %u)", a->slen, self->r[0].len, self->q[0].len, t->max, self->r[0].len - a->seg->apos - a->seg->alen, self->q[0].len - a->seg->bpos - a->seg->blen, self->r[0].len - a->seg->apos, self->q[0].len - a->seg->bpos);
 			if(a->slen > 1) { debug("second, len(%u, %u), score(%ld), (%u, %u) <- (%u, %u)", self->r[0].len, self->q[0].len, t->max, self->r[0].len - a->seg[1].apos - a->seg[1].alen, self->q[0].len - a->seg[1].bpos - a->seg[1].blen, self->r[0].len - a->seg[1].apos, self->q[0].len - a->seg[1].bpos); }
-
 
 			/* record alignment, update current head position */
 			if(mm_record_pos(self, res, &cp, a)) {
@@ -4278,15 +4280,17 @@ void mm_init_query(
 {
 	/* clear buffers */
 	self->resc.n = 0;
+	self->presc = self->resc.a;
 	self->seed.n = 0;
+	self->n_seed = 0;
 	self->root.n = 0;
 	self->next.n = 0;
+	self->n_res = 0;
 	self->bin.n = 0;
 	kh_clear(&self->pos);
-	self->n_res = 0;
 
 	/* set query seq info; the query sequence can be a pair of an array of subsequences and a list of links between subsequences */
-	self->qid = qid;
+	self->qid = 0; /* qid; */
 	self->qlen = l_seq;
 	self->q[0] = _sec_fw(0, seq, l_seq);		/* gaba::id is always set zero so that seq is treated as uint8_t const *[1] */
 	self->q[1] = _sec_rv(0, seq, l_seq);
@@ -4362,11 +4366,11 @@ static _force_inline
 void mm_tbuf_destroy(mm_tbuf_t *t)
 {
 	if(t == NULL) { return; }
-	free(t->resc.a);
-	free(t->seed.a);
-	free(t->root.a);
-	free(t->next.a);
-	free(t->bin.a);
+	if(t->resc.a) { free(t->resc.a); }
+	if(t->seed.a) { free(t->seed.a); }
+	if(t->root.a) { free(t->root.a); }
+	if(t->next.a) { free(t->next.a); }
+	if(t->bin.a) { free(t->bin.a); }
 	kh_destroy_static(&t->pos);
 	gaba_dp_clean(t->dp);
 	free(t);
@@ -5064,7 +5068,6 @@ void mm_print_sam_mapped_core(
 	_putsk(b, "*\t*\t0\t0\t");								/* CIGAR is moved to CG:Z tag; mate tags, unused */
 
 	/* print sequence */
-	fprintf(stderr, "\n");
 	if(s->bid & 0x01) {
 		_putsnt(b, &q[qid].seq[qs], qe - qs, decaf);
 	} else {
@@ -5575,6 +5578,7 @@ void mm_print_destroy(
 	mm_print_t *pr)
 {
 	fwrite(pr->base, sizeof(uint8_t), pr->p - pr->base, stdout);
+	free(pr->arg_line); free(pr->rg_line); free(pr->rg_id);
 	free(pr->base); free(pr);
 	return;
 }
@@ -6021,12 +6025,13 @@ void mm_opt_destroy(mm_opt_t *o)
 {
 	pt_destroy(o->pt);
 	kv_foreach(void *, o->parg, { free(*p); });
+	kh_str_destroy_static(&o->c.circ);
 	free(o->parg.a);
 	free(o->fnw);
 	free(o->tags.a);
+	free(o->r.arg_line);
 	free(o->r.rg_line);
 	free(o->r.rg_id);
-	free(o->r.arg_line);
 	free(o);
 	return;
 }
