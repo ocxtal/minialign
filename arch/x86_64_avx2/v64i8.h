@@ -144,7 +144,7 @@ typedef struct v64i8_s {
 	(v64i8_t) { \
 		_mm256_alignr_epi8( \
 			(a).v1, \
-			_mm256_permute2x128_si256((a).v1, (a).v2, 0x04), \
+			_mm256_permute2x128_si256((a).v1, (a).v2, 0x08), \
 			15), \
 		_mm256_alignr_epi8( \
 			(a).v2, \
