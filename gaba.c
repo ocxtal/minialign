@@ -1512,13 +1512,15 @@ struct gaba_joint_tail_s *fill_create_tail(
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
 	register nvec_t di = _add_n(dv, _load_gfv(self->scv)); \
 	register nvec_t dd = _sub_n(_load_gfh(self->scv), dh); \
+	_print_n(_sub_n(_zero_n(), dh)); _print_n(dv); _print_n(de); _print_n(df); \
 	_print_n(dd); _print_n(di); \
+	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
 	register nvec_t s = _max_n(de, df); \
-	t = _shuf_n(_load_sb(self->scv), t); \
+	t = _shuf_n(_load_sb(self->scv), t); _print_n(t); \
 	s = _max_n(s, di); \
 	t = _max_n(t, dd); \
 	t = _max_n(t, s); \
-	_print_n(t); _print_n(dd); _print_n(di); \
+	_print_n(t); \
 	uint64_t mask_gfa = _mask_u64(_mask_n(_eq_n(t, di))), mask_gh = _mask_u64(_mask_n(_eq_n(t, de))); \
 	uint64_t mask_gfb = _mask_u64(_mask_n(_eq_n(t, dd))), mask_gv = _mask_u64(_mask_n(_eq_n(t, df))); \
 	debug("mask_gfa(%lx), mask_gh(%lx), mask_gfb(%lx), mask_gv(%lx)", mask_gfa, mask_gh, mask_gfb, mask_gv); \
@@ -1747,7 +1749,10 @@ struct gaba_block_s *fill_bulk_k_blocks(
 	struct gaba_block_s *tblk = blk + cnt;
 	while((blk->xstat | (ptrdiff_t)(tblk - blk)) > 0) {
 		/* bulk fill */
-		debug("blk(%p)", blk + 1);
+		debug("blk(%p), aadv(%u), badv(%u), max(%ld)", blk + 1,
+			self->w.r.asridx - self->w.r.arem - self->w.r.arlim,
+			self->w.r.bsridx - self->w.r.brem - self->w.r.brlim,
+			self->w.r.md.delta[_W/2] + self->w.r.xd.drop[_W/2] + _offset(self->w.r.tail) + self->w.r.ofsd);
 		fill_bulk_block(self, ++blk);
 	}
 	debug("return, blk(%p), xstat(%x), pridx(%u)", blk, blk->xstat, self->w.r.pridx);
@@ -1765,7 +1770,10 @@ struct gaba_block_s *fill_bulk_seq_bounded(
 {
 	/* bulk fill loop, first check termination */
 	while((blk->xstat | fill_bulk_test_idx(self)) >= 0) {
-		debug("blk(%p)", blk + 1);
+		debug("blk(%p), aadv(%u), badv(%u), max(%ld)", blk + 1,
+			self->w.r.asridx - self->w.r.arem - self->w.r.arlim,
+			self->w.r.bsridx - self->w.r.brem - self->w.r.brlim,
+			self->w.r.md.delta[_W/2] + self->w.r.xd.drop[_W/2] + _offset(self->w.r.tail) + self->w.r.ofsd);
 		fill_bulk_block(self, ++blk);
 	}
 	debug("return, blk(%p), xstat(%x)", blk, blk->xstat);
@@ -2455,6 +2463,27 @@ uint64_t leaf_load_max_mask(
 	return(max_mask);
 }
 
+/**
+ * @fn leaf_search_pos
+ */
+static _force_inline
+void leaf_search_pos(
+	struct gaba_dp_context_s *self,
+	nvec_masku_t const *mask_arr,
+	nvec_masku_t const *m,
+	uint64_t max_mask)
+{
+	/* search max cell, probe from the tail to the head */
+	while(m > mask_arr && (max_mask & ~(--m)->all) != 0) {
+		debug("max_mask(%lx), m(%lx)", max_mask, (uint64_t)m->all);
+		max_mask &= ~m->all;
+	}
+	debug("max_mask(%lx), m(%lx)", max_mask, (uint64_t)m->all);
+	self->w.l.p = m - mask_arr;
+	self->w.l.q = tzcnt(m->all & max_mask);
+	debug("p(%u), q(%u)", self->w.l.p, self->w.l.q);
+}
+
 #ifndef DEBUG_ALL
 #  undef DEBUG
 #  undef _LOG_H_INCLUDED
@@ -2495,15 +2524,8 @@ void leaf_detect_pos(
 		}
 	}
 
-	/* search max cell, probe from the tail to the head */
-	while(m > mask_arr && (max_mask & ~(--m)->all) != 0) {
-		debug("max_mask(%lx), m(%lx)", max_mask, (uint64_t)m->all);
-		max_mask &= ~m->all;
-	}
-	debug("max_mask(%lx), m(%lx)", max_mask, (uint64_t)m->all);
-	self->w.l.p = m - mask_arr;
-	self->w.l.q = tzcnt(m->all & max_mask);
-	debug("p(%u), q(%u)", self->w.l.p, self->w.l.q);
+	/* search */
+	leaf_search_pos(self, mask_arr, m, max_mask);
 	return;
 }
 
@@ -2877,6 +2899,7 @@ enum {
 	if(_unlikely(mask < blk->mask)) { \
 		_trace_reload_block(); \
 		if(_unlikely(!_trace_test_bulk())) {	/* adjust gidx */ \
+			if(q >= _W) { goto _trace_term; }	/* out-of-bound check */ \
 			gidx = _add_v2i32(gidx, _seta_v2i32(q - save, save - q)); \
 			debug("jump to %s, adjust gidx, q(%d), prev_q(%d), adj(%d, %d), gidx(%u, %u)", #_jump_to, \
 				q, self->w.l.q, q - save, save - q, _hi32(gidx), _lo32(gidx)); \
