@@ -46,7 +46,7 @@
  *   affine:   g(k) =     gi + ge * k          where gi > 0,      ge > 0
  *   combined: g(k) = min(gi + ge * k, gf * k) where gi > 0, gf > ge > 0
  */
-#define LINEAR 						0
+#define LINEAR						0
 #define AFFINE						1
 #define COMBINED					2
 
@@ -55,7 +55,7 @@
 #    error "MODEL must be LINEAR (1), AFFINE (2), or COMBINED (3)."
 #  endif
 #else
-#  define MODEL 					AFFINE
+#  define MODEL					AFFINE
 #endif
 
 #if MODEL == LINEAR
@@ -162,14 +162,14 @@
 
 
 /* static assertion macros */
-#define _sa_cat_intl(x, y) 		x##y
+#define _sa_cat_intl(x, y)		x##y
 #define _sa_cat(x, y)			_sa_cat_intl(x, y)
 #define _static_assert(expr)	typedef char _sa_cat(_st, __LINE__)[(expr) ? 1 : -1]
 
 
 /* internal constants */
 #define BLK_BASE					( 5 )
-#define BLK 						( 0x01<<BLK_BASE )
+#define BLK						( 0x01<<BLK_BASE )
 
 #ifdef DEBUG_MEM
 #  define MIN_BULK_BLOCKS			( 0 )
@@ -299,14 +299,14 @@ _static_assert(sizeof(struct gaba_char_vec_s) == _W);
  */
 struct gaba_block_s {
 	struct gaba_mask_pair_s mask[BLK];	/** (256 / 512) traceback capability flag vectors (set if transition to the ajdacent cell is possible) */
-	struct gaba_diff_vec_s diff; 		/** (64, 128, 256) diff variables of the last vector */
+	struct gaba_diff_vec_s diff;		/** (64, 128, 256) diff variables of the last vector */
 	int8_t acc, xstat;					/** (2) accumulator, and xdrop status (term detected when xstat < 0) */
 	int8_t acnt, bcnt;					/** (2) forwarded lengths */
 	uint32_t dir_mask;					/** (4) extension direction bit array */
 	uint64_t max_mask;					/** (8) lanewise update mask (set if the lane contains the current max) */
 };
 struct gaba_phantom_s {
-	struct gaba_diff_vec_s diff; 		/** (64, 128, 256) diff variables of the last (just before the head) vector */
+	struct gaba_diff_vec_s diff;		/** (64, 128, 256) diff variables of the last (just before the head) vector */
 	int8_t acc, xstat;					/** (2) accumulator, and xdrop status (term detected when xstat < 0) */
 	int8_t acnt, bcnt;					/** (4) prefetched sequence lengths (only effective at the root, otherwise zero) */
 	uint32_t reserved;					/** (4) overlaps with dir_mask */
@@ -329,11 +329,11 @@ struct gaba_merge_s {
 	uint64_t reserved1;					/** (8) keep aligned to 16byte boundary */
 	struct gaba_block_s const *blk[1];	/** (8) addressed by [tail_idx[vec][q]] */
 	int8_t tidx[2][_W];					/** (32, 64, 128) lanewise index array */
-	struct gaba_diff_vec_s diff; 		/** (64, 128, 256) diff variables of the last (just before the head) vector */
+	struct gaba_diff_vec_s diff;		/** (64, 128, 256) diff variables of the last (just before the head) vector */
 	int8_t acc, xstat;					/** (2) acc and xstat are reserved for block_s */
 	uint8_t reserved2[13], qofs[1];		/** (14) displacement of vectors in the q-direction */
 };
-#define MERGE_TAIL_OFFSET 			( BLK * sizeof(struct gaba_mask_pair_s) - 2 * _W - 2 * sizeof(void *) )
+#define MERGE_TAIL_OFFSET			( BLK * sizeof(struct gaba_mask_pair_s) - 2 * _W - 2 * sizeof(void *) )
 #define _merge(x)					( (struct gaba_merge_s *)((uint8_t *)(x) + MERGE_TAIL_OFFSET) )
 _static_assert(sizeof(struct gaba_merge_s) % 16 == 0);
 _static_assert(sizeof(struct gaba_merge_s) + MERGE_TAIL_OFFSET == sizeof(struct gaba_block_s));
@@ -650,13 +650,13 @@ _static_assert((int32_t)TERM<<8 == (int32_t)GABA_TERM);
 /**
  * max and min
  */
-#define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
-#define MAX3(x,y,z) 	( MAX2(x, MAX2(y, z)) )
-#define MAX4(w,x,y,z) 	( MAX2(MAX2(w, x), MAX2(y, z)) )
+#define MAX2(x,y)		( (x) > (y) ? (x) : (y) )
+#define MAX3(x,y,z)		( MAX2(x, MAX2(y, z)) )
+#define MAX4(w,x,y,z)	( MAX2(MAX2(w, x), MAX2(y, z)) )
 
-#define MIN2(x,y) 		( (x) < (y) ? (x) : (y) )
-#define MIN3(x,y,z) 	( MIN2(x, MIN2(y, z)) )
-#define MIN4(w,x,y,z) 	( MIN2(MIN2(w, x), MIN2(y, z)) )
+#define MIN2(x,y)		( (x) < (y) ? (x) : (y) )
+#define MIN3(x,y,z)		( MIN2(x, MIN2(y, z)) )
+#define MIN4(w,x,y,z)	( MIN2(MIN2(w, x), MIN2(y, z)) )
 
 
 /**
@@ -674,7 +674,7 @@ void *gaba_malloc(
 	size = _roundup(size, MEM_ALIGN_SIZE);
 	if(posix_memalign(&ptr, MEM_ALIGN_SIZE, size + 2 * MEM_MARGIN_SIZE) != 0) {
 		debug("posix_memalign failed");
-		return(NULL);
+		trap(); return(NULL);
 	}
 	debug("posix_memalign(%p), size(%lu)", ptr, size);
 	return(ptr + MEM_MARGIN_SIZE);
@@ -776,6 +776,7 @@ struct gaba_dir_s {
  * @brief calculate scores
  */
 #define _max_match(_p)				( _hmax_v16i8(_loadu_v16i8((_p)->score_matrix)) )
+#define _min_match(_p)				( -_hmax_v16i8(_sub_v16i8(_zero_v16i8(), _loadu_v16i8((_p)->score_matrix))) )
 #if MODEL == LINEAR
 #define _gap_h(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
 #define _gap_v(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
@@ -815,8 +816,8 @@ enum BASES { A = 0x01, C = 0x02, G = 0x04, T = 0x08, N = 0x00 };
 #if BIT == 2
 /* 2bit encoding */
 static uint8_t const comp_mask_a[16] __attribute__(( aligned(16) )) = {
-	0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03,
-	0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03, 0x03
+	0x03, 0x02, 0x01, 0x00, 0x04, 0x04, 0x04, 0x04,
+	0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04
 };
 static uint8_t const shift_mask_b[16] __attribute__(( aligned(16) )) = {
 	0x00, 0x04, 0x08, 0x0c, 0x02, 0x02, 0x02, 0x02,
@@ -828,18 +829,18 @@ static uint8_t const compshift_mask_b[16] __attribute__(( aligned(16) )) = {
 };
 /* q-fetch (anti-diagonal matching for vector calculation) */
 
-#  define _fwaq_v16i8(_v)		( _xor_v16i8((_load_v16i8(comp_mask_a)), (_v)) )
-#  define _fwaq_v32i8(_v)		( _xor_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask_a))), (_v)) )
+#  define _fwaq_v16i8(_v)		( _shuf_v16i8((_load_v16i8(comp_mask_a)), (_v)) )
+#  define _fwaq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask_a))), (_v)) )
 #  define _rvaq_v16i8(_v)		( _swap_v16i8((_v)) )
 #  define _rvaq_v32i8(_v)		( _swap_v32i8((_v)) )
 #  define _fwbq_v16i8(_v)		( _shuf_v16i8((_load_v16i8(shift_mask_b)), (_v)) )
 #  define _fwbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(shift_mask_b))), (_v)) )
 #  define _rvbq_v16i8(_v)		( _shuf_v16i8((_load_v16i8(compshift_mask_b)), _swap_v16i8(_v)) )
-#  define _rvbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(compshift_mask_b))), _swap_v32i8(_v)) ) 
+#  define _rvbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(compshift_mask_b))), _swap_v32i8(_v)) )
 
 #if 0
-#  define _fwaq_v16i8(_v, _l)	( _xor_v16i8((_load_v16i8(comp_mask_a)), (_v)) )	/* _l is ignored */
-#  define _fwaq_v32i8(_v)		( _xor_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask_a))), (_v)) )
+#  define _fwaq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask_a)), (_v)) )	/* _l is ignored */
+#  define _fwaq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask_a))), (_v)) )
 #  define _rvaq_v16i8(_v, _l)	( _swapn_v16i8((_v), (_l)) )
 #  define _rvaq_v32i8(_v)		( _swap_v32i8((_v)) )
 #  define _fwbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(shift_mask_b)), (_v)) )	/* _l is ignored */
@@ -850,7 +851,7 @@ static uint8_t const compshift_mask_b[16] __attribute__(( aligned(16) )) = {
 
 /* p-fetch (diagonal matching for alignment refinement) */
 #  define _fwap_v16i8(_v, _l)	( (_v) )
-#  define _rvap_v16i8(_v, _l)	( _xor_v16i8((_load_v16i8(comp_mask_a)), _swapn_v16i8((_v), (_l))) )
+#  define _rvap_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask_a)), _swapn_v16i8((_v), (_l))) )
 #  define _fwbp_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(shift_mask_b)), (_v)) )
 #  define _rvbp_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(compshift_mask_b)), _swapn_v16i8((_v), (_l))) )
 
@@ -1482,7 +1483,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 #define _fill_body() { \
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
 	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
-	t = _shuf_n(_load_sb(self->scv), t); _print_n(_load_sb(self->scv)); _print_n(t); \
+	t = _shuf_n(_load_sb(self->scv), t); _print_n(t); \
 	t = _max_n(de, t); \
 	t = _max_n(df, t); \
 	ptr->h.mask = _mask_n(_eq_n(t, de)); \
@@ -3327,7 +3328,7 @@ void gaba_init_restore_default(
 		/* affine gap penalty */
 		p->gi = 1; p->ge = 1; p->gfa = 0; p->gfb = 0;
 	}
-	restore(xdrop, 			50);
+	restore(xdrop,			50);
 	restore(filter_thresh,	0);					/* disable filter */
 	restore(head_margin,	0);
 	restore(tail_margin,	0);
@@ -3342,7 +3343,12 @@ static _force_inline
 int64_t gaba_init_check_score(
 	struct gaba_params_s const *p)
 {
-	if(_max_match(p) > 7) { return(-1); }
+	if(_max_match(p) <= 0) { return(-1); }
+	if(_max_match(p) > 6) { return(-1); }
+	if(_min_match(p) >= 0) { return(-1); }
+	if(_min_match(p) < -7) { return(-1); }
+	if(_min_match(p) < -2 * (p->gi + p->ge)) { return(-1); }
+	if(p->gfa != 0 && p->gfb != 0 && _min_match(p) < -1 * (p->gfa + p->gfb)) { return(-1); }
 	if(p->ge <= 0) { return(-1); }
 	if(p->gi < 0) { return(-1); }
 	if(p->gfa < 0 || (p->gfa != 0 && p->gfa <= p->ge)) { return(-1); }
@@ -3372,13 +3378,11 @@ struct gaba_score_vec_s gaba_init_score_vector(
 	struct gaba_score_vec_s sc __attribute__(( aligned(MEM_ALIGN_SIZE) ));
 
 	/* score matrices */
-	_print_v16i8(scv);
 	#if BIT == 4
 		int8_t m = _hmax_v16i8(scv);
 		int8_t x = _hmax_v16i8(_sub_v16i8(_zero_v16i8(), scv));
 		scv = _add_v16i8(_bsl_v16i8(_set_v16i8(m + x), 1), _set_v16i8(-x));
 	#endif
-	_print_v16i8(scv);
 	_store_sb(sc, _add_v16i8(scv, _set_v16i8(-2 * (ge + gi))));
 
 	/* gap penalties */
@@ -3587,6 +3591,7 @@ gaba_t *_export(gaba_init)(
 		/* create new context */
 		gaba_init_restore_default(&pi);			/* restore defaults */
 		if(gaba_init_check_score(&pi) != 0) {	/* check the scores are applicable */
+			debug("unsupported score: (%d, %d, %d, %d, %d, %d)", p->score_matrix[0], p->score_matrix[1], p->gi, p->ge, p->gfa, p->gfb);
 			return(NULL);						/* cannot be instanciated with the score param */
 		}
 
@@ -3805,41 +3810,75 @@ void _export(gaba_dp_clean)(
 #include <unistd.h>
 
 /**
+ * @struct unittest_context_s
+ */
+struct unittest_context_s {
+	struct gaba_params_s const *params;
+	struct gaba_context_s *ctx;
+	struct gaba_dp_context_s *dp;
+};
+
+/**
  * @fn unittest_build_context
  * @brief build context for unittest
  */
 #if MODEL == LINEAR
-static struct gaba_params_s const *unittest_default_params = GABA_PARAMS(
-	.xdrop = 100,
-	GABA_SCORE_SIMPLE(2, 3, 0, 6)
-);
+static struct gaba_params_s const *unittest_default_params[8] = {
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 0, 6)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(1, 2, 0, 1)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 4, 0, 3)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 6, 0, 3)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(4, 5, 0, 8)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(4, 7, 0, 8)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 3, 0, 8)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 7, 0, 5))
+};
 #elif MODEL == AFFINE
-static struct gaba_params_s const *unittest_default_params = GABA_PARAMS(
-	.xdrop = 100,
-	GABA_SCORE_SIMPLE(2, 3, 5, 1)
-);
+static struct gaba_params_s const *unittest_default_params[8] = {
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 5, 1)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(1, 2, 2, 1)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(1, 3, 2, 1)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 6, 3, 1)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(4, 5, 8, 2)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(6, 7, 5, 3)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 3, 8, 2)),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 7, 10, 2))
+};
 #else
-static struct gaba_params_s const *unittest_default_params = GABA_PARAMS(
-	.xdrop = 100,
-	GABA_SCORE_SIMPLE(2, 3, 5, 1),
-	.gfa = 2, .gfb = 2
-);
+static struct gaba_params_s const *unittest_default_params[8] = {
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 2, .gfb = 2),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 4, 5, 1), .gfa = 2, .gfb = 2),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 4, .gfb = 2),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 2, .gfb = 4),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(4, 5, 8, 2), .gfa = 3, .gfb = 3),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(6, 7, 5, 3), .gfa = 4, .gfb = 4),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 3, 5, 2), .gfa = 3, .gfb = 3),
+	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 7, 10, 2), .gfa = 4, .gfb = 4)
+};
 #endif
 static
 void *unittest_build_context(void *params)
 {
 	/* build context */
-	gaba_t *ctx = _export(gaba_init)(unittest_default_params);
-	return((void *)ctx);
+	struct unittest_context_s *c = malloc(sizeof(struct unittest_context_s));
+	c->params = unittest_default_params[rand() % 8];
+	c->ctx = _export(gaba_init)(c->params);
+	c->dp = _export(gaba_dp_init)(c->ctx);
+
+	if(c->ctx == NULL) { trap(); }
+	if(c->dp == NULL) { trap(); }
+	return((void *)c);
 }
 
 /**
  * @fn unittest_clean_context
  */
 static
-void unittest_clean_context(void *ctx)
+void unittest_clean_context(void *gctx)
 {
-	_export(gaba_clean)((struct gaba_context_s *)ctx);
+	struct unittest_context_s *c = (struct unittest_context_s *)gctx;
+	_export(gaba_dp_clean)(c->dp);
+	_export(gaba_clean)(c->ctx);
 	return;
 }
 
@@ -3851,24 +3890,15 @@ unittest_config(
 );
 
 /**
- * check if gaba_init returns a valid pointer to a context
+ * check if gaba_init and gaba_dp_init returned valid pointers to context
  */
 unittest()
 {
-	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx;
+	struct unittest_context_s *c = (struct unittest_context_s *)gctx;
 	assert(c != NULL, "%p", c);
-}
-
-/**
- * check if gaba_dp_init returns a vaild pointer to a dp context
- */
-unittest()
-{
-	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx;
-	struct gaba_dp_context_s *d = _export(gaba_dp_init)(c);
-
-	assert(d != NULL, "%p", d);
-	_export(gaba_dp_clean)(d);
+	assert(c != NULL, "%p", c->params);
+	assert(c != NULL, "%p", c->ctx);
+	assert(c != NULL, "%p", c->dp);
 }
 
 /* print_cigar test */
@@ -4371,7 +4401,7 @@ struct unittest_naive_result_s unittest_naive(
 #if MODEL == LINEAR
 unittest( .name = "naive" )
 {
-	struct gaba_params_s const *p = unittest_default_params;
+	struct gaba_params_s const *p = unittest_default_params[0];
 	struct unittest_naive_result_s n;
 
 	/* all matches */
@@ -4401,7 +4431,7 @@ unittest( .name = "naive" )
 #elif MODEL == AFFINE
 unittest( .name = "naive" )
 {
-	struct gaba_params_s const *p = unittest_default_params;
+	struct gaba_params_s const *p = unittest_default_params[0];
 	struct unittest_naive_result_s n;
 
 	/* all matches */
@@ -4436,7 +4466,7 @@ unittest( .name = "naive" )
 #else /* COMBINED */
 unittest( .name = "naive" )
 {
-	struct gaba_params_s const *p = unittest_default_params;
+	struct gaba_params_s const *p = unittest_default_params[0];
 	struct unittest_naive_result_s n;
 
 	/* all matches */
@@ -4849,12 +4879,16 @@ char *string_pair_diff(
 static
 void unittest_test_pair(
 	UNITTEST_ARG_DECL,
+	struct gaba_params_s const *params,
 	struct gaba_dp_context_s *dp,
 	struct unittest_seq_pair_s const *pair,
 	uint64_t dir)
 {
-	#define FMT			"[%s:%d:%s] { .a = { \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\" }, .b = { \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\" } }"
-	#define ARG			MODEL_STR, _W, dir == 0 ? "fw" : "rv", pair->a[0], pair->a[1], pair->a[2], pair->a[3], pair->a[4], pair->a[5], pair->b[0], pair->b[1], pair->b[2], pair->b[3], pair->b[4], pair->b[5]
+	#define FMT			"[%s:%d:%s] (%d, %d, %d, %d, %d, %d) { .a = { \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\" }, .b = { \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\" } }"
+	#define ARG			MODEL_STR, _W, dir == 0 ? "fw" : "rv", \
+		params->score_matrix[0], params->score_matrix[1], params->gi, params->ge, params->gfa, params->gfb, \
+		pair->a[0], pair->a[1], pair->a[2], pair->a[3], pair->a[4], pair->a[5], \
+		pair->b[0], pair->b[1], pair->b[2], pair->b[3], pair->b[4], pair->b[5]
 
 	/* prepare sequences */
 	char *a = unittest_cat_seq(pair->a);
@@ -4868,7 +4902,7 @@ void unittest_test_pair(
 	);
 
 	/* test naive implementations */
-	struct unittest_naive_result_s nr = unittest_naive(unittest_default_params, a, b, asec, bsec);
+	struct unittest_naive_result_s nr = unittest_naive(params, a, b, asec, bsec);
 	assert(nr.score >= 0);
 	assert(nr.path_length <= strlen(a) + strlen(b));
 	assert(nr.path != NULL);
@@ -4895,7 +4929,7 @@ void unittest_test_pair(
 
 	assert(r != NULL);
 	assert(r->plen == nr.path_length, FMT ", m->plen(%lu), nr.path_length(%u)", ARG, r->plen, nr.path_length);
-	assert(unittest_check_path(r, nr.path), "\n%s", ARG, format_string_pair_diff(unittest_decode_path(r), nr.path));
+	assert(unittest_check_path(r, nr.path), FMT "\n%s", ARG, format_string_pair_diff(unittest_decode_path(r), nr.path));
 	assert(unittest_check_section(r, nr.sec, nr.scnt), FMT, ARG);
 
 	/* calc score */
@@ -4903,6 +4937,7 @@ void unittest_test_pair(
 		struct gaba_score_s const *c = _export(gaba_dp_calc_score)(dp,
 			r->path, &r->seg[i], &s->a[r->seg[i].aid>>1], &s->b[r->seg[i].bid>>1]
 		);
+		(void)c;
 	}
 
 	/* cleanup everything */
@@ -5162,7 +5197,29 @@ unittest( .name = "base" )
 		{
 			.a = { "GTCCTGTTACACCCCAGGCGACGGGAGT", "CGGCATAGGTTTTACACCGTTCAATGGTCCTGAGT", "CTGATCTGCATTG" },
 			.b = { "GTCCTGTTACACCCCCAGGCGACCGGGAGT", "CGTCATAGCGTTTTACACCGTTCAATGTCTCTTAGGT", "CTGTTTCATG" }
-		}
+		},
+		/* debugging combined */
+		{
+			.a = {
+				"CTCACTGCCACACACGGTTCG",
+				"ACCCACTTTAGCATATCC",
+				"GCCTTTCG",
+				"GCTTGAAGGTCCAAGATGTATTTCAGATTGGGTCCGGCAAAGCAGACCGAGGTCTTTTTGCCACGCTAGTATCGTTGACACTGAACATATCGAGTGTGTGCTCTCAGTCTAGGGGGAGCACTGCCCAATTGCGTAAAGTCGTTAGCTGAAGCTCTAGTCGGTTATTATCAATTTACATTATGGTTCTCAATGAGGTCTGTTGGGCGACCTGCCAAACTGCACTAACTCACATTTGACGCTCTATTATATCCTTATTGGAGTCGGAAGCGAATTAGTAGTATCTGCTCTCGGCTATTAGAGGCCCCAAGGAGCCCAGACGGTATGAGCAAGGGTTAATAGCAATCGTAGAGAAGTGGGAGGGACCTCCTCAAGATTGGTCTCCTTCCCTCTCTTGATTGGCGGTGGGCAGGTTTGTAAATCACCTTCGTTAACTTACCCCTTCTGTGTTGGCGTGGTTAGTCGAACACGCGGATCTTTGGCATAACGT",
+				"GCATTATACAGGTATGCGCAAAGATGACATGGAGGTGCTTGGGCGCTATCATCGTAAACATTTACCTAGTTACCCTGCTCGAATGATTAC",
+				"TAGTGTTG"
+			},
+			.b = {
+				"GTGTCGCTGCCCTCACACCGCTCG",
+				"ACCACTTTAGCATTCC",
+				"GCCTTTGG",
+				"GCTTGAAGGTCCAAGCTGTATTTCAGATTGGGTCGGCTAAGCAGACTGAGGTCTATTTGCACACGCTAGTATCGGTGACACTTCACATATTCGAGTGTGCGCTCTCAAGTCTAGGGGAGCACGCCGACATTGCGTAAAGTCAGTTAGATAGAAGCTCTAAGTCGGTAATTATTAAGTATCATTATGGGTCTCCAGAGGTCTGTTGGGGACCTGCCAAACTGCACTAACTCACATTTGCGCTTATTATATCACTTATTGGAATCGGAAGTGAATTAGTAGTATCTGCTCTCGGCTATTAGAGGCCCCCATGACTCAGCGCGATGAGACCAAGGTCAAGTACCAATCGTAGAGTAAGGCGAGAATCCTCCTTCAGATCGGCTCTTCCCTCTCTTGATTGGCGGTGGGCAGATTTATAATCACCTTCGTTAACCCAGCCCTTACTGTGTTGTCGATGGTAAGTCGAGACCCCGGATCTTTGGCATAAGT",
+				"GCATTATACAGGGATGGCCAAGTTGACACGGAGTGCTGGGCGCATTTTCGTAAACATTTACCTAGATTACCATGCTCGAATCAGATTAAGC",
+				"TAGTGGTTG"
+			}
+		},
+		{ .a = { "GGCATCAGGTTGCGACC", "AACGACAGATCACTGGTGTAACTTAAC", "G", "AGGCATTACTTGTAG" }, .b = { "GGCATCAGCTTGCGACC", "AAGCGCAGGATCACTGGTGTGGAAACTGTT", "G", "AGGCTGTTTACTCGTAG" } },
+		{ .a = { "GTAGT", "TCAATATTAGACGATGGCTGCTTTCCTCAG", "TTCATCTGC", "GTAGGGAAGGCCCCTTAATGCGCGGATCGATATT" }, .b = { "GTAGT", "TCCATATTAGACGAAGGCTGCGGTCTCG", "TTATCCTGC", "GCAGGAGAGGCCCCTTAATGCGTGGATCGAATATG" } },
+		{ .a = { "ACAAAAAGATCGGTC", "ATGGGACGTTGACAGCGGGGTGATCGGTCTTGGCAA", "GTACCATGTA", "CGGAATACCGCGCAATCCTTTGTAAATGTAGAGACTTCAATCTACTTTAGGTC" }, .b = { "ACTAAAAGTCGGAC", "ATAGACGTTCACAGCGGTGATCCGGACTTGGCAA", "GTACCATGTA", "CGGAGTACCACGCACTCCTTTATAAAGTAGAGACTTAAATCCTACTTGAATGGC" } },
 		/* fails for affine-16 due to the bandwidth shotage */
 #if 0
 		{
@@ -5172,15 +5229,13 @@ unittest( .name = "base" )
 #endif
 	};
 
-	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx;
-	struct gaba_dp_context_s *dp = _export(gaba_dp_init)(c);
+	struct unittest_context_s *c = (struct unittest_context_s *)gctx;
 
 	for(uint64_t i = 0; i < sizeof(pairs) / sizeof(struct unittest_seq_pair_s); i++) {
-		_export(gaba_dp_flush)(dp);
-		unittest_test_pair(UNITTEST_ARG_LIST, dp, &pairs[i], 0);
-		unittest_test_pair(UNITTEST_ARG_LIST, dp, &pairs[i], 1);
+		_export(gaba_dp_flush)(c->dp);
+		unittest_test_pair(UNITTEST_ARG_LIST, c->params, c->dp, &pairs[i], 0);
+		unittest_test_pair(UNITTEST_ARG_LIST, c->params, c->dp, &pairs[i], 1);
 	}
-	_export(gaba_dp_clean)(dp);
 }
 
 /**
@@ -5252,8 +5307,7 @@ unittest( .name = "cross" )
 {
 	uint64_t const cnt = 5000;
 
-	struct gaba_context_s const *c = (struct gaba_context_s const *)gctx;
-	struct gaba_dp_context_s *dp = _export(gaba_dp_init)(c);
+	struct unittest_context_s *c = (struct unittest_context_s *)gctx;
 
 	for(uint64_t i = 0; i < cnt; i++) {
 		struct unittest_seq_pair_s pair = {
@@ -5273,15 +5327,14 @@ unittest( .name = "cross" )
 			pair.b[j] = unittest_generate_mutated_sequence(pair.a[j], 0.1, 0.1, _W);
 		}
 
-		unittest_test_pair(UNITTEST_ARG_LIST, dp, &pair, 0);
-		unittest_test_pair(UNITTEST_ARG_LIST, dp, &pair, 1);
+		unittest_test_pair(UNITTEST_ARG_LIST, c->params, c->dp, &pair, 0);
+		unittest_test_pair(UNITTEST_ARG_LIST, c->params, c->dp, &pair, 1);
 
 		for(uint64_t j = 0; pair.a[j] != NULL; j++) {
 			free((void *)pair.a[j]);
 			free((void *)pair.b[j]);
 		}
 	}
-	_export(gaba_dp_clean)(dp);
 }
 
 #endif /* UNITTEST */

@@ -124,6 +124,7 @@
 #undef dbprintf
 #undef print_lane
 
+// #define trap() { fprintf(stderr, "[%s: %s(%d)] segmentation fault (trapped)\n", __FILE__, __func__, __LINE__); *((volatile uint8_t *)NULL); }
 #define trap() {}
 #define debug(...) {}
 #define dbprintf(fmt, ...) {}
