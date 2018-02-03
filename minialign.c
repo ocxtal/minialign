@@ -1,4 +1,4 @@
-#define DEBUG
+
 /**
  * @file minialign.c
  *
@@ -2360,7 +2360,7 @@ void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k, uint64_v *b)
 })
 #define _push_cap(_i) ({ \
 	mm_sketch_cap_t *cap = (mm_sketch_cap_t *)q; \
-	*cap = (mm_sketch_cap_t){ .i = (((int64_t)-1)<<16) |  (_i), .u = u, .k0 = k0, .k1 = k1 }; \
+	*cap = (mm_sketch_cap_t){ .i = 0xffffffffffff0000 |  (_i), .u = u, .k0 = k0, .k1 = k1 }; \
 	sk->b->n = (uint64_t *)(cap + 1) - sk->b->a; \
 	cap; \
 })
