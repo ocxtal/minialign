@@ -177,6 +177,7 @@ typedef struct gaba_fill_s gaba_fill_t;
 struct gaba_pos_pair_s {
 	uint32_t aid, bid;
 	uint32_t apos, bpos;
+	uint64_t plen;
 };
 typedef struct gaba_pos_pair_s gaba_pos_pair_t;
 
