@@ -5488,6 +5488,7 @@ void mm_print_maf_mapped(
 	bseq_seq_t const *t,
 	mm_reg_t const *reg)
 {
+	if(reg == NULL) { return; }
 	uint64_t const n = (b->tags & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
@@ -5511,6 +5512,7 @@ void mm_print_blast6_mapped(
 	bseq_seq_t const *t,
 	mm_reg_t const *reg)
 {
+	if(reg == NULL) { return; }
 	uint64_t const n = (b->tags & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
@@ -5560,6 +5562,7 @@ void mm_print_paf_mapped(
 	bseq_seq_t const *t,
 	mm_reg_t const *reg)
 {
+	if(reg == NULL) { return; }
 	uint64_t const n = (b->tags & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
@@ -5673,7 +5676,7 @@ void mm_print_header(mm_print_t *b, uint32_t n_seq, mm_idx_seq_t const *ref)
 static _force_inline
 void mm_print_mapped(mm_print_t *b, mm_idx_seq_t const *ref, bseq_seq_t const *t, mm_reg_t const *reg)
 {
-	if(reg != NULL) { b->fn.mapped(b, ref, t, reg); }
+	b->fn.mapped(b, ref, t, reg);
 	return;
 }
 /* end of printer.c */
@@ -6062,8 +6065,11 @@ static _force_inline
 uint64_t mm_opt_check_sanity(mm_opt_t *o)
 {
 	/* check sanity */
+	int8_t x = -_hmax_v16i8(_sub_v16i8(_zero_v16i8(), _loadu_v16i8(o->a.p.score_matrix)));
 	oassert(o, o->a.p.gfa == 0 || o->a.p.gfa > o->a.p.ge, "short-gap extension penalty (-r) must be larger than gap extension penalty (%d).", o->a.p.ge);
 	oassert(o, o->a.p.gfb == 0 || o->a.p.gfb > o->a.p.ge, "short-gap extension penalty (-r) must be larger than gap extension penalty (%d).", o->a.p.ge);
+	oassert(o, ((o->a.p.gfa == 0) ^ (o->a.p.gfb == 0)) == 0, "short-gap extension penalty (-r) must be set for both sides.");
+	oassert(o, o->a.p.gfa == 0 || o->a.p.gfb == 0 || o->a.p.gfa + o->a.p.gfb > -x, "short-gap extension penalty (-r) must not be greater than mismatch penalty.");
 	if(o->c.w >= 32) { o->c.w = (int)(2.0/3.0 * o->c.k + .499); }		/* calc. default window size (proportional to kmer length) if not specified */
 	return(o->ecnt);
 }
