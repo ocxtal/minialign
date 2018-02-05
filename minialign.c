@@ -4698,6 +4698,9 @@ typedef struct {
 	uint8_t base[240];
 } mm_tmpbuf_t;
 
+/* margins */
+#define OUTBUF_TAIL_MARGIN				( 256 )
+
 /**
  * @macro _flush
  * @brief flush the buffer if there is no room for(margin + 1) bytes
@@ -4720,7 +4723,8 @@ typedef struct {
 		_force_flush(_buf); \
 		if((_buf)->size < (_len)) { \
 			uint64_t prev_size = (_buf)->tail - (_buf)->base; \
-			(_buf)->p = (_buf)->base = realloc((_buf)->base, (_buf)->size = (_len));	/* abort when failed */ \
+			(_buf)->size = MAX2(2 * (_buf)->size, (_len)); \
+			(_buf)->p = (_buf)->base = realloc((_buf)->base, (_buf)->size + OUTBUF_TAIL_MARGIN);	/* abort when failed */ \
 			(_buf)->tail = (_buf)->base + prev_size; \
 		} \
 	} \
@@ -5182,7 +5186,6 @@ void mm_print_sam_supp(
 
 	/* print cigar */
 	if(hl != 0) { _putn(b, hl); _put(b, 'H'); }				/* always hard clipped */
-	// gaba_print_cigar_forward(mm_cigar_printer, b, a->a->path, 0, a->a->plen);
 	_with_buffer(b, gaba_plen(s), {
 		p += gaba_dump_cigar_reverse((char *)p, gaba_plen(s), path, s->ppos, gaba_plen(s));
 	});
@@ -5456,15 +5459,15 @@ void mm_print_maf_mapped_core(
 	_putpn(b, &qb, r[rid].l_seq, q[qid].l_seq); _sp(b); _sp(&qb);
 
 	/* reference alignment */
-	_with_buffer(b, s->alen + 1, {
-		p += gaba_dump_seq_reverse((char *)p, s->alen + 1, GABA_SEQ_A, path, s->ppos, gaba_plen(s), &r[rid].seq[rs], '-');
+	_with_buffer(b, gaba_plen(s), {
+		p += gaba_dump_seq_reverse((char *)p, gaba_plen(s), GABA_SEQ_A, path, s->ppos, gaba_plen(s), &r[rid].seq[rs], '-');
 	});
 	_cr(b);
 
 	/* query */
 	_putsn(b, qb.base, qb.p - qb.base);
-	_with_buffer(b, s->blen + 1, {
-		p += gaba_dump_seq_reverse((char *)p, s->blen + 1,
+	_with_buffer(b, gaba_plen(s), {
+		p += gaba_dump_seq_reverse((char *)p, gaba_plen(s),
 			GABA_SEQ_B | ((s->bid & 0x01) ? GABA_SEQ_FW : GABA_SEQ_RV),
 			path, s->ppos, gaba_plen(s),
 			(s->bid & 0x01) ? &q[qid].seq[qs] : &q[qid].seq[q[qid].l_seq - qs],
@@ -5648,7 +5651,8 @@ mm_print_t *mm_print_init(
 		[MM_BLAST6] = { .mapped = mm_print_blast6_mapped }
 	};
 	mm_print_t *pr = calloc(1, sizeof(mm_print_t));
-	void *p = malloc(sizeof(uint8_t) * r->outbuf_size);
+
+	void *p = malloc(sizeof(uint8_t) * r->outbuf_size + OUTBUF_TAIL_MARGIN);
 	*pr = (mm_print_t){
 		.p = p, .base = p, .tail = p + r->outbuf_size,
 		.size = r->outbuf_size,
