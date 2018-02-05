@@ -4132,7 +4132,6 @@ uint64_t mm_prune_regs(
 		/* actually nothing to do because all the alignment objects are allocated from lmm */
 		mm_bin_t *bin = (mm_bin_t *)&self->bin.a[res[q].iid];
 		for(uint64_t i = 0; i < bin->n_aln; i++) {
-			// gaba_dp_res_free((gaba_alignment_t *)(bin->aln[i] + 1));	/* destroy gaba_alignment_t objects */
 			lmm_free(lmm, (void *)bin->aln[i]);
 		}
 	}
