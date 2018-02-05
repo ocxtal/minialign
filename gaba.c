@@ -2868,7 +2868,7 @@ enum {
 	mask = &(--blk)->mask[BLK - 1]; dir_mask = _dir_mask_load(blk, BLK); \
 	if(_unlikely((_phantom(blk)->xstat & HEAD) != 0)) { \
 		do { blk = _phantom(blk)->blk; debug("reload block, cnt(%u, %u)", blk->acnt, blk->bcnt); } while((_phantom(blk)->xstat & HEAD) != 0); \
-		uint64_t _cnt = blk->acnt + blk->bcnt; \
+		uint64_t _cnt = blk->acnt + blk->bcnt; path++; \
 		mask = &blk->mask[_cnt - 1]; dir_mask = _trace_load_block_rem(_cnt); \
 	} \
 	debug("reload block, path_array(%lx), blk(%p), head(%x), mask(%x), ofs(%u), cnt(%u, %u)", path_array, blk, blk->xstat & HEAD, dir_mask, ofs, blk->acnt, blk->bcnt); \
@@ -2955,7 +2955,6 @@ void trace_core(
 	#define _trace_gap_loop(t, _c, _n, _l) { \
 		_trace_##_c##_##_l##_head: \
 			if(_trace_test_fgap_##_l()) { \
-				debug("fgap detected"); \
 				if(_unlikely(_trace_##_c##_##_l##_test_index())) { \
 					self->w.l.state = ts_##_l##0; goto _trace_term; \
 				} \
@@ -2970,7 +2969,6 @@ void trace_core(
 				} \
 				_trace_inc_ge_##_l();	/* increment #gap bases on every iter */ \
 				_pop_vector(_c, _l, 1, _trace_##_n##_##_l##_tail); \
-				debug("test next gap, (%x)", _trace_test_gap_##_l()); \
 			_trace_##_c##_##_l##_tail:; \
 			} while(_trace_test_gap_##_l()); \
 			goto _trace_##_c##_##_l##_retd; \
@@ -3181,6 +3179,7 @@ struct gaba_alignment_s *trace_body(
 	_store_v2i32(&self->w.l.aln->agcnt, gcnt);
 	self->w.l.aln->dcnt = dlen;
 
+	/*
 	fprintf(stderr, "plen(%lu), g(%d, %d, %d, %d), gic(%u, %u), gec(%u, %u), gfc(%u, %u), gc(%u, %u), dlen(%ld), sc(%ld, %ld), mc(%f), identity(%f)\n",
 		plen, self->gi, self->ge, self->gfa, self->gfb,
 		self->w.l.a.bicnt, self->w.l.a.aicnt,
@@ -3188,6 +3187,7 @@ struct gaba_alignment_s *trace_body(
 		self->w.l.bfcnt, self->w.l.afcnt,
 		_hi32(gcnt), _lo32(gcnt),
 		dlen, self->w.l.aln->score, dsc, dsc * self->imx - self->xmx * dlen, self->w.l.aln->identity);
+	*/
 	return(self->w.l.aln);
 }
 
