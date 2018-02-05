@@ -1626,22 +1626,11 @@ struct gaba_joint_tail_s *fill_create_tail(
 	debug("update_mask(%lx)", (uint64_t)(_blk)->max_mask); \
 	/* update middle delta vector */ \
 	wvec_t md = _load_w(&self->w.r.md); \
-	md = _add_w(md, _cvt_n_w(delta)); md = _add_w(md, _set_w(-cofs)); \
-	/* md = _add_w(md, _cvt_n_w(_sub_n(delta, _set_n(cofs)))); */ \
-	{ \
-		int8_t b[_W]; _storeu_n(b, delta); \
-		for(uint64_t i = 0; i < _W - 1; i++) { \
-			uint64_t flag = 0; \
-			if(b[i] - b[i + 1] > 32 || b[i] - b[i + 1] < -32) { \
-				flag = 1; \
-				fprintf(stderr, "overflow detected at i(%lu), b(%d, %d)\n", i, b[i], b[i + 1]); trap(); \
-			} \
-			if(flag) { \
-				for(uint64_t j = 0; j < _W; j++) { fprintf(stderr, "%d, ", b[j]); } \
-				uint64_t ovf = _mask_u64(_mask_n(_gt_n(delta, _set_n(0)))); \
-				fprintf(stderr, "\nflag(%lx)\n", ovf); \
-			} \
-		} \
+	md = _add_w(md, _cvt_n_w(delta)); md = _add_w(md, _set_w(0x0100 - cofs)); \
+	/* dirty-hack to handle overflow */ { \
+		nvec_t ov1 = _add_n(delta, drop), ov2 = _sub_n(delta, drop); \
+		wvec_t ovw = _and_w(_set_w(0x0100), _cvt_n_w(_or_n(ov1, ov2))); \
+		md = _sub_w(md, ovw); \
 	} \
 	_store_w(&self->w.r.md, md); \
 }
