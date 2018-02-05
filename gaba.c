@@ -3641,7 +3641,7 @@ gaba_t *_export(gaba_init)(
 void _export(gaba_clean)(
 	struct gaba_context_s *ctx)
 {
-	gaba_free(ctx);
+	if(ctx != NULL) { gaba_free(ctx); }
 	return;
 }
 
