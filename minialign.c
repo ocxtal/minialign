@@ -4505,7 +4505,7 @@ void *mm_align_source(uint32_t tid, void *arg)
 	*s = (mm_align_step_t){
 		.id = b->icnt++,			/* assign id */
 		// .base_qid = b->base_qid,
-		.lmm = lmm_init(NULL, 512 * 1024)
+		.lmm = lmm_init_margin(NULL, 512 * 1024, sizeof(mm_aln_t), 0)
 	};
 	// b->base_qid += r->n_seq;		/* update qid */
 	return(s);
@@ -4542,7 +4542,7 @@ void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 		mm_print_mapped(b->pr, b->u.mi.s, &r->seq[i], reg);	/* mapped */
 		if(reg != NULL) {
 			for(uint64_t j = 0; j < reg->n_all; j++) {
-				lmm_free(s->lmm, (void *)reg->aln[j]);
+				lmm_free(s->lmm, (void *)reg->aln[j]->a);
 			}
 			lmm_free(s->lmm, reg);
 		}
