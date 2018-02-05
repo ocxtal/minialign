@@ -1629,7 +1629,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	debug("update_mask(%lx)", (uint64_t)(_blk)->max_mask); \
 	/* update middle delta vector */ \
 	wvec_t md = _load_w(&self->w.r.md); \
-	md = _add_w(md, _cvt_n_w(_sub_n(delta, _set_n(cofs)))); \
+	md = _add_w(md, _cvt_n_w(delta)); md = _add_w(md, _set_w(-cofs)); \
 	_store_w(&self->w.r.md, md); \
 }
 #if MODEL == LINEAR
