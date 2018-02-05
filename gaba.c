@@ -3094,6 +3094,7 @@ void trace_init(
 	self->w.l.a.score = tail->f.max;					/* just copy */
 	_store_v2i32(&self->w.l.a.aicnt, _zero_v2i32());	/* clear counters */
 	_store_v2i32(&self->w.l.a.aecnt, _zero_v2i32());
+	_store_v2i32(&self->w.l.afcnt, _zero_v2i32());
 	self->w.l.a.dcnt = 0;
 
 	/* section and path */
