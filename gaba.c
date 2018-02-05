@@ -1627,6 +1627,22 @@ struct gaba_joint_tail_s *fill_create_tail(
 	/* update middle delta vector */ \
 	wvec_t md = _load_w(&self->w.r.md); \
 	md = _add_w(md, _cvt_n_w(delta)); md = _add_w(md, _set_w(-cofs)); \
+	/* md = _add_w(md, _cvt_n_w(_sub_n(delta, _set_n(cofs)))); */ \
+	{ \
+		int8_t b[_W]; _storeu_n(b, delta); \
+		for(uint64_t i = 0; i < _W - 1; i++) { \
+			uint64_t flag = 0; \
+			if(b[i] - b[i + 1] > 32 || b[i] - b[i + 1] < -32) { \
+				flag = 1; \
+				fprintf(stderr, "overflow detected at i(%lu), b(%d, %d)\n", i, b[i], b[i + 1]); trap(); \
+			} \
+			if(flag) { \
+				for(uint64_t j = 0; j < _W; j++) { fprintf(stderr, "%d, ", b[j]); } \
+				uint64_t ovf = _mask_u64(_mask_n(_gt_n(delta, _set_n(0)))); \
+				fprintf(stderr, "\nflag(%lx)\n", ovf); \
+			} \
+		} \
+	} \
 	_store_w(&self->w.r.md, md); \
 }
 #if MODEL == LINEAR
@@ -3169,14 +3185,20 @@ struct gaba_alignment_s *trace_body(
 
 	uint64_t dlen = (self->w.l.a.plen - _hi32(gcnt) - _lo32(gcnt))>>1;
 	int64_t dsc = self->w.l.a.score - _hi32(g) - _lo32(g);
-	// debug("plen(%lu), g(%ld, %ld, %ld, %ld), gcnt(%ld, %ld, %ld, %ld), dlen(%ld), sc(%ld, %ld), mc(%f), id(%f)",
-		// plen, gi, ge, ga, gb, gic, gec, gac, gbc, dlen, sc, dsc, dsc * self->imx - self->xmx * dlen, id);
 
 	/* copy */
 	_memcpy_blk_ua(self->w.l.aln, &self->w.l.a, sizeof(struct gaba_alignment_s));
 	self->w.l.aln->identity = dlen == 0 ? 0.0 : (((double)dsc / (double)dlen) * self->imx - self->xmx);
 	_store_v2i32(&self->w.l.aln->agcnt, gcnt);
 	self->w.l.aln->dcnt = dlen;
+
+	fprintf(stderr, "plen(%lu), g(%d, %d, %d, %d), gic(%u, %u), gec(%u, %u), gfc(%u, %u), gc(%u, %u), dlen(%ld), sc(%ld, %ld), mc(%f), identity(%f)\n",
+		plen, self->gi, self->ge, self->gfa, self->gfb,
+		self->w.l.a.bicnt, self->w.l.a.aicnt,
+		self->w.l.a.becnt, self->w.l.a.aecnt,
+		self->w.l.bfcnt, self->w.l.afcnt,
+		_hi32(gcnt), _lo32(gcnt),
+		dlen, self->w.l.aln->score, dsc, dsc * self->imx - self->xmx * dlen, self->w.l.aln->identity);
 	return(self->w.l.aln);
 }
 
