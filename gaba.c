@@ -209,7 +209,7 @@ _static_assert(V2I32_MASK_10 == GABA_UPDATE_B);
 _static_assert(sizeof(void *) == 8);
 
 /** check size of structs declared in gaba.h */
-_static_assert(sizeof(struct gaba_params_s) == 48);
+_static_assert(sizeof(struct gaba_params_s) == 40);
 _static_assert(sizeof(struct gaba_section_s) == 16);
 _static_assert(sizeof(struct gaba_fill_s) == 64);
 _static_assert(sizeof(struct gaba_segment_s) == 32);
@@ -545,10 +545,7 @@ struct gaba_dp_context_s {
 	/* memory management */
 	struct gaba_mem_block_s mem;		/** (16) root memory block */
 	struct gaba_stack_s stack;			/** (24) current stack */
-
-	/** output options */
-	uint32_t head_margin;				/** (4) margin at the head of gaba_res_t */
-	uint32_t tail_margin;				/** (4) margin at the tail of gaba_res_t */
+	uint64_t _pad2;
 
 	/* score constants */
 	double imx, xmx;					/** (16) 1 / (M - X), X / (M - X) (precalculated constants) */
@@ -3086,11 +3083,10 @@ void trace_init(
 		  sizeof(struct gaba_alignment_s)				/* base */
 		+ sizeof(uint32_t) * _roundup(pn, 8)			/* path array and its margin */
 		+ sizeof(struct gaba_segment_s) * sn			/* segment array */
-		+ self->head_margin + self->tail_margin			/* head and tail margins */
 	);
 
 	/* save aln pointer and memory management stuffs to working buffer */
-	self->w.l.aln = alloc->lmalloc(alloc->opaque, size) + self->head_margin;
+	self->w.l.aln = alloc->lmalloc(alloc->opaque, size);
 	self->w.l.a.opaque = alloc->opaque;					/* save opaque pointer */
 	self->w.l.a.lfree = alloc->lfree;
 
@@ -3148,9 +3144,7 @@ struct gaba_alignment_s *trace_body(
 		debug("p(%d), q(%d)", self->w.l.p, self->w.l.q);
 		if(_unlikely(self->w.l.q >= _W)) {
 			/* out of band: abort */
-			self->w.l.a.lfree(self->w.l.a.opaque,
-				(void *)((uint8_t *)self->w.l.aln - self->head_margin)
-			);
+			self->w.l.a.lfree(self->w.l.a.opaque, (void *)((uint8_t *)self->w.l.aln));
 			return(NULL);
 		}
 
@@ -3219,8 +3213,8 @@ void _export(gaba_dp_res_free)(
 	struct gaba_alignment_s *aln)
 {
 	struct gaba_aln_intl_s *a = (struct gaba_aln_intl_s *)aln;
-	debug("free mem, ptr(%p), lmm(%p)", (void *)a - self->head_margin, a->opaque);
-	a->lfree(a->opaque, (void *)((uint8_t *)a - self->head_margin));
+	debug("free mem, ptr(%p), lmm(%p)", a, a->opaque);
+	a->lfree(a->opaque, (void *)a);
 	return;
 }
 
@@ -3355,8 +3349,6 @@ void gaba_init_restore_default(
 	}
 	restore(xdrop,			50);
 	restore(filter_thresh,	0);					/* disable filter */
-	restore(head_margin,	0);
-	restore(tail_margin,	0);
 	return;
 }
 
@@ -3579,10 +3571,6 @@ void gaba_init_dp_context(
 
 		.gi = -p->gi, .ge = -p->ge, .gfa = -p->gfa, .gfb = -p->gfb,
 		.imx = 1 / (m - x), .xmx = x / (m - x),
-
-		/* input and output options */
-		.head_margin = _roundup(p->head_margin, MEM_ALIGN_SIZE),
-		.tail_margin = _roundup(p->tail_margin, MEM_ALIGN_SIZE),
 
 		/* pointers to root vectors */
 		.root = {

@@ -42,11 +42,37 @@
 struct lmm_s {
 	uint8_t need_free;
 	uint8_t pad1[7];
-	void *ptr;
-	void *lim;
-	void *pad2;			/* make 16byte aligned */
+	uint32_t head_margin, tot_margin;
+	void *ptr, *lim;
 };
 typedef struct lmm_s lmm_t;
+
+/**
+ * @fn lmm_init_margin
+ */
+static inline
+lmm_t *lmm_init_margin(
+	void *base,
+	size_t base_size,
+	uint32_t head_margin,
+	uint32_t tail_margin)
+{
+	struct lmm_s *lmm = NULL;
+	uint8_t need_free = 0;
+	if(base == NULL || base_size < LMM_MIN_BASE_SIZE) {
+		base_size = LMM_MAX2(base_size, LMM_DEFAULT_BASE_SIZE);
+		base = malloc(base_size);
+		need_free = 1;
+	}
+
+	lmm = (struct lmm_s *)base;
+	lmm->need_free = need_free;
+	lmm->ptr = (void *)((uintptr_t)base + sizeof(struct lmm_s));
+	lmm->lim = (void *)((uintptr_t)base + _lmm_cutdown(base_size, LMM_ALIGN_SIZE));
+	lmm->head_margin = head_margin;
+	lmm->tot_margin = head_margin + tail_margin;
+	return(lmm);
+}
 
 /**
  * @fn lmm_init
@@ -56,24 +82,9 @@ lmm_t *lmm_init(
 	void *base,
 	size_t base_size)
 {
-	if(base != NULL && base_size > LMM_MIN_BASE_SIZE) {
-		struct lmm_s *lmm = (struct lmm_s *)base;
-		lmm->need_free = 0;
-		lmm->ptr = (void *)((uintptr_t)base + sizeof(struct lmm_s));
-		lmm->lim = (void *)((uintptr_t)base + _lmm_cutdown(base_size, LMM_ALIGN_SIZE));
-		return((lmm_t *)lmm);
-	} else {
-		base_size = LMM_MAX2(base_size, LMM_DEFAULT_BASE_SIZE);
-		struct lmm_s *lmm = (struct lmm_s *)malloc(base_size);
-		lmm->need_free = 1;
-		lmm->ptr = (void *)(lmm + 1);
-		lmm->lim = (void *)((uintptr_t)lmm + base_size);
-		return((lmm_t *)lmm);
-	}
-
-	/* never reaches here */
-	return(NULL);
+	return(lmm_init_margin(base, base_size, 0, 0));
 }
+
 
 /**
  * @fn lmm_clean
@@ -113,20 +124,18 @@ void *lmm_malloc(
 	lmm_t *lmm,
 	size_t size)
 {
-#ifdef LMM_DEBUG
+	if(lmm == NULL) { return(malloc(size)); }
 
-	return(malloc(size));
+	size += lmm->tot_margin;
+	#ifndef LMM_DEBUG
+		if(((uintptr_t)lmm->ptr + LMM_ALIGN_SIZE + size) < (uintptr_t)lmm->lim) {
+			return(lmm_reserve_mem(lmm, lmm->ptr, size) + lmm->head_margin);
+		}
+	#endif
 
-#else
-
-	if(lmm != NULL
-	&& ((uintptr_t)lmm->ptr + LMM_ALIGN_SIZE + size) < (uintptr_t)lmm->lim) {
-		return(lmm_reserve_mem(lmm, lmm->ptr, size));
-	} else {
-		return(malloc(size));
-	}
-
-#endif
+	void *ptr = malloc(size);
+	if(ptr == NULL) { return(NULL); }
+	return(ptr + lmm->head_margin);
 }
 
 /**
@@ -138,37 +147,37 @@ void *lmm_realloc(
 	void *ptr,
 	size_t size)
 {
-#ifdef LMM_DEBUG
+	if(ptr == NULL) { lmm_malloc(lmm, size); }
+	if(lmm == NULL) { return(realloc(ptr, size)); }
 
-	return(realloc(ptr, size));
+	size += lmm->tot_margin;
+	ptr -= lmm->head_margin;
+	#ifndef LMM_DEBUG
+		/* check if prev mem (ptr) is inside mm */
+		if((void *)lmm < ptr && ptr < lmm->lim) {
+			
+			uint64_t prev_size = *((uint64_t *)((uintptr_t)ptr - LMM_ALIGN_SIZE));
+			if((uintptr_t)ptr + prev_size == (uintptr_t)lmm->ptr	/* the last block */
+			&& (uintptr_t)ptr + size < (uintptr_t)lmm->lim) {		/* and room for expansion */
+				return(lmm_reserve_mem(lmm,
+					(void *)((uintptr_t)ptr - LMM_ALIGN_SIZE), size
+				) + lmm->head_margin);
+			}
 
-#else
-
-	if(lmm == NULL) {
-		return(realloc(ptr, size));
-	}
-
-	/* check if prev mem (ptr) is inside mm */
-	if((void *)lmm < ptr && ptr < lmm->lim) {
-		
-		uint64_t prev_size = *((uint64_t *)((uintptr_t)ptr - LMM_ALIGN_SIZE));
-		if((uintptr_t)ptr + prev_size == (uintptr_t)lmm->ptr
-		&& (uintptr_t)ptr + size < (uintptr_t)lmm->lim) {
-			return(lmm_reserve_mem(lmm,
-				(void *)((uintptr_t)ptr - LMM_ALIGN_SIZE), size));
+			/* no room realloc to outside */
+			void *np = malloc(size);
+			if(np == NULL) { return(NULL); }
+			np += lmm->head_margin;
+			memcpy(np, ptr, prev_size);
+			lmm->ptr = (void *)((uintptr_t)ptr - LMM_ALIGN_SIZE);
+			return(np);
 		}
-
-		void *np = malloc(size);
-		if(np == NULL) { return(NULL); }
-
-		memcpy(np, ptr, prev_size);
-		return(np);
-	}
+	#endif
 
 	/* pass to library realloc */
-	return(realloc(ptr, size));
-
-#endif
+	void *p = realloc(ptr, size);
+	if(p == NULL) { p = ptr; }
+	return(p + lmm->head_margin);
 }
 
 /**
@@ -179,25 +188,22 @@ void lmm_free(
 	lmm_t *lmm,
 	void *ptr)
 {
-#ifdef LMM_DEBUG
+	if(ptr == NULL) { return; }
+	if(lmm == NULL) { free(ptr); }
 
-	free(ptr);
-
-#else
-
-	if(lmm != NULL && (void *)lmm < ptr && ptr < lmm->lim) {
-		/* no need to free */
-		uint64_t prev_size = *((uint64_t *)((uintptr_t)ptr - LMM_ALIGN_SIZE));
-		if((uintptr_t)ptr + prev_size == (uintptr_t)lmm->ptr) {
-			lmm->ptr = (void *)((uintptr_t)ptr - LMM_ALIGN_SIZE);
+	ptr -= lmm->head_margin;
+	#ifndef LMM_DEBUG
+		if((void *)lmm < ptr && ptr < lmm->lim) {
+			/* no need to free */
+			uint64_t prev_size = *((uint64_t *)((uintptr_t)ptr - LMM_ALIGN_SIZE));
+			if((uintptr_t)ptr + prev_size == (uintptr_t)lmm->ptr) {
+				lmm->ptr = (void *)((uintptr_t)ptr - LMM_ALIGN_SIZE);
+			}
+			return;
 		}
-		return;
-	}
-
+	#endif
 	free(ptr);
 	return;
-
-#endif
 }
 
 /**
