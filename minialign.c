@@ -4094,8 +4094,9 @@ uint64_t mm_extend(
 				debug("not significant or failed traceback: len(%u, %u), score(%ld), <- (%u, %u)", self->r[0].len, self->q[0].len, f->max, st.tp.apos, st.tp.bpos);
 				continue;
 			}
-			debug("slen(%u), len(%u, %u), score(%ld), (%u, %u) <- (%u, %u)", a->slen, self->r[0].len, self->q[0].len, f->max, self->r[0].len - a->seg->apos - a->seg->alen, self->q[0].len - a->seg->bpos - a->seg->blen, self->r[0].len - a->seg->apos, self->q[0].len - a->seg->bpos);
-			if(a->slen > 1) { debug("second, len(%u, %u), score(%ld), (%u, %u) <- (%u, %u)", self->r[0].len, self->q[0].len, f->max, self->r[0].len - a->seg[1].apos - a->seg[1].alen, self->q[0].len - a->seg[1].bpos - a->seg[1].blen, self->r[0].len - a->seg[1].apos, self->q[0].len - a->seg[1].bpos); }
+			debug("slen(%u), identity(%f), score(%ld)", a->slen, a->identity, a->score);
+			debug("first, len(%u, %u), (%u, %u) <- (%u, %u)", self->r[0].len, self->q[0].len, self->r[0].len - a->seg->apos - a->seg->alen, self->q[0].len - a->seg->bpos - a->seg->blen, self->r[0].len - a->seg->apos, self->q[0].len - a->seg->bpos);
+			if(a->slen > 1) { debug("second, len(%u, %u), (%u, %u) <- (%u, %u)", self->r[0].len, self->q[0].len, self->r[0].len - a->seg[1].apos - a->seg[1].alen, self->q[0].len - a->seg[1].bpos - a->seg[1].blen, self->r[0].len - a->seg[1].apos, self->q[0].len - a->seg[1].bpos); }
 
 			/* record alignment, update current head position */
 			if(mm_search_record(self, &st, a)) { break; }
