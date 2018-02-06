@@ -657,7 +657,7 @@ typedef struct {
 #define kh_str_init_static(_h, _size)	{ (_h)->s = (uint8_v){ 0 }; kh_init_static(&(_h)->h, _size); }
 #define kh_str_init(_size)				({ kh_str_t *h = calloc(1, sizeof(kh_str_t)); kh_init_static(h, _size); h; })
 #define kh_str_destroy_static(_h)		{ kh_destroy_static(&((kh_str_t *)_h)->h); free(((kh_str_t *)_h)->s.a); }
-#define kh_str_destroy(_h)				{ kh_destroy_static(&((kh_str_t *)_h)->h); free(_h); }
+#define kh_str_destroy(_h)				{ kh_str_destroy_static(_h); free(_h); }
 #define kh_str_clear(_h)				{ kh_clear(&((kh_str_t *)_h)->h); }
 
 /**
