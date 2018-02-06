@@ -1116,6 +1116,9 @@ unittest( .name = "pt.multi" ) {
 }
 
 /* stdio stream with multithreaded compression / decompression */
+
+#define pg_eof(_pg)					( (_pg)->eof == 2 ? 1 : 0 )
+
 /**
  * @struct pg_block_t
  * @brief compression / decompression unit block
@@ -6325,6 +6328,7 @@ void main_align_error(mm_opt_t *o, int stat, char const *fn, char const *file)
 	case 2: o->log(o, 'E', fn, "failed to open index file `%s'. Please check file path and its version.", file); break;
 	case 3: o->log(o, 'E', fn, "failed to open sequence file `%s'. Please check file path and its format.", file); break;
 	case 4: o->log(o, 'E', fn, "failed to map sequence file `%s'. Please check file path and its format.", file); break;
+	case 5: o->log(o, 'E', fn, "failed to load index block from `%s'. Please check file path and its version.", file); break;
 	}
 	return;
 }
@@ -6361,12 +6365,14 @@ int main_align(mm_opt_t *o)
 		if((_pg) != NULL) { \
 			_mi = mm_idx_load(_pg, (read_t)pgread); \
 			pg_freeze(_pg);		/* release thread worker */ \
+			if(_mi == NULL && pg_eof(_pg) == 0) { main_align_error(o, 5, __func__, *(_r)); goto _main_align_fail; } \
 		} else if(*(_r) != NULL) { \
 			bseq_file_t *_fp = _bseq_open_wrap(&br, *(_r)); \
 			_mi = mm_idx_gen(&o->c, _fp, o->pt); \
-			o->a.base_rid += bseq_close(_fp); (_r)++;	/* increment r when in the on-the-fly mode and the index is correctly built */ \
+			o->a.base_rid += bseq_close(_fp); \
+			if(_mi == NULL) { main_align_error(o, 2, __func__, *(_r)); goto _main_align_fail; } \
+			(_r)++;	/* increment r when in the on-the-fly mode and the index is correctly built */ \
 		} \
-		if(_mi == NULL) { main_align_error(o, 2, __func__, (_pg) != NULL ? *o->parg.a : (_r)[-1]); goto _main_align_fail; } \
 		_mi; \
 	})
 
@@ -6393,7 +6399,6 @@ int main_align(mm_opt_t *o)
 			if(err) { main_align_error(o, 1, __func__, *q); goto _main_align_fail; }
 			o->log(o, 9, __func__, "finished mapping `%s' onto `%s'.", *q, pg ? *o->parg.a : r[-1]);
 		}
-		fprintf(stderr, "r(%p), t(%p), rt(%u)\n", r, t, rt);
 		mm_align_destroy(aln); aln = NULL;		/* prevent double free (occurs when error occured in the next _mm_idx_load_wrap) */
 		mm_idx_destroy(mi); mi = NULL;			/* prevent double free */
 	}
