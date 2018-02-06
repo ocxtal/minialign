@@ -107,7 +107,7 @@
 /**
  * @macro _swap_u64
  */
-#ifdef __clang__
+#if defined(__clang__) || (defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470)
 #  define _swap_u64(x)		({ uint64_t _x = (x); __asm__( "bswapq %0" : "+r"(_x) ); _x; })
 #else
 #  define _swap_u64(x)		( (uint64_t)_bswap64(x) )
@@ -291,7 +291,7 @@
 
 /* compare and swap (cas) */
 #if defined(__GNUC__)
-#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470
+#  if (defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470) || (defined(_ARCH_GCC_COMPAT) && _ARCH_GCC_COMPAT < 470)
 #    define cas(ptr, cmp, val) ({ \
 		uint8_t _res; \
 		__asm__ volatile ("lock cmpxchg %[src], %[dst]\n\tsete %[res]" \
