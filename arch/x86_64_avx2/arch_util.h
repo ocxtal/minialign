@@ -58,7 +58,7 @@
 /**
  * @macro _swap_u64
  */
-#ifdef __clang__
+#if defined(__clang__) || (defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470)
 #  define _swap_u64(x)		({ uint64_t _x = (x); __asm__( "bswapq %0" : "+r"(_x) ); _x; })
 #else
 #  define _swap_u64(x)		( (uint64_t)_bswap64(x) )
