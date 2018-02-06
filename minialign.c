@@ -1072,14 +1072,14 @@ static void *pt_unittest_source(uint32_t tid, void *arg)
 }
 static void *pt_unittest_worker(uint32_t tid, void *arg, void *item)
 {
-	uint64_t *p = (uint64_t *)item, *a = (uint64_t *)arg;
-	*p += *a;
+	uint64_t *p = (uint64_t *)item, *a = (uint64_t *)arg, i = *a;
+	*p += i;
 	return p;
 }
 static void pt_unittest_drain(uint32_t tid, void *arg, void *item)
 {
-	uint64_t *d = (uint64_t*)arg, *p = (uint64_t*)item;
-	*d += *p;
+	uint64_t *d = (uint64_t*)arg, *p = (uint64_t*)item, i = *p;
+	*d += i;
 	free(item);
 }
 
@@ -3308,7 +3308,7 @@ typedef struct mm_tbuf_s {
 #define _p(_ptr)		( ((int32_t const *)(_ptr))[0] + ((int32_t const *)(_ptr))[1] )
 #define _q(_ptr)		( ((int32_t const *)(_ptr))[1] - ((int32_t const *)(_ptr))[0] )
 #define _inside(_lb, _x, _ub)		( (uint32_t)((_x) - (_lb)) <= (uint32_t)((_ub) - (_lb)) )
-#define _key(_x, _y)	( (_x) ^ ((_x)>>29) ^ (_y) ^ _swap_u64(_y) )
+#define _key(x, y)		({ uint64_t _x = (x), _y = (y), _z = (_x) ^ ((_x)>>29) ^ (_y) ^ _swap_u64(_y); (z); })
 _static_assert(_ud(1000, -5) == _vd(-5, 1000));	/* invariant condition */
 _static_assert(_ud(1000, 10) == _vd(10, 1000));	/* invariant condition */
 
