@@ -6393,8 +6393,8 @@ int main_align(mm_opt_t *o)
 			if(err) { main_align_error(o, 1, __func__, *q); goto _main_align_fail; }
 			o->log(o, 9, __func__, "finished mapping `%s' onto `%s'.", *q, pg ? *o->parg.a : r[-1]);
 		}
-		mm_align_destroy(aln);
-		mm_idx_destroy(mi);
+		mm_align_destroy(aln); aln = NULL;		/* prevent double free (occurs when error occured in the next _mm_idx_load_wrap) */
+		mm_idx_destroy(mi); mi = NULL;			/* prevent double free */
 	}
 	mm_print_destroy(pr);
 	pg_destroy(pg);
