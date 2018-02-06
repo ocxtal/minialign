@@ -10,6 +10,7 @@
 #ifndef NDEBUG
 #  define DEBUG
 #endif
+// #define COLLECT_FAIL_SEQ
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -2364,7 +2365,7 @@ void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k, uint64_v *b)
 })
 #define _push_cap(_i) ({ \
 	mm_sketch_cap_t *cap = (mm_sketch_cap_t *)q; \
-	*cap = (mm_sketch_cap_t){ .i = (((int64_t)-1)<<16) |  (_i), .u = u, .k0 = k0, .k1 = k1 }; \
+	*cap = (mm_sketch_cap_t){ .i = 0xffffffffffff0000 |  (_i), .u = u, .k0 = k0, .k1 = k1 }; \
 	sk->b->n = (uint64_t *)(cap + 1) - sk->b->a; \
 	cap; \
 })
@@ -2589,10 +2590,10 @@ int mm_log_printer(
 	int r = 0;
 	if(level >= ' ' || (level & 0x10) == 0) {
 		if(level >= ' ' || (level & 0x08) == 0) {
-			r += fprintf(fp, "[%c::%s] ", level < ' '? 'M' : level, func);
+			r += fprintf(fp, "[%c::%s] ", level < ' ' ? 'M' : level, func);
 		} else {
 			r += fprintf(fp, "[%c::%s::%.3f*%.2f] ",
-				level < ' '? 'M' : level,					/* 'E' for error */
+				level < ' ' ? 'M' : level,					/* 'E' for error */
 				func,										/* function name */
 				realtime() - o->inittime,					/* realtime */
 				cputime() / (realtime() - o->inittime));	/* average cpu usage */
@@ -3481,9 +3482,10 @@ uint64_t mm_seed(
 	/* sort seed array */
 	debug("sort seed, n(%zu)", self->seed.n);
 	radix_sort_128x((v4u32_t *)self->seed.a, self->seed.n);
-/*	for(uint64_t i = 0; i < self->seed.n; i++) {
+	for(uint64_t i = 0, rid = UINT32_MAX; i < self->seed.n - 1; i++) {
+		if(rid != self->seed.a[i].rid) { rid = self->seed.a[i].rid; debug("ref(%lu, %s)", rid, self->mi.s[rid].name); }
 		debug("i(%lu), rid(%u), uv(%d, %d), ab(%d, %d)", i, self->seed.a[i].rid, _bare(self->seed.a[i].upos), _bare(self->seed.a[i].vpos), _as(&self->seed.a[i]), _bs(&self->seed.a[i]));
-	}*/
+	}
 	return(self->seed.n);						/* report #seeds found */
 }
 
@@ -3556,7 +3558,10 @@ uint64_t mm_chain_seeds(
 
 		/* update chain length */
 		plen = _ofs(_ps(&s[nrsid]) - plen);
-		debug("sid(%u, %lu), plen(%d)", _l(s)[lid].lsid, nrsid, _ofs(plen));
+		debug("sid(%u, %lu), rid(%u), (%d, %d) -> (%d, %d), plen(%d)", _l(s)[lid].lsid, nrsid, s[nrsid].rid,
+			_as(&s[_l(s)[lid].lsid]), _bs(&s[_l(s)[lid].lsid]),
+			_as(&s[nrsid]), _bs(&s[nrsid]),
+			_ofs(plen));
 		if(plen < c[cid].plen) {
 			c[cid] = (mm_root_t){ .plen = plen, .lid = lid };
 			debug("update plen for cid(%u), plen(%d), lid(%u)", cid, _ofs(plen), lid);
@@ -3585,7 +3590,7 @@ void mm_circularize(
 	for(uint32_t rcid = 0; rcid < self->root.n; rcid++) {
 		uint32_t rlid = c[rcid].lid;
 		uint32_t rsid = _l(s)[rlid].rsid, rid = _l(s)[rlid].rid;
-		if(self->mi.s[rid].circular == 0 || self->mi.s[rid].l_seq - _as(&s[rsid]) > self->twlen) { continue; }
+		if(self->mi.s[rid].circular == 0 || self->mi.s[rid].l_seq - _as(&s[rsid]) > self->twlen) { debug("skip"); continue; }
 		uint32_t rlen = self->mi.s[rid].l_seq;
 		int32_t uofs = _ud(rlen, 0), vofs = _vd(rlen, 0);
 		v4i32_t ov = _seta_v4i32(vofs, vofs, 0, uofs);
@@ -4369,7 +4374,6 @@ mm_reg_t const *mm_align_seq(
 	/* clear buffers */
 	mm_tbuf_clear(self, lmm);
 	mm_init_query(self, l_seq, seq, qid, 0);
-	debug("start: qid(%u)", qid);
 
 	/* seed-chain-extend loop */
 	debug("n_occ(%u)", self->mi.n_occ);
@@ -4527,6 +4531,7 @@ void *mm_align_worker(uint32_t tid, void *arg, void *item)
 	bseq_t *r = (bseq_t *)s;
 	for(uint64_t i = 0; i < r->n_seq; i++) {
 		uint32_t qid = s->base_qid + i;			/* FIXME: parse qid from name with atoi when -M is set */
+		debug("start next query(%lu, %s)", i, r->seq[i].name);
 		r->seq[i].u64 = (uintptr_t)mm_align_seq(t, r->seq[i].l_seq, r->seq[i].seq, qid, s->lmm);
 	}
 	return(s);
@@ -4543,7 +4548,25 @@ void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 	for(uint64_t i = 0; i < r->n_seq; i++) {
 		mm_reg_t *reg = (mm_reg_t *)r->seq[i].u64;
 		debug("i(%lu), reg(%p)", i, reg);
-		mm_print_mapped(b->pr, b->u.mi.s, &r->seq[i], reg);	/* mapped */
+
+		/* debug hook */
+		#ifdef COLLECT_FAIL_SEQ
+		if(reg != NULL) {
+			uint64_t flag = 0;
+			for(uint64_t j = 0; j < reg->n_all; j++) {
+				mm_aln_t const *a = reg->aln[j];
+				for(uint64_t k = 0; k < a->a->slen; k++) { if(a->a->seg[k].aid > INT32_MAX || a->a->seg[k].bid > INT32_MAX) { flag = 1; } }
+			}
+			if(flag) {
+				fprintf(stderr, ">%s\n", r->seq[i].name);
+				for(uint64_t j = 0; j < r->seq[i].l_seq; j++) { fprintf(stderr, "%c", "ACGT"[r->seq[i].seq[j]]); }
+				fprintf(stderr, "\n");
+			}
+		}
+		#else
+			mm_print_mapped(b->pr, b->u.mi.s, &r->seq[i], reg);	/* mapped */
+		#endif
+
 		if(reg != NULL) {
 			for(uint64_t j = 0; j < reg->n_all; j++) {
 				lmm_free(s->lmm, (void *)reg->aln[j]->a);
@@ -5124,7 +5147,14 @@ void mm_print_sam_mapped_core(
 	_putsn(b, r[rid].name, r[rid].l_name); _t(b);			/* tname (ref name) */
 	_putn(b, rs + 1); _t(b);								/* mapped pos */
 	_putn(b, mapq>>MAPQ_DEC); _t(b);						/* mapping quality */
-	_putsk(b, "*\t*\t0\t0\t");								/* CIGAR is moved to CG:Z tag; mate tags, unused */
+
+	/* print cigar */
+	if(hl) { _putn(b, hl); _put(b, (flag & 0x900) ? 'H' : 'S'); }	/* print head clip */
+	_with_buffer(b, gaba_plen(s), {
+		p += gaba_dump_cigar_reverse((char *)p, gaba_plen(s), path, s->ppos, gaba_plen(s));
+	});
+	if(tl) { _putn(b, tl); _put(b, (flag & 0x900) ? 'H' : 'S'); }	/* print tail clip */
+	_putsk(b, "\t*\t0\t0\t");									/* mate tags, unused */
 
 	/* print sequence */
 	if(s->bid & 0x01) {
@@ -5143,21 +5173,6 @@ void mm_print_sam_mapped_core(
 		}
 	} else {
 		_put(b, '*');
-	}
-
-	/* print cigar */
-	_putsk(b, "\tCG:Z:");
-	if(hl) {
-		_putn(b, hl);
-		_put(b, (flag & 0x900) ? 'H' : 'S');				/* print head clip */
-	}
-	_with_buffer(b, gaba_plen(s), {
-		p += gaba_dump_cigar_reverse((char *)p, gaba_plen(s), path, s->ppos, gaba_plen(s));
-	});
-	
-	if(tl) {
-		_putn(b, tl);
-		_put(b, (flag & 0x900) ? 'H' : 'S');				/* print tail clip */
 	}
 	return;
 }
@@ -5516,11 +5531,7 @@ void mm_print_blast6_mapped(
 	uint64_t const n = (b->tags & MM_OMIT_REP)? reg->n_uniq : reg->n_all;
 	for(uint64_t i = 0; i < n; i++) {
 		mm_aln_t const *a = reg->aln[i];
-		gaba_path_section_t const *s = &a->a->seg[0];
-
-		// int32_t dcnt = (a->a->plen - a->a->gecnt)>>1, slen = dcnt + a->a->gecnt;
-		// int32_t mid = 100000.0 * (double)(dcnt - a->a->xcnt) / (double)slen;	/* percent identity */
-		int32_t dcnt = 0, slen = 0, mid = 100000;
+		gaba_path_section_t const *s = &a->a->seg[a->a->slen - 1], *e = &a->a->seg[0];
 
 		uint32_t rid = s->aid>>1, qid = s->bid>>1;
 		uint32_t rs = s->bid & 0x01 ? r[rid].l_seq - s->apos - s->alen + 1 : r[rid].l_seq - s->apos;
@@ -5531,10 +5542,14 @@ void mm_print_blast6_mapped(
 		_putsn(b, q[qid].name, q[qid].l_name); _t(b);
 		_putsn(b, r[rid].name, r[rid].l_name); _t(b);
 
-		_putfi(int32_t, b, mid, 3); _t(b);				/* sequence identity */
+		uint32_t dcnt = a->a->dcnt, mcnt = (double)dcnt * a->a->identity;
+		uint32_t gcnt = a->a->agcnt + a->a->bgcnt, slen = dcnt + gcnt;
+		uint32_t mid = (uint32_t)(1000.0 * a->a->identity);
+
+		_putfi(uint32_t, b, mid, 3); _t(b);				/* sequence identity */
 		_putn(b, slen); _t(b);							/* alignment length */
-		// _putn(b, a->a->xcnt); _t(b);					/* mismatch count */
-		// _putn(b, a->a->gicnt); _t(b);					/* gap count */
+		_putn(b, dcnt - mcnt); _t(b);					/* mismatch count */
+		_putn(b, gcnt); _t(b);							/* gap count */
 		
 		/* positions */
 		_putn(b, qs); _t(b);
@@ -5544,9 +5559,9 @@ void mm_print_blast6_mapped(
 
 		/* estimated e-value and bitscore */
 		double bit = 1.85 * (double)a->a->score - 0.02;	/* fixme, lambda and k should be calcd from the scoring params */
-		int32_t e = 1000.0 * (double)r[rid].l_seq * (double)q[qid].l_seq * pow(2.0, -bit);	/* fixme, lengths are not corrected */
-		_putfi(int32_t, b, e, 3); _t(b);
-		_putn(b, (int32_t)bit); _cr(b);
+		uint32_t eval = 1000.0 * (double)r[rid].l_seq * (double)q[qid].l_seq * pow(2.0, -bit);	/* fixme, lengths are not corrected */
+		_putfi(uint32_t, b, eval, 3); _t(b);
+		_putn(b, (uint32_t)bit); _cr(b);
 	}
 	return;
 }
@@ -5777,6 +5792,7 @@ int mm_opt_parse_argv(mm_opt_t *o, char const *const *argv)
 			kv_push(void *, o->parg, mm_strdup(q)); continue;	/* positional argument */
 		}
 		while(o->t[_x(*++q)].type == 1) { o->t[_x(*q)].fn(o, NULL); }/* eat boolean options */
+		if(*q == '\0') { continue; }							/* end of positional argument */
 		if(!o->t[_x(*q)].fn) { oassert(o, 0, "unknown option `-%c'.", *q); continue; }/* argument option not found */
 		char const *r = q[1] ? q+1 : (p[1] && _isarg(p[1]) ? *++p : NULL);/* if the option ends without argument, inspect the next element in the jagged array (originally placed after space(s)) */
 		oassert(o, o->t[_x(*q)].type != 2 || r, "missing argument for option `-%c'.", *q);
@@ -5940,12 +5956,12 @@ static void mm_opt_keep_qual(mm_opt_t *o, char const *arg) { o->b.keep_qual = 1;
 static void mm_opt_ava(mm_opt_t *o, char const *arg) { o->a.flag |= MM_AVA; }
 static void mm_opt_comp(mm_opt_t *o, char const *arg) { o->a.flag |= MM_COMP; }
 static void mm_opt_omit_rep(mm_opt_t *o, char const *arg) { o->a.flag |= MM_OMIT_REP; }
-static void mm_opt_verbose(mm_opt_t *o, char const *arg) { o->verbose = arg ? (isdigit(*arg) ? mm_opt_atoi(o, arg, UINT32_MAX) : strlen(arg) + 1) : 0; }
+static void mm_opt_verbose(mm_opt_t *o, char const *arg) { o->verbose = arg ? (isdigit(*arg) ? mm_opt_atoi(o, arg, UINT32_MAX) : strlen(arg) + 1) : 1; }
 static void mm_opt_threads(mm_opt_t *o, char const *arg) {
 	o->nth = mm_opt_atoi(o, arg, UINT32_MAX);
 	oassert(o, o->nth < MAX_THREADS, "#threads must be less than %d.", MAX_THREADS);
 }
-static void mm_opt_help(mm_opt_t *o, char const *arg) { o->verbose = 1; o->help++; }
+static void mm_opt_help(mm_opt_t *o, char const *arg) { o->verbose++; o->help++; }
 
 /* input configurations */
 static void mm_opt_base_id(mm_opt_t *o, char const *arg) {
@@ -5963,10 +5979,11 @@ static void mm_opt_circular(mm_opt_t *o, char const *arg) {
 	if(arg == NULL) { return; }
 	mm_split_foreach(arg, ",;:/", {
 		if(l == 1 && (*p =='*' || *p == '-')) {
-			o->log(o, 'M', __func__, "all the reference sequences are marked circular (%c).", *p);
+			o->log(o, 2, __func__, "all the reference sequences are marked circular (%c).", *p);
 			kh_str_clear(&o->c.circ);
+		} else {
+			kh_str_put(&o->c.circ, p, l, "", 0);
 		}
-		kh_str_put(&o->c.circ, p, l, "", 0);
 	});
 }
 
@@ -6133,6 +6150,7 @@ mm_opt_t *mm_opt_init(char const *const *argv)
 		.verbose = 1, .fp = (void *)stderr, .log = (mm_log_t)mm_log_printer,
 		/* parsers: mapping from option character to functionality */
 		.t = {
+			['\0'] = { 0, NULL },			/* sentinel */
 			['x'] = { 2, mm_opt_preset },
 			['R'] = { 2, mm_opt_rg },
 			['T'] = { 2, mm_opt_tags },
@@ -6188,60 +6206,60 @@ void mm_print_help(mm_opt_t const *o)
 		o->log(o, 16 + _level, __func__, __VA_ARGS__); \
 	}
 
-	_msg(1, "\n"
+	_msg(2, "\n"
 			"  minialign - fast and accurate alignment tool for long reads\n"
 			"");
-	_msg(1, "Usage:\n"
+	_msg(2, "Usage:\n"
 			"  first trial:\n"
 			"    $ minialign -t4 -xont.r9.1d ref.fa ont_r9.4_1d.fq > mapping.sam\n"
 			"");
-	_msg(1, "  mapping on a prebuilt index (saves ~1min for human genome per run):\n"
+	_msg(2, "  mapping on a prebuilt index (saves ~1min for human genome per run):\n"
 			"    $ minialign [indexing options] -d index.mai ref.fa\n"
 			"    $ minialign index.mai reads.fq > mapping.sam\n"
 			"");
 	_msg(2, "  all-versus-all alignment in a read set:\n"
 			"    $ minialign -X -xava reads.fa [reads.fa ...] > allvsall.paf\n"
 			"");
-	_msg(1, "Options:");
-	_msg(1, "  Global:");
-	_msg(1, "    -x STR       load preset params [ont]");
-	_msg(1, "                   {pacbio.{clr,ccs},ont.{r7,r9}.{1d,1dsq,2d},ava}");
-	_msg(1, "    -t INT       number of threads [%d]", o->nth);
-	_msg(1, "    -d FILE      index construction mode, dump index to FILE");
-	_msg(2, "    -X           all-versus-all mode, `-XA' to calculate both A~B and B~A.");
-	_msg(1, "    -v [INT]     show version number / set verbose level");
-	_msg(1, "  Indexing:");
-	_msg(1, "    -k INT       k-mer size [%d]", o->c.k);
-	_msg(1, "    -w INT       minimizer window size [{-k}*2/3]");
-	_msg(1, "    -c STR,...   circular reference name, `*' to mark all as circular []");
-	_msg(2, "    -B INT       1st stage hash table size base [%u]", o->c.b)
-	_msg(2, "    -C INT[,INT] set base rid and qid, `*' to infer from seq. name [%u, %u]", o->a.base_rid, o->a.base_qid);
-	_msg(2, "    -L INT       min seq length; 0 to disable [%u]", o->b.min_len);
-	_msg(1, "  Mapping:");
-	_msg(2, "    -f FLOAT,... occurrence thresholds [%rf]", o->c.n_frq, o->c.frq);
-	_msg(1, "    -a INT       match award [%d]", o->a.p.score_matrix[0]);
-	_msg(1, "    -b INT       mismatch penalty [%d]", o->a.p.score_matrix[1]);
-	_msg(1, "    -e STR,...   score matrix modifier, `GA+3' adds 3 to (r,q)=(G,A) pair");
-	_msg(1, "    -p INT       gap open penalty offset for large indels [%d]", o->a.p.gi);
-	_msg(1, "    -q INT       per-base penalty for large indels [%d]", o->a.p.ge);
-	_msg(1, "    -r INT[,INT] per-base penalty for small ins[,del] (0 to disable) [%d,%d]", o->a.p.gfa, o->a.p.gfb);
-	_msg(2, "    -Y INT       X-drop threshold [%d]", o->a.p.xdrop);
-	_msg(1, "    -s INT       minimum score [%d]", o->a.min_score);
-	_msg(1, "    -m INT       minimum score ratio to max [%1.2f]", o->a.min_ratio);
-	_msg(1, "  Output:");
-	_msg(1, "    -O STR       output format {sam,maf,blast6,paf} [%s]",
+	_msg(2, "Options:");
+	_msg(2, "  Global:");
+	_msg(2, "    -x STR       load preset params [ont]");
+	_msg(2, "                   {pacbio.{clr,ccs},ont.{r7,r9}.{1d,1dsq,2d},ava}");
+	_msg(2, "    -t INT       number of threads [%d]", o->nth);
+	_msg(2, "    -d FILE      index construction mode, dump index to FILE");
+	_msg(3, "    -X           all-versus-all mode, `-XA' to calculate both A~B and B~A.");
+	_msg(2, "    -v [INT]     show version number / set verbose level");
+	_msg(2, "  Indexing:");
+	_msg(2, "    -k INT       k-mer size [%d]", o->c.k);
+	_msg(2, "    -w INT       minimizer window size [{-k}*2/3]");
+	_msg(2, "    -c STR,...   circular reference name, `*' to mark all as circular []");
+	_msg(3, "    -B INT       1st stage hash table size base [%u]", o->c.b)
+	_msg(3, "    -C INT[,INT] set base rid and qid, `*' to infer from seq. name [%u, %u]", o->a.base_rid, o->a.base_qid);
+	_msg(3, "    -L INT       min seq length; 0 to disable [%u]", o->b.min_len);
+	_msg(2, "  Mapping:");
+	_msg(3, "    -f FLOAT,... occurrence thresholds [%rf]", o->c.n_frq, o->c.frq);
+	_msg(2, "    -a INT       match award [%d]", o->a.p.score_matrix[0]);
+	_msg(2, "    -b INT       mismatch penalty [%d]", o->a.p.score_matrix[1]);
+	_msg(2, "    -e STR,...   score matrix modifier, `GA+3' adds 3 to (r,q)=(G,A) pair");
+	_msg(2, "    -p INT       gap open penalty offset for large indels [%d]", o->a.p.gi);
+	_msg(2, "    -q INT       per-base penalty for large indels [%d]", o->a.p.ge);
+	_msg(2, "    -r INT[,INT] per-base penalty for small ins[,del] (0 to disable) [%d,%d]", o->a.p.gfa, o->a.p.gfb);
+	_msg(3, "    -Y INT       X-drop threshold [%d]", o->a.p.xdrop);
+	_msg(2, "    -s INT       minimum score [%d]", o->a.min_score);
+	_msg(2, "    -m INT       minimum score ratio to max [%1.2f]", o->a.min_ratio);
+	_msg(2, "  Output:");
+	_msg(2, "    -O STR       output format {sam,maf,blast6,paf} [%s]",
 		(char const *[]){ "sam", "maf", "blast6", "blasr1", "blasr4", "paf", "mhap", "falcon" }[o->r.format]);
-	_msg(2, "    -P           omit secondary (repetitive) alignments");
-	_msg(1, "    -Q           include quality string");
-	_msg(2, "    -R STR       read group header line, such as `@RG\\tID:1' [%s]", o->r.rg_line ? o->r.rg_line : "");
-	_msg(2, "    -T STR,...   optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []");
-	_msg(2, "                   RG is also inferred from `-R'");
-	_msg(2, "                   supp. records are omitted when SA is enabled");
-	_msg(2, "                   tags in the input BAM file will also transferred");
-	_msg(1, "");
-	if(o->verbose < 2) {
-		_msg(0, "  Pass -hvv to show all the options.");
-		_msg(0, "");
+	_msg(3, "    -P           omit secondary (repetitive) alignments");
+	_msg(2, "    -Q           include quality string");
+	_msg(3, "    -R STR       read group header line, such as `@RG\\tID:1' [%s]", o->r.rg_line ? o->r.rg_line : "");
+	_msg(3, "    -T STR,...   optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []");
+	_msg(3, "                   RG is also inferred from `-R'");
+	_msg(3, "                   supp. records are omitted when SA is enabled");
+	_msg(3, "                   tags in the input BAM file will also transferred");
+	_msg(2, "");
+	if(o->verbose < 3) {
+		_msg(2, "  Pass -hh to show all the options.");
+		_msg(2, "");
 	}
 
 	#undef _msg
@@ -6406,7 +6424,7 @@ int _export(main)(int argc, char *argv[])
 	/* init option object (init base time) and parse args */
 	mm_opt_t *o = mm_opt_init((char const *const *)argv);
 	if(o == NULL) { return(1); }
-	o->log(o, 0, __func__, "Version: %s, Build: %s", mm_version(), MM_ARCH);		/* always print version */
+	o->log(o, 1, __func__, "Version: %s, Build: %s", mm_version(), MM_ARCH);		/* always print version */
 	if(o->help || o->parg.n == 0) {								/* when -h is passed or no input file is given, print help message */
 		if(o->help) { o->fp = stdout; ret = 0; }				/* set logger to stdout when invoked by -h option, also exit status is 0 (not an error) */
 		mm_print_help(o);
