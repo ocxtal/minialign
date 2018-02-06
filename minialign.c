@@ -3974,7 +3974,7 @@ uint64_t mm_search_record(
 	uint64_t id = _loadu_u64(&st->aid), hk = _key(p.u64[0], id), tk = _key(p.u64[1], id);
 	v2u32_t *h = (v2u32_t *)kh_put_ptr(&self->pos, hk, 1);
 	v2u32_t *t = (v2u32_t *)kh_put_ptr(&self->pos, tk, 0);		/* noextend */
-	uint64_t new = h->u32[0] == UINT32_MAX;
+	uint64_t new = h->u32[1] == UINT32_MAX;
 	debug("adjusted prem(%d), plen(%lu), hash key, h(%lx), t(%lx)", st->prem, a->plen, hk, tk);
 
 	/* open new bin for aln, reuse if the head hit an existing one */
