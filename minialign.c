@@ -10,7 +10,7 @@
 #ifndef NDEBUG
 #  define DEBUG
 #endif
-#define COLLECT_FAIL_SEQ
+// #define COLLECT_FAIL_SEQ
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -2503,6 +2503,7 @@ typedef struct {
 #define MM_NM 			( 6 )				/* i: editdist to the reference */
 #define MM_SA			( 7 )				/* Z: supplementary records */
 #define MM_MD			( 8 )				/* Z: mismatch positions */
+#define MM_CG			( 9 )				/* Z: CIGAR */
 
 /* formats */
 #define MM_SAM			( 0x00ULL )
@@ -5613,6 +5614,12 @@ void mm_print_paf_mapped(
 		uint64_t const f = b->tags;
 		if(f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->a->score); }
 		if(f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, (dcnt - mcnt) + gcnt); }
+		if(f & 0x01ULL<<MM_CG) {
+			_putsk(b, "\tCG:Z:");
+			_with_buffer(b, a->a->plen, {
+				p += gaba_dump_cigar_reverse((char *)p, a->a->plen, a->a->path, 0, a->a->plen);
+			});
+		}
 		_cr(b);
 	}
 	return;
