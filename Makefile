@@ -4,7 +4,8 @@ CC = gcc
 GIT = git
 
 # compiler flags
-CFLAGS = -g -Wall -Wno-unused-function -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
+OPT = -O3 -DNDEBUG
+CFLAGS = $(OPT) -Wall -Wno-unused-function -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
 LDFLAGS = -lm -lz -lpthread
 
 # default version string is parsed from git tags, otherwise extracted from the source
@@ -19,6 +20,12 @@ all: native
 native:
 	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)' all
 	$(CC) -o $(TARGET) $(CFLAGS) minialign.o gaba.*.o $(LDFLAGS)
+
+CFLAGS_DEBUG = -g -Wall -Wno-unused-function -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
+debug:
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS_DEBUG) -DUNITTEST=0 -DNDEBUG' NAMESPACE=silent all
+	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS_DEBUG) -DUNITTEST=0 -DDEBUG' NAMESPACE=verbose all
+	$(CC) -o $(TARGET) $(CFLAGS_DEBUG) debug.c minialign.*.o gaba.*.o $(LDFLAGS)
 
 nowrap:
 	$(MAKE) -f Makefile.core CC=$(CC) CFLAGS='$(CFLAGS)' nowrap
