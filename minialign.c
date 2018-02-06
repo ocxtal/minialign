@@ -2120,7 +2120,7 @@ bseq_t *bseq_read(bseq_file_t *fp)
 	return(s);
 
 _bseq_read_fail:;
-	free(mem.a); fp->is_eof = 2;
+	free(mem.a); fp->is_eof = 3;							/* mark error occurred */
 	return(NULL);
 
 	#undef _readp
@@ -4683,9 +4683,8 @@ int mm_align_file(mm_align_t *b, bseq_file_t *fp, mm_print_t *pr)
 	if(fp == NULL || pr == NULL) { return(-1); }
 	b->fp = fp; b->pr = pr;		/* input and output */
 	mm_print_header(pr, b->u.mi.n_seq, b->u.mi.s);
-	return(pt_stream(b->pt, b,	/* multithreaded mapping */
-		mm_align_source, mm_align_worker, mm_align_drain
-	));
+	pt_stream(b->pt, b, mm_align_source, mm_align_worker, mm_align_drain);	/* multithreaded mapping */
+	return(fp->is_eof > 2 ? 1 : 0);
 }
 /* end of mtmap.c */
 
@@ -6325,6 +6324,7 @@ void main_align_error(mm_opt_t *o, int stat, char const *fn, char const *file)
 	case 1: o->log(o, 'E', fn, "failed to instanciate alignment context."); break;
 	case 2: o->log(o, 'E', fn, "failed to open index file `%s'. Please check file path and its version.", file); break;
 	case 3: o->log(o, 'E', fn, "failed to open sequence file `%s'. Please check file path and its format.", file); break;
+	case 4: o->log(o, 'E', fn, "failed to map sequence file `%s'. Please check file path and its format.", file); break;
 	}
 	return;
 }
@@ -6388,8 +6388,9 @@ int main_align(mm_opt_t *o)
 		for(char const *const *q = (char const *const *)&o->parg.a[qh]; *q; q++) {
 			debug("query(%s)", *q);
 			bseq_file_t *fp = _bseq_open_wrap(&bq, *q);
-			mm_align_file(aln, fp, pr);
+			int err = mm_align_file(aln, fp, pr);
 			bseq_close(fp);
+			if(err) { main_align_error(o, 1, __func__, *q); goto _main_align_fail; }
 			o->log(o, 9, __func__, "finished mapping `%s' onto `%s'.", *q, pg ? *o->parg.a : r[-1]);
 		}
 		mm_align_destroy(aln);
