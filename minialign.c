@@ -6334,7 +6334,7 @@ int main_align(mm_opt_t *o)
 
 	/* first test if prebuilt index is available, then instanciate pg reader. pg != NULL indicates prebuilt index is available for this batch */
 	if(mm_endswith(*o->parg.a, ".mai") && (pg = pg_init(fopen(*o->parg.a, "rb"), o->pt)) == NULL) {
-		goto _main_align_fail;
+		main_align_error(o, 2, __func__, *o->parg.a); goto _main_align_fail;
 	}
 	uint64_t rt = 1, qh = 1;					/* tail of reference-side arguments, head of query-side arguments */
 	if((o->a.flag & MM_AVA) && pg == NULL) {	/* all-versus-all mode without prebuilt index is a special case */
@@ -6349,22 +6349,20 @@ int main_align(mm_opt_t *o)
 	/* file I/O and error handlings */
 	#define _bseq_open_wrap(_b, _fn) ({ \
 		bseq_file_t *_fp = bseq_open(_b, _fn); \
-		if(_fp == NULL) { main_align_error(o, 2, __func__, _fn); goto _main_align_fail; } \
+		if(_fp == NULL) { main_align_error(o, 3, __func__, _fn); goto _main_align_fail; } \
 		_fp; \
 	})
 	#define _mm_idx_load_wrap(_pg, _r) ({ \
 		mm_idx_t *_mi = NULL; \
-		if(_pg) { \
+		if((_pg) != NULL) { \
 			_mi = mm_idx_load(_pg, (read_t)pgread); \
 			pg_freeze(_pg);		/* release thread worker */ \
-		} else if(*(_r)) { \
-			debug("ref(%s)", *(_r)); \
+		} else if(*(_r) != NULL) { \
 			bseq_file_t *_fp = _bseq_open_wrap(&br, *(_r)); \
 			_mi = mm_idx_gen(&o->c, _fp, o->pt); \
-			o->a.base_rid += bseq_close(_fp); \
-			if(_mi == NULL) { main_align_error(o, 3, __func__, *(_r)); goto _main_align_fail; } \
-			(_r)++;		/* increment r when in the on-the-fly mode and the index is correctly built */ \
+			o->a.base_rid += bseq_close(_fp); (_r)++;	/* increment r when in the on-the-fly mode and the index is correctly built */ \
 		} \
+		if(_mi == NULL) { main_align_error(o, 2, __func__, (_pg) != NULL ? *o->parg.a : (_r)[-1]); goto _main_align_fail; } \
 		_mi; \
 	})
 
