@@ -234,7 +234,7 @@
 
 /* compare and swap (cas) */
 #if defined(__GNUC__)
-#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470
+#  if (defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 470) || (defined(_ARCH_GCC_COMPAT) && _ARCH_GCC_COMPAT < 470)
 #    define cas(ptr, cmp, val) ({ \
 		uint8_t _res; \
 		__asm__ volatile ("lock cmpxchg %[src], %[dst]\n\tsete %[res]" \
