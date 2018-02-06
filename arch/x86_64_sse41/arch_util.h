@@ -54,7 +54,7 @@
  */
 #ifdef __BMI__
 /** immintrin.h is already included */
-#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 480
+#  if defined(_ARCH_GCC_VERSION) && _ARCH_GCC_VERSION < 490
 #    define tzcnt(x)		( (uint64_t)__tzcnt_u64(x) )
 #  else
 #    define tzcnt(x)		( (uint64_t)_tzcnt_u64(x) )
