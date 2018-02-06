@@ -6104,7 +6104,7 @@ uint64_t mm_opt_check_sanity(mm_opt_t *o)
 	oassert(o, o->a.p.gfb == 0 || o->a.p.gfb > o->a.p.ge, "short-gap extension penalty (-r) must be larger than gap extension penalty (%d).", o->a.p.ge);
 	oassert(o, ((o->a.p.gfa == 0) ^ (o->a.p.gfb == 0)) == 0, "short-gap extension penalty (-r) must be set for both sides.");
 	oassert(o, o->a.p.gfa == 0 || o->a.p.gfb == 0 || o->a.p.gfa + o->a.p.gfb > -x, "short-gap extension penalty (-r) must not be greater than mismatch penalty.");
-	if(mm_endswith(*o->parg.a, ".mai") && kh_str_ptr(&o->c.circ) != NULL) {
+	if(*o->parg.a != NULL && mm_endswith(*o->parg.a, ".mai") && kh_str_ptr(&o->c.circ) != NULL) {
 		o->log(o, 'W', __func__, "index will be loaded from file `%s'. circular option is ignored.", *o->parg.a);
 	}
 
