@@ -1,7 +1,7 @@
 
 # load architecture-dependent optimization flags, the default is `-march=native'
 ARCH = NATIVE
-NATIVE_FLAGS = -march=native
+NATIVE_FLAGS = -march=native -msse4.2 -mpopcnt
 SSE41_FLAGS = $(shell bash -c "if [[ $(CC) = icc* ]]; then echo '-msse4.2'; else echo '-msse4.2 -mpopcnt'; fi")
 AVX2_FLAGS = $(shell bash -c "if [[ $(CC) = icc* ]]; then echo '-march=core-avx2'; else echo '-mavx2 -mbmi -mbmi2 -mlzcnt -mpopcnt'; fi")
 ARCHFLAGS = $($(ARCH)_FLAGS)

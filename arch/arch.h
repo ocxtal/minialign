@@ -20,7 +20,7 @@
 #  if defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
 /* the compiler is gcc, not clang nor icc */
 #    define _ARCH_GCC_VERSION	( __GNUC__ * 100 + __GNUC_MINOR__ * 10 + __GNUC_PATCHLEVEL__ )
-#  elif defined(__GNUC__) && !defined(__clang__) && defined(__INTEL_COMPILER)
+#  elif defined(__GNUC__) && (defined(__clang__) || defined(__INTEL_COMPILER))
 #    define _ARCH_GCC_COMPAT	( __GNUC__ * 100 + __GNUC_MINOR__ * 10 + __GNUC_PATCHLEVEL__ )
 #  endif
 
