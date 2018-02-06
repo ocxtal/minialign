@@ -124,7 +124,7 @@
 #ifdef NAMESPACE
 #  define _export_cat(x, y)			x##_##y
 #  define _export_cat2(x, y)		_export_cat(x, y)
-#  define _export(_base)			_export_cat2(NAMESPACE, _suffix(_base))
+#  define _export(_base)			_export_cat2(_suffix(_base), NAMESPACE)
 #else
 #  define _export(_base)			_suffix(_base)
 #endif
@@ -1602,6 +1602,28 @@ struct gaba_joint_tail_s *fill_create_tail(
 }
 #endif /* MODEL */
 
+#ifdef DEBUG
+#define _check_overflow(_delta, _drop) { \
+	int8_t b[_W], d[_W], flag = 0; int16_t adj[_W], m1[_W], m2[_W]; \
+	_storeu_n(b, _delta); _storeu_n(d, _drop); \
+	wvec_t adjv = _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_add_n(delta, drop), delta))); \
+	_storeu_w(adj, adjv); _storeu_w(m1, md); _storeu_w(m2, _add_w(md, adjv)); \
+	for(uint64_t i = 0; i < _W - 1; i++) { if(b[i + 1] > b[i] + 32) { flag = 1; } if(b[i + 1] < b[i] - 32) { flag = 1; } } \
+	if(flag == 1) { \
+		fprintf(stderr, "delta("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", b[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, " drop("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", d[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "   md("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", self->w.r.md.delta[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "   m1("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", m1[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "  adj("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", adj[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "   m2("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", m2[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "  sum("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", (int8_t)(b[i] + d[i])); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, " mask("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%c,    ", (int8_t)(~(b[i] + d[i]) & b[i]) < 0 ? '1' : '0'); } fprintf(stderr, ")\n"); \
+	} \
+}
+#else
+#define _check_overflow(_x, _y) {}
+#endif
+
 /**
  * @macro _fill_store_context
  * @brief store vectors at the end of the block
@@ -1626,12 +1648,11 @@ struct gaba_joint_tail_s *fill_create_tail(
 	debug("update_mask(%lx)", (uint64_t)(_blk)->max_mask); \
 	/* update middle delta vector */ \
 	wvec_t md = _load_w(&self->w.r.md); \
-	md = _add_w(md, _cvt_n_w(delta)); md = _add_w(md, _set_w(0x0100 - cofs)); \
-	/* dirty-hack to handle overflow */ { \
-		nvec_t ov1 = _add_n(delta, drop), ov2 = _sub_n(delta, drop); \
-		wvec_t ovw = _and_w(_set_w(0x0100), _cvt_n_w(_or_n(ov1, ov2))); \
-		md = _sub_w(md, ovw); \
-	} \
+	md = _add_w(md, _cvt_n_w(delta)); \
+	_check_overflow(delta, drop); \
+	/* dirty-hack to handle overflow: underflow is not rescued here */ \
+	md = _add_w(md, _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_add_n(delta, drop), delta)))); \
+	md = _add_w(md, _set_w(-cofs));		/* fixup offset adjustment */ \
 	_store_w(&self->w.r.md, md); \
 }
 #if MODEL == LINEAR
@@ -1755,6 +1776,7 @@ struct gaba_block_s *fill_bulk_k_blocks(
 			self->w.r.asridx - self->w.r.arem - self->w.r.arlim,
 			self->w.r.bsridx - self->w.r.brem - self->w.r.brlim,
 			self->w.r.md.delta[_W/2] + self->w.r.xd.drop[_W/2] + _offset(self->w.r.tail) + self->w.r.ofsd);
+		_print_w(_load_w(self->w.r.md.delta));
 		fill_bulk_block(self, ++blk);
 	}
 	debug("return, blk(%p), xstat(%x), pridx(%u)", blk, blk->xstat, self->w.r.pridx);

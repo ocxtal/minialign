@@ -55,7 +55,7 @@ _static_assert(_gaba_dp_ctx_index(64) == 0);		/* assume 64-cell has the smallest
 #  ifdef NAMESPACE
 #    define _import_cat(x, y)		x##_##y
 #    define _import_cat2(x, y)		_import_cat(x, y)
-#    define _import(_base)			_import_cat2(NAMESPACE, _base)
+#    define _import(_base)			_import_cat2(_base, NAMESPACE)
 #  else
 #    define _import(_base)			_base
 #  endif
