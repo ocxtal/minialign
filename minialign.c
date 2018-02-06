@@ -2346,7 +2346,7 @@ void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k, uint64_v *b)
  */
 #define _loop_init(_len, _cap) \
 	uint64_t const kk = sk->k - 1, shift1 = 2*kk, mask = (1ULL<<2*sk->k) - 1, w = sk->w; \
-	kv_reserve(uint64_t, *sk->b, sk->b->n + 4 * (_len) / w);	/* reserve buffer for minimizers, expected number will be 2 * len / w */ \
+	kv_reserve(uint64_t, *sk->b, sk->b->n + 4 * (_len) / w + 256);	/* reserve buffer for minimizers, expected number will be 2 * len / w */ \
 	uint64_t *q = sk->b->a + sk->b->n; \
 	uint8_t const *p = seq, *t = &seq[_len]; \
 	uint64_t u = (_cap)->u, k0 = (_cap)->k0, k1 = (_cap)->k1;	/* forward and backward k-mers, min buffer (w < 32 must be guaranteed) */
