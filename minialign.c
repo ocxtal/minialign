@@ -5646,6 +5646,7 @@ static _force_inline
 void mm_print_destroy(
 	mm_print_t *pr)
 {
+	if(pr == NULL) { return; }
 	fwrite(pr->base, sizeof(uint8_t), pr->p - pr->base, stdout);
 	free(pr->arg_line); free(pr->rg_line); free(pr->rg_id);
 	free(pr->base); free(pr);
@@ -6397,8 +6398,8 @@ int main_align(mm_opt_t *o)
 	return(0);
 
 _main_align_fail:;
-	mm_idx_destroy(mi);
 	mm_align_destroy(aln);
+	mm_idx_destroy(mi);
 	mm_print_destroy(pr);
 	pg_destroy(pg);
 	return(1);
