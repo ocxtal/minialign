@@ -3308,7 +3308,7 @@ typedef struct mm_tbuf_s {
 #define _p(_ptr)		( ((int32_t const *)(_ptr))[0] + ((int32_t const *)(_ptr))[1] )
 #define _q(_ptr)		( ((int32_t const *)(_ptr))[1] - ((int32_t const *)(_ptr))[0] )
 #define _inside(_lb, _x, _ub)		( (uint32_t)((_x) - (_lb)) <= (uint32_t)((_ub) - (_lb)) )
-#define _key(x, y)		({ uint64_t _x = (x), _y = (y), _z = (_x) ^ ((_x)>>29) ^ (_y) ^ _swap_u64(_y); (z); })
+#define _key(x, y)		({ uint64_t _x = (x), _y = (y), _z = (_x) ^ ((_x)>>29) ^ (_y) ^ _swap_u64(_y); (_z); })
 _static_assert(_ud(1000, -5) == _vd(-5, 1000));	/* invariant condition */
 _static_assert(_ud(1000, 10) == _vd(10, 1000));	/* invariant condition */
 
