@@ -1962,7 +1962,7 @@ uint64_t min_blocks_idx(
 {
 	uint64_t p = MIN2(self->w.r.arem, self->w.r.brem);
 	debug("aridx(%u), bridx(%u), p(%lu), pridx(%u)", self->w.r.arem, self->w.r.brem, p, self->w.r.pridx)
-	return(MIN2(p + p / 2, self->w.r.pridx) / BLK);
+	return(MIN2(p, self->w.r.pridx) / BLK);
 }
 
 /**
