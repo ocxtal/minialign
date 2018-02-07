@@ -10,7 +10,7 @@
 #ifndef NDEBUG
 #  define DEBUG
 #endif
-// #define COLLECT_FAIL_SEQ
+#define COLLECT_FAIL_SEQ
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -3296,7 +3296,7 @@ typedef struct mm_tbuf_s {
 	mm_seed_v seed;					/* seed array / leaf array */
 	uint64_t n_seed;
 	mm_root_v root;					/* roots of chain trees */
-	uint64_v next;					/* marginal roots */
+	v2u32_v next;					/* marginal roots */
 	uint32_t n_res;					/* #alignments collected */
 	ptr_v bin;						/* gaba_alignment_t* array */
 	kh_t pos;						/* alignment dedup hash */
@@ -3359,9 +3359,9 @@ _static_assert(_ud(1000, 10) == _vd(10, 1000));	/* invariant condition */
 	_sub_v4i32(_w, _sv); \
 })
 #define _posv_v4i32(_aid, _bid, _apos, _bpos)		( _seta_v4i32(_v(_apos, _bpos), _v(_apos, _bpos), (_aid), _u(_apos, _bpos)) )
-#define _pdiff_v4i32(_w, _f)	({ \
+#define _pdiff_v4i32(_w, _f) ({ \
 	v4i32_t _dv = _sub_v4i32(_w, _f); \
-	_ext_v4i32(_dv, 0) + _ext_v4i32(_dv, 2); \
+	_ext_v4i32(_dv, 0) + _ext_v4i32(_dv, 2);		/* p-distance from f to the bottomleft window tip: two positions are closer if larger */ \
 })
 
 /**
@@ -3862,7 +3862,8 @@ uint64_t mm_search_load_next(
 	if(st->srem == 0) { return(0); } st->srem--;
 
 	mm_seed_t const *s = self->seed.a;
-	uint64_t *n = self->next.a, ncnt = self->next.n, ofs = 2 * self->twlen;
+	v2u32_t *n = self->next.a;
+	uint64_t ncnt = self->next.n, ofs = 2 * self->twlen;
 	v4i32_t tv = _window(self->twlen), ev = _window(128);		/* exclude near seeds */
 	v4i32_t fv = _posv_v4i32(st->aid, st->bid,
 		st->cp.apos,
@@ -3872,10 +3873,12 @@ uint64_t mm_search_load_next(
 
 	/* update reseeding array for the next seeding */
 	uint64_t plim = ofs - st->pacc;
+	debug("plim(%lx), st->pacc(%d, %x)", plim, st->pacc, st->pacc);
+	if(st->pacc > ofs) { debug("clear, pacc(%d), ofs(%lu)", st->pacc, ofs); ncnt = 0; }
 	for(uint64_t i = 0; i < ncnt; i++) {
-		debug("update next array, sid(%lu), pdiff(%lu), plim(%lu)", n[i]>>32, _lo32(n[i]), plim);
-		if(_lo32(n[i]) >= plim) { debug("strip next array, ncnt(%lu)", i); ncnt = i; break; }
-		n[i] += st->pacc;
+		debug("update next array, sid(%u), pdiff(%u), plim(%lu), rid(%u)", n[i].u32[1], n[i].u32[0], plim, self->seed.a[n[i].u32[1]].rid);
+		if(n[i].u32[0] >= plim) { debug("strip next array, ncnt(%lu)", i); ncnt = i; break; }
+		n[i].u32[0] += st->pacc;
 	}
 
 	/* append new seeds */
@@ -3886,30 +3889,25 @@ uint64_t mm_search_load_next(
 		// _print_seed("test seed at sid(%lu), mask(%x, %x), ab(%d, %d)", wv, sid, _inside_mask(wv, fv), _inside_mask(zv, fv), _as(&s[sid]), _bs(&s[sid]));
 		if(!_inside_uub(wv, fv)) { break; }
 		if(!_inside_wv(wv, fv) || _inside_wv(zv, fv)) { continue; }
-
 		v4i32_t dv = _sub_v4i32(tv, _sub_v4i32(wv, fv));
 		_print_v4i32(dv);
-		uint64_t pdiff = _pdiff_v4i32(wv, fv) | ((sid - 1)<<32);
-		debug("sid(%lu), pdiff(%lu, %lx)", sid - 1, (ofs - _pdiff_v4i32(wv, fv)), pdiff);
-		n[ncnt++] = pdiff; rcnt--;
+		n[ncnt++] = (v2u32_t){ .u32 = { _pdiff_v4i32(wv, fv), sid - 1 } }; rcnt--;
+		debug("sid(%lu), pdiff(%u), rid(%u)", sid - 1, _pdiff_v4i32(wv, fv), self->seed.a[sid - 1].rid);
 	}
-	st->sid = sid;						/* write back sid for next search */
-	st->pacc = 0;
-
+	st->sid = sid;						/* write back sid for the next search */
 	self->next.n = ncnt;
-	if(ncnt == 0) { st->srem = 0; return(0); }
-	debug("sort candidates, ncnt(%lu)", ncnt);
-	radix_sort_64x((v2u32_t *)n, ncnt);
+	if(ncnt == 0) { st->pacc = 0; st->srem = 0; return(0); }
+	radix_sort_64x(n, ncnt);
 
 	/* extract next */
-	uint32_t nsid = n[--self->next.n]>>32;
+	uint32_t nsid = n[--self->next.n].u32[1];
+	st->pacc = ofs - n[self->next.n].u32[0];
 	st->cp = mm_search_load_pos(self, &s[nsid], &st->rev);		/* load tail */
-	st->pacc = ofs - _lo32(n[self->next.n]);
 
-	debug("load next, sid(%u), id(%u, %u), bare(%d, %d), cp(%d, %d), prem(%d)",
+	debug("load next, sid(%u), id(%u, %u), bare(%d, %d), cp(%d, %d), prem(%d), pacc(%d)",
 		st->sid, st->aid, st->bid,
 		_bare(s[nsid].upos), _bare(s[nsid].vpos),
-		st->cp.apos, st->cp.bpos, st->prem
+		st->cp.apos, st->cp.bpos, st->prem, st->pacc
 	);
 	return(st->srem);
 }
