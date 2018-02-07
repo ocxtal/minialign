@@ -1960,6 +1960,7 @@ uint64_t bseq_read_bam(
 		_m1 = _match(_r, _dv); _m2 = _match(_r, _lv); \
 		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m1 | _m2), _t - _p); \
 		_len = _l; _p += 32; _q += 32; \
+		if(_p > (_t + 32) || _q > mem->a + mem->m) { fprintf(stderr, "buffer overrun, p(%p), fp(%p, %lu, %p), q(%p), mem(%p, %lu, %p)\n", _p, fp->a, fp->n, _t, _q, mem->a, mem->m, mem->a + mem->m); *((volatile uint8_t *)NULL); } \
 	} while(_len >= 32); \
 	_p += _len - 32; _q += _len - 32; _q -= _q[-1] == '\r'; _m1>>_len; \
 })
@@ -2070,6 +2071,10 @@ uint64_t bseq_read_fasta(
 _refill:
 	debug("return, p(%p), t(%p)", p, t);
 	fp->p = p; mem->n = q - mem->a;				/* write back pointers */
+	if(mem->n > mem->m) {
+		fprintf(stderr, "buffer overrun, mem->n(%lu), mem->m(%lu)\n", mem->n, mem->m);
+		*((volatile uint8_t *)NULL);
+	}
 	return(p >= t);
 
 	#undef _id
@@ -2098,9 +2103,10 @@ bseq_t *bseq_read(bseq_file_t *fp)
 	if(fp->is_eof > 1) { return(NULL); }
 
 	#define _readp(_l)	({ \
-		kv_reserve(uint8_t, *fp, _l);		/* dead code when _l == fp->n */ \
+		kv_reserve(uint8_t, *fp, (_l) + 64);				/* dead code when _l == fp->n */ \
 		uint64_t _r = gzread(fp->fp, fp->a, _l); \
 		fp->p = fp->a; fp->t = fp->a + _r; \
+		_storeu_v64i8(fp->t, _set_v64i8('\n'));				/* fill margin of the input buffer */ \
 		(_r != _l) ? (fp->is_eof = 1 + (_r == 0)) : 0; \
 	})
 	#define _reada(type)	({ type _n; if(gzread(fp->fp, &_n, sizeof(type)) != sizeof(type)) { _n = 0; } _n; })
@@ -2121,7 +2127,6 @@ bseq_t *bseq_read(bseq_file_t *fp)
 		while(mem.n < fp->n + BSEQ_MGN) {					/* fetch-and-parse loop */
 			while(bseq_read_fasta(fp, &seq, &mem) == 1) {	/* buffer starved */
 				if(_readp(fp->n) > 1) { break; }			/* fetch next */
-				_storeu_v64i8(fp->t, _zero_v64i8());		/* fill margin of the input buffer */
 				kv_reserve(uint8_t, mem, mem.n + 2 * fp->n);/* reserve room for the next parsing unit */
 			}
 			debug("finished seq, state(%u), is_eof(%u)", fp->state, fp->is_eof);
