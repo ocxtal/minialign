@@ -795,7 +795,8 @@ typedef void (*pt_drain_t)(uint32_t tid, void *arg, void *item);
 typedef struct pt_q_s {
 	uint64_t lock, head, tail, size;
 	void **elems;
-	uint64_t _pad1[3];
+	uint64_t wait_cnt;
+	uint64_t _pad1[2];
 } pt_q_t;
 _static_assert(sizeof(pt_q_t) == 64);		/* to occupy a single cache line */
 
@@ -805,7 +806,7 @@ _static_assert(sizeof(pt_q_t) == 64);		/* to occupy a single cache line */
  */
 typedef struct pt_thread_s {
 	pthread_t th;
-	uint64_t tid;
+	uint64_t tid, wait_cnt;
 	pt_q_t *in, *out;
 	volatile pt_worker_t wfp;
 	volatile void *warg;
@@ -822,7 +823,8 @@ typedef struct pt_s {
 } pt_t;
 #define pt_nth(_pt)	( (_pt)->nth )
 #define PT_EMPTY	( (void *)(UINT64_MAX) )
-#define PT_EXIT		( (void *)(UINT64_MAX-1) )
+#define PT_EXIT		( (void *)(UINT64_MAX - 1) )
+#define PT_DEFAULT_INTERVAL		( 512 * 1024 )
 
 /**
  * @fn pt_enq
@@ -847,6 +849,13 @@ uint64_t pt_enq(pt_q_t *q, uint64_t tid, void *elem)
 	/* release */
 	do { z = tid; } while(!cas(&q->lock, &z, UINT32_MAX));
 	return(ret);
+}
+static _force_inline
+uint64_t pt_enq_retry(pt_q_t *q, uint64_t tid, void *elem, uint64_t nsec)
+{
+	struct timespec tv = { .tv_nsec = nsec };
+	while(pt_enq(q, tid, elem) != 0) { q->wait_cnt++; nanosleep(&tv, NULL); }
+	return(0);
 }
 
 /**
@@ -880,25 +889,26 @@ static _force_inline
 void *pt_dispatch(void *s)
 {
 	pt_thread_t *c = (pt_thread_t *)s;
-	struct timespec tv = { .tv_nsec = 512 * 1024 };
+	uint64_t const intv = PT_DEFAULT_INTERVAL;
+	struct timespec tv = { .tv_nsec = intv };
 
 	void *ping = PT_EMPTY, *pong = PT_EMPTY;
 	while(1) {
 		ping = pt_deq(c->in, c->tid);		/* prefetch */
 		if(ping == PT_EMPTY && pong == PT_EMPTY) {
-			nanosleep(&tv, NULL);			/* no task is available, sleep for a while */
+			c->wait_cnt++; nanosleep(&tv, NULL);			/* no task is available, sleep for a while */
 		}
 		if(pong != PT_EMPTY) {
-			pt_enq(c->out, c->tid, c->wfp(c->tid, (void *)c->warg, pong));
+			pt_enq_retry(c->out, c->tid, c->wfp(c->tid, (void *)c->warg, pong), intv);
 		}
 		if(ping == PT_EXIT) { break; }		/* terminate thread */
 
 		pong = pt_deq(c->in, c->tid);		/* prefetch */
 		if(ping == PT_EMPTY && pong == PT_EMPTY) {
-			nanosleep(&tv, NULL);			/* no task is available, sleep for a while */
+			c->wait_cnt++; nanosleep(&tv, NULL);			/* no task is available, sleep for a while */
 		}
 		if(ping != PT_EMPTY) {
-			pt_enq(c->out, c->tid, c->wfp(c->tid, (void *)c->warg, ping));
+			pt_enq_retry(c->out, c->tid, c->wfp(c->tid, (void *)c->warg, ping), intv);
 		}
 		if(pong == PT_EXIT) { break; }		/* terminate thread */
 	}
@@ -916,13 +926,11 @@ void pt_destroy(pt_t *pt)
 
 	/* send termination signal */
 	for(uint64_t i = 1; i < pt->nth; i++) {
-		pt_enq(pt->c->in, pt->c->tid, PT_EXIT);
+		pt_enq_retry(pt->c->in, pt->c->tid, PT_EXIT, PT_DEFAULT_INTERVAL);
 	}
 
 	/* wait for the threads terminate */
-	for(uint64_t i = 1; i < pt->nth; i++) {
-		pthread_join(pt->c[i].th, &status);
-	}
+	for(uint64_t i = 1; i < pt->nth; i++) { pthread_join(pt->c[i].th, &status); }
 
 	/* clear queues */
 	while(pt_deq(pt->c->in, pt->c->tid) != PT_EMPTY) {}
@@ -946,15 +954,16 @@ pt_t *pt_init(uint32_t nth)
 	pt_t *pt = calloc(nth, sizeof(pt_t) + sizeof(pt_thread_t));
 
 	/* init queues (note: #elems can be larger for better performance?) */
+	uint64_t const size = 16 * nth;
 	pt->in = (pt_q_t){
 		.lock = UINT32_MAX,
-		.elems = calloc(8 * nth, sizeof(void *)),
-		.size = 8 * nth
+		.elems = calloc(size, sizeof(void *)),
+		.size = size
 	};
 	pt->out = (pt_q_t){
 		.lock = UINT32_MAX,
-		.elems = calloc(8 * nth, sizeof(void *)),
-		.size = 8 * nth
+		.elems = calloc(size, sizeof(void *)),
+		.size = size
 	};
 
 	/* init parent thread info */
@@ -984,7 +993,7 @@ int pt_set_worker(pt_t *pt, void *arg, pt_worker_t wfp)
 
 	/* fails when unprocessed object exists in the queue */
 	if((item = pt_deq(&pt->in, 0)) != PT_EMPTY) {
-		pt_enq(&pt->in, 0, item);
+		pt_enq_retry(&pt->in, 0, item, PT_DEFAULT_INTERVAL);
 		return(-1);
 	}
 
@@ -1008,27 +1017,35 @@ int pt_stream(pt_t *pt, void *arg, pt_source_t sfp, pt_worker_t wfp, pt_drain_t 
 	if(pt_set_worker(pt, arg, wfp)) { return(-1); }
 
 	/* keep balancer between [lb, ub) */
-	uint64_t const lb = 2 * pt->nth, ub = 4 * pt->nth;
+	uint64_t const lb = 2 * pt->nth, ub = 8 * pt->nth;
 	uint64_t bal = 0;
 	void *it;
 
 	while((it = sfp(0, arg)) != NULL) {
+		// if(pt_enq(&pt->in, 0, it) != 0) { dfp(0, arg, wfp(0, arg, it)); continue; }	/* queue full, process locally */
 		pt_enq(&pt->in, 0, it);
-		if(++bal < ub) { continue; }
+		if(++bal < ub) { continue; }									/* queue not full */
 
 		while(bal > lb) {
 			/* flush to drain (note: while loop is better?) */
-			if((it = pt_deq(&pt->out, 0)) != PT_EMPTY) { bal--; dfp(0, arg, it); }
+			while((it = pt_deq(&pt->out, 0)) != PT_EMPTY) { bal--; dfp(0, arg, it); }
 			/* process one in the master (parent) thread */
 			if((it = pt_deq(&pt->in, 0)) != PT_EMPTY) { bal--; dfp(0, arg, wfp(0, arg, it)); }
 		}
 	}
 
 	/* source depleted, process remainings */
-	while((it = pt_deq(&pt->in, 0)) != PT_EMPTY) { pt_enq(&pt->out, 0, wfp(0, arg, it)); }
+	while((it = pt_deq(&pt->in, 0)) != PT_EMPTY) { pt_enq_retry(&pt->out, 0, wfp(0, arg, it), PT_DEFAULT_INTERVAL); }
 
 	/* flush results */
-	while(bal > 0) { if((it = pt_deq(&pt->out, 0)) != PT_EMPTY) { bal--; dfp(0, arg, it); } }
+	while(bal > 0) {
+		if((it = pt_deq(&pt->out, 0)) != PT_EMPTY) {
+			bal--; dfp(0, arg, it);
+		} else {
+			struct timespec tv = { .tv_nsec = 2 * 1024 * 1024 };
+			nanosleep(&tv, NULL);
+		}
+	}
 	return(0);
 }
 
@@ -1042,7 +1059,9 @@ int pt_parallel(pt_t *pt, void *arg, pt_worker_t wfp)
 	if(pt_set_worker(pt, arg, wfp)) { return(-1); }
 
 	/* push items */
-	for(uint64_t i = 1; i < pt->nth; i++) { pt_enq(&pt->in, 0, (void *)i); }
+	for(uint64_t i = 1; i < pt->nth; i++) {
+		pt_enq_retry(&pt->in, 0, (void *)i, PT_DEFAULT_INTERVAL);
+	}
 	debug("pushed items");
 
 	/* process the first one in the master (parent) thread */
@@ -1300,7 +1319,7 @@ void pg_freeze(pg_t *pg)
 		if(pg->nth == 1) {
 			pg_write_block(pg, pg_deflate(s, pg->block_size));
 		} else {
-			pg->bal++; pt_enq(&pg->pt->in, 0, s);
+			pg->bal++; pt_enq_retry(&pg->pt->in, 0, s, PT_DEFAULT_INTERVAL);
 		}
 		pg->s = NULL;
 	}
@@ -1361,7 +1380,7 @@ pg_block_t *pg_read_multi(pg_t *pg)
 	while(!pg->eof && pg->bal < pg->ub) {
 		if((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
 		pg->bal++;
-		pt_enq(&pg->pt->in, 0, t);
+		pt_enq_retry(&pg->pt->in, 0, t, PT_DEFAULT_INTERVAL);
 	}
 
 	/* fetch inflated blocks and push heapqueue to sort */
@@ -1422,7 +1441,7 @@ static _force_inline
 void pg_write_multi(pg_t *pg, pg_block_t *s)
 {
 	/* push the current block to deflate queue */
-	if(s != NULL) { pg->bal++; pt_enq(&pg->pt->in, 0, s); }
+	if(s != NULL) { pg->bal++; pt_enq_retry(&pg->pt->in, 0, s, PT_DEFAULT_INTERVAL); }
 
 	/* fetch copressed block and push to heapqueue to sort */
 	pg_block_t *t;
