@@ -428,7 +428,7 @@ struct gaba_merge_work_s {
 #endif
 	uint64_t abrk[4];					/** (32) */
 	uint64_t bbrk[4];					/** (32) */
-	uint8_t buf[MERGE_BUFFER_LENGTH + 5 * sizeof(int16_t) * MERGE_BUFFER_LENGTH];	/** (32, 64, 128) + (320, 640, 1280) */
+	uint8_t buf[MERGE_BUFFER_LENGTH + 7 * sizeof(int16_t) * MERGE_BUFFER_LENGTH];	/** (32, 64, 128) + (320, 640, 1280) */
 };
 _static_assert((sizeof(struct gaba_merge_work_s) % 64) == 0);
 
@@ -630,9 +630,9 @@ struct gaba_opaque_s {
  * @sa gaba_init, gaba_close
  */
 #ifdef DEBUG_MEM
-#  define ROOT_BLOCK_OFFSET				( 2048 + 1024 )
+#  define ROOT_BLOCK_OFFSET				( 4096 + 2048 )
 #else
-#  define ROOT_BLOCK_OFFSET				( 2048 + 1024 )
+#  define ROOT_BLOCK_OFFSET				( 4096 )
 #endif
 struct gaba_context_s {
 	/** opaque pointers for function dispatch */
