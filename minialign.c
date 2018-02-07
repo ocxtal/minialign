@@ -102,6 +102,7 @@ void oom_abort(
 	struct rusage r;
 	getrusage(RUSAGE_SELF, &r);
 	fprintf(stderr, "[E::%s] Out of memory. (required: %zu MB, maxrss: %ld MB)\n", name, req / 1024, r.ru_maxrss);
+	*((volatile uint8_t *)NULL);
 	trap();								/* segv trap for debugging; see log.h */
 	exit(128);							/* 128 reserved for out of memory */
 }
@@ -110,6 +111,7 @@ void oom_abort(
  * @macro mm_malloc
  */
 #define mm_malloc(_x) ({ \
+	if((_x) > 20ULL * 1024 * 1024 * 1024) { fprintf(stderr, "size(%lu)\n", (_x)); *((volatile uint8_t *)NULL); } \
 	void *_ptr = malloc((size_t)(_x)); \
 	if(_unlikely(_ptr == NULL)) { \
 		oom_abort(__func__, (_x)); \
@@ -127,6 +129,7 @@ void oom_abort(
  * @macro mm_realloc
  */
 #define mm_realloc(_x, _y) ({ \
+	if((_y) > 20ULL * 1024 * 1024 * 1024) { fprintf(stderr, "size(%lu)\n", (_y)); *((volatile uint8_t *)NULL); } \
 	void *_ptr = realloc((void *)(_x), (size_t)(_y)); \
 	if(_unlikely(_ptr == NULL)) { \
 		oom_abort(__func__, (_y)); \
@@ -1947,7 +1950,7 @@ uint64_t bseq_read_bam(
 #define _match(_v1, _v2)	( ((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(_v1, _v2)) }).all )
 #define _strip(_p, _t, _v) ({ \
 	v32i8_t _r = _loadu_v32i8(_p); \
-	ZCNT_RESULT uint64_t _l = MIN2(tzcnt(~((uint64_t)_match(_r, _v))), _t - _p); \
+	ZCNT_RESULT uint64_t _l = MIN2(tzcnt(~((uint64_t)_match(_r, _v))), (uint64_t)(_t - _p)); \
 	uint64_t _len = _l; \
 	_p += _len; _len; \
 })
@@ -1958,7 +1961,7 @@ uint64_t bseq_read_bam(
 	do { \
 		v32i8_t _r = _loadu_v32i8(_p), _s = _op(_r); _storeu_v32i8(_q, _s); \
 		_m1 = _match(_r, _dv); _m2 = _match(_r, _lv); \
-		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m1 | _m2), _t - _p); \
+		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m1 | _m2), (uint64_t)(_t - _p)); \
 		_len = _l; _p += 32; _q += 32; \
 		if(_p > (_t + 32) || _q > mem->a + mem->m) { fprintf(stderr, "buffer overrun, p(%p), fp(%p, %lu, %p), q(%p), mem(%p, %lu, %p)\n", _p, fp->a, fp->n, _t, _q, mem->a, mem->m, mem->a + mem->m); *((volatile uint8_t *)NULL); } \
 	} while(_len >= 32); \
@@ -1972,7 +1975,7 @@ uint64_t bseq_read_bam(
 	do { \
 		v32i8_t _r = _loadu_v32i8(_p); \
 		_m = _match(_r, _lv); \
-		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m), _t - _p); _len = _l; _p += 32; \
+		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m), (uint64_t)(_t - _p)); _len = _l; _p += 32; \
 	} while(_len >= 32); \
 	_p += _len - 32; _p - _b; \
 })
@@ -2404,7 +2407,7 @@ mm_sketch_cap_t const *mm_sketch(mm_sketch_t *sk, uint8_t const *seq, uint32_t l
 	_loop_init(len, &init);			/* initialize working buffers */
 	debug("p(%p), t(%p), len(%u, %lu)", p, t, len, t - p);
 	for(uint64_t i = 0; i < kk && p < t; i++) { _push_kmer(); }
-	while(t - p >= w) {
+	while((int64_t)(t - p) >= (int64_t)w) {		/* signed compare to prevent overrun */
 		/* calculate hash values for the current block */
 		for(uint64_t i = 0, f = UINT64_MAX; i < w; i++) { sk->r[i] = _loop_core(); }
 		/* fold backward-min array */
@@ -2494,7 +2497,7 @@ typedef struct {
 	int32_t wlen, glen;						/* chainable window edge length, linkable gap length */
 	float min_ratio;
 	uint32_t min_score;
-	int32_t mcoef;
+	uint32_t mcoef;
 	// uint32_t base_rid;					/* currently disabled */
 	uint32_t base_qid;
 	gaba_t *ctx;
@@ -2909,9 +2912,9 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 		uint64_t max_cnt = mii->mi.occ[mii->mi.n_occ - 1], sp = 0, *r = (uint64_t *)arr;	/* reuse minimizer array */
 		mm_mini_t *p = arr, *q = p, *t = &arr[n_arr];
 		for(uint64_t ph = p++->hrem; p < t; q = p, ph = p++->hrem) {
-			if(ph != p->hrem && p - q <= max_cnt) { _fill_body(); }	/* skip if occurs more than the max_cnt threshold */
+			if(ph != p->hrem && (uint64_t)(p - q) <= max_cnt) { _fill_body(); }	/* skip if occurs more than the max_cnt threshold */
 		}
-		if(p - q <= max_cnt) { _fill_body(); }
+		if((uint64_t)(p - q) <= max_cnt) { _fill_body(); }
 		#undef _fill_body
 
 		/* shrink table */
@@ -3198,9 +3201,10 @@ typedef struct {
 	mm_pos_pair_t cp, tp;			/* current head and tail pos */
 	uint32_t aid, bid;				/* head ids */
 	uint32_t iid, eid, sid, rev;	/* bin id, res id, seed id, reverse flag (1 if b is reverse) */
-	int32_t prem, pacc;				/* remaining plen */
+	int64_t prem;					/* remaining plen */
+	uint32_t pacc;
 	uint32_t crem, srem, narrow;	/* chain trial count, seed trial count, bandwidth */
-	int32_t min_score;
+	uint32_t min_score;
 } mm_search_t;
 
 /**
@@ -3278,7 +3282,7 @@ typedef struct {
  */
 typedef struct mm_tbuf_s {
 	mm_idx_t mi;					/* (immutable) index object */
-	int32_t twlen, tglen;			/* leaned chainable window edge length, linkable gap length; converted from wlen and glen */
+	uint32_t twlen, tglen;			/* leaned chainable window edge length, linkable gap length; converted from wlen and glen */
 	float min_ratio;
 	uint32_t min_score;
 	int32_t mcoef;
@@ -3529,13 +3533,13 @@ uint64_t mm_chain_seeds(
 	mm_seed_t *s = self->seed.a;
 	mm_root_t *c = self->root.a;
 	uint32_t ncid = 0, nlid = self->n_seed + 1;		/* keep sentinel untouched */
-	uint32_t bsid = 0, nlsid = 0, tsid = self->n_seed;
+	uint32_t nlsid = 0, tsid = self->n_seed;
 	v4i32_t tv = _window(self->twlen);
 	while(nlsid < tsid) {
 		uint32_t lid = nlid++;						/* open new leaf for the new branch */
 		_l(s)[lid] = (mm_leaf_t){ .rsid = nlsid, .lsid = nlsid, .rid = s[nlsid].rid, .cid = UINT32_MAX };
 
-		int32_t plen = _ps(&s[nlsid]);
+		uint32_t plen = _ps(&s[nlsid]);
 		uint64_t nrsid = nlsid; nlsid = UINT32_MAX;	/* root seed id */
 		while(1) {
 			uint32_t rsid = nrsid; nrsid = 0;		/* front seed id, extract lower 32bit */
@@ -3556,7 +3560,7 @@ uint64_t mm_chain_seeds(
 				wv = _update_wv(wv, fv);			/* update window */
 				// _print_seed("link sid(%u) and update", wv, sid);
 				int64_t di = ((uint64_t)(_pdiff_v4i32(wv, fv))<<32) | sid;
-				nrsid = MAX2(nrsid, di);			/* update next root */
+				nrsid = MAX2((int64_t)nrsid, di);	/* update next root */
 			}
 			/* terminate if no linkable seed is found, or hit at the middle of an existing chain */
 			if(nrsid == 0) { /* debug("no chainable seed remains, nrsid(%lu)", _lo32(nrsid)); */ nrsid = rsid; break; }
@@ -3772,7 +3776,7 @@ uint64_t mm_finish_root(
 	mm_search_t *st)
 {
 	mm_res_t *r = (mm_res_t *)self->root.a;
-	if(r[st->eid].score > _ofs(self->min_score)) {/* _ofs() inverts the sign */
+	if(r[st->eid].score > (uint32_t)_ofs(self->min_score)) {/* _ofs() inverts the sign */
 		self->bin.n = st->iid;					/* clear alignment bin */
 		self->n_res--;							/* clear res bin (chain bin) */
 		st->crem--;
@@ -3818,7 +3822,7 @@ uint64_t mm_search_load_root(
 	/* load seed ptr and position */
 	mm_seed_t const *s = self->seed.a;
 	uint32_t const lid = self->root.a[cid].lid;
-	int32_t plen = _ofs(self->root.a[cid].plen);
+	uint32_t plen = _ofs(self->root.a[cid].plen);
 	debug("plen(%u), mcoef(%d), min_score(%d)", plen, self->mcoef, self->min_score);
 	if(plen * self->mcoef < 2 * self->min_score) { return(1); }
 
@@ -4093,8 +4097,6 @@ uint64_t mm_extend(
 	mm_tbuf_t *self,
 	uint64_t i)
 {
-	mm_seed_t const *s = self->seed.a;
-
 	#ifndef GABA_NOWRAP
 	#  define _dp(_narrow)			( &self->dp[st.narrow] )
 	#else
@@ -4194,7 +4196,7 @@ uint64_t mm_collect_supp(
 		for(uint64_t i = p; i < q; i++) {
 			/* bin[0] holds a tuple (bpos, blen) */
 			mm_bin_t *s = (mm_bin_t *)&bin[res[i].iid];
-			int32_t lb = s->lb, ub = s->ub, span = ub - lb;
+			uint32_t lb = s->lb, ub = s->ub, span = ub - lb;
 
 			debug("bid(%u), s(%u, %u)", res[i].iid, lb, ub);
 
@@ -4464,7 +4466,6 @@ static _force_inline
 mm_tbuf_t *mm_tbuf_init(mm_tbuf_params_t *u)
 {
 	mm_tbuf_t *t = (mm_tbuf_t *)calloc(1, sizeof(mm_tbuf_t));
-	uint8_t const *lim = (uint8_t const *)0x800000000000;
 
 	/* init dp context and copy constants */
 	*t = (mm_tbuf_t){
@@ -4921,7 +4922,7 @@ typedef struct {
  * @brief dump string with encoding conversion
  */
 #define _putsnt(_buf, _s, _l, _table) { \
-	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
+	v32i8_t _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
 	v32i8_t _r, _b; \
 	uint8_t const *_q = (uint8_t const *)(_s); \
 	for(uint8_t const *_t = _q + ((_l) & ~0x1fULL); _q < _t; _q += 32) { \
@@ -4938,7 +4939,7 @@ typedef struct {
 	(_buf)->p += (_l) & 0x1f; \
 }
 #define _putsntr(_buf, _s, _l, _table) { \
-	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
+	v32i8_t _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
 	v32i8_t _r, _b; \
 	uint8_t const *_q = (uint8_t const *)(_s) + (_l) - 32; \
 	for(; _q >= _s; _q -= 32) { \
@@ -4961,13 +4962,13 @@ typedef struct {
  */
 #define _putsnt32(_buf, _q, _len, _table) { \
 	_flush(_buf, 32); \
-	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
+	v32i8_t _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
 	_storeu_v32i8((_buf)->p, _shuf_v32i8(_conv, _loadu_v32i8(_q))); \
 	(_buf)->p += (_len); \
 }
 #define _putsntr32(_buf, _q, _len, _table) { \
 	_flush(_buf, 32); \
-	v32i8_t register _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
+	v32i8_t _conv = _from_v16i8_v32i8(_loadu_v16i8(_table)); \
 	_storeu_v32i8((_buf)->p, _shuf_v32i8(_conv, _swap_v32i8(_loadu_v32i8(_q)))); \
 	(_buf)->p += (_len); \
 }
@@ -5590,9 +5591,9 @@ void mm_print_blast6_mapped(
 		gaba_path_section_t const *s = &a->a->seg[a->a->slen - 1], *e = &a->a->seg[0];
 
 		uint32_t rid = s->aid>>1, qid = s->bid>>1;
-		uint32_t rs = s->bid & 0x01 ? r[rid].l_seq - s->apos - s->alen + 1 : r[rid].l_seq - s->apos;
-		uint32_t re = s->bid & 0x01 ? r[rid].l_seq - s->apos : r[rid].l_seq - s->apos - s->alen + 1;
-		uint32_t qs = q[qid].l_seq - s->bpos - s->blen + 1, qe = q[qid].l_seq - s->bpos;
+		uint32_t rs = s->bid & 0x01 ? r[rid].l_seq - s->apos - s->alen + 1 : r[rid].l_seq - e->apos;
+		uint32_t re = s->bid & 0x01 ? r[rid].l_seq - e->apos : r[rid].l_seq - s->apos - s->alen + 1;
+		uint32_t qs = q[qid].l_seq - s->bpos - s->blen + 1, qe = q[qid].l_seq - e->bpos;
 
 		/* sequence names */
 		_putsn(b, q[qid].name, q[qid].l_name); _t(b);
