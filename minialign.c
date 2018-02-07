@@ -3881,16 +3881,16 @@ uint64_t mm_search_load_next(
 	/* append new seeds */
 	uint64_t sid = st->sid;				/* previous search base */
 	for(uint64_t rcnt = 2 * st->srem; sid > 0 && rcnt > 0; sid--) {
-		v4i32_t wv = _load_wv(&s[sid], tv);
-		v4i32_t zv = _load_wv(&s[sid], ev);
+		v4i32_t wv = _load_wv(&s[sid - 1], tv);
+		v4i32_t zv = _load_wv(&s[sid - 1], ev);
 		// _print_seed("test seed at sid(%lu), mask(%x, %x), ab(%d, %d)", wv, sid, _inside_mask(wv, fv), _inside_mask(zv, fv), _as(&s[sid]), _bs(&s[sid]));
 		if(!_inside_uub(wv, fv)) { break; }
 		if(!_inside_wv(wv, fv) || _inside_wv(zv, fv)) { continue; }
 
 		v4i32_t dv = _sub_v4i32(tv, _sub_v4i32(wv, fv));
 		_print_v4i32(dv);
-		uint64_t pdiff = _pdiff_v4i32(wv, fv) | (sid<<32);
-		debug("sid(%lu), pdiff(%lu, %lx)", sid, (ofs - _pdiff_v4i32(wv, fv)), pdiff);
+		uint64_t pdiff = _pdiff_v4i32(wv, fv) | ((sid - 1)<<32);
+		debug("sid(%lu), pdiff(%lu, %lx)", sid - 1, (ofs - _pdiff_v4i32(wv, fv)), pdiff);
 		n[ncnt++] = pdiff; rcnt--;
 	}
 	st->sid = sid;						/* write back sid for next search */
