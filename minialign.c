@@ -3800,8 +3800,8 @@ mm_pos_pair_t mm_search_load_pos(
 		.bpos = _bs(p) + (_smask(_bs(p)) & self->qlen)
 	};
 	if(cp.apos >= self->rlen || cp.bpos >= self->qlen) {
-		cp.apos -= self->mi.k;
-		cp.bpos -= self->mi.k;
+		cp.apos -= MIN2(cp.apos, self->mi.k);
+		cp.bpos -= MIN2(cp.bpos, self->mi.k);
 	}
 	return(cp);
 }
@@ -3934,7 +3934,10 @@ uint64_t mm_search_test_dup(
 	uint64_t prev = t->u64[0];
 	debug("pos(%u, %u), key(%lx), prev(%lx)", cp->apos, cp->bpos, k, prev);
 
-	_storeu_v2i32(&st->tp.apos, _loadu_v2i32(&cp->apos));	/* copy pos for the upward search */
+	v2i32_t const slen = _loadu_v2i32(&self->rlen);
+	v2i32_t pos = _loadu_v2i32(&cp->apos);
+	pos = _max_v2i32(_set_v2i32(1), _min_v2i32(pos, slen));	/* clip */
+	_storeu_v2i32(&st->tp.apos, pos);						/* store pos for the upward search */
 	// _storeu_v2i32(&st->tp.aid, _loadu_v2i32(&cp->aid));	/* copy id */
 
 	*t = (v2u32_t){ .u32 = { st->eid, UINT32_MAX } };	/* mark the current pos, pos is encoded in key */
