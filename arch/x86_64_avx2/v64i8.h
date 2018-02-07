@@ -49,6 +49,7 @@ typedef struct v64i8_s {
 
 /* expand intrinsic name */
 #define _i_v64i8(intrin) 			_mm256_##intrin##_epi8
+#define _i_v64u8(intrin) 			_mm256_##intrin##_epu8
 #define _i_v64i8x(intrin)			_mm256_##intrin##_si256
 
 /* apply */
@@ -56,6 +57,12 @@ typedef struct v64i8_s {
 	(v64i8_t) { \
 		_i_v64i8(intrin)(expander##_v64i8_1(__VA_ARGS__)), \
 		_i_v64i8(intrin)(expander##_v64i8_2(__VA_ARGS__)) \
+	} \
+)
+#define _a_v64u8(intrin, expander, ...) ( \
+	(v64i8_t) { \
+		_i_v64u8(intrin)(expander##_v64i8_1(__VA_ARGS__)), \
+		_i_v64u8(intrin)(expander##_v64i8_2(__VA_ARGS__)) \
 	} \
 )
 #define _a_v64i8x(intrin, expander, ...) ( \
@@ -110,6 +117,8 @@ typedef struct v64i8_s {
 #define _sub_v64i8(...)		_a_v64i8(sub, _e_vv, __VA_ARGS__)
 #define _adds_v64i8(...)	_a_v64i8(adds, _e_vv, __VA_ARGS__)
 #define _subs_v64i8(...)	_a_v64i8(subs, _e_vv, __VA_ARGS__)
+#define _addus_v64i8(...)	_a_v64u8(adds, _e_vv, __VA_ARGS__)
+#define _subus_v64i8(...)	_a_v64u8(subs, _e_vv, __VA_ARGS__)
 #define _max_v64i8(...)		_a_v64i8(max, _e_vv, __VA_ARGS__)
 #define _min_v64i8(...)		_a_v64i8(min, _e_vv, __VA_ARGS__)
 

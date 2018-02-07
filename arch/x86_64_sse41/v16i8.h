@@ -47,12 +47,18 @@ typedef struct v16i8_s {
 
 /* expand intrinsic name */
 #define _i_v16i8(intrin) 			_mm_##intrin##_epi8
+#define _i_v16u8(intrin) 			_mm_##intrin##_epu8
 #define _i_v16i8x(intrin)			_mm_##intrin##_si128
 
 /* apply */
 #define _a_v16i8(intrin, expander, ...) ( \
 	(v16i8_t) { \
 		_i_v16i8(intrin)(expander##_v16i8_1(__VA_ARGS__)) \
+	} \
+)
+#define _a_v16u8(intrin, expander, ...) ( \
+	(v16i8_t) { \
+		_i_v16u8(intrin)(expander##_v16i8_1(__VA_ARGS__)) \
 	} \
 )
 #define _a_v16i8x(intrin, expander, ...) ( \
@@ -109,6 +115,8 @@ typedef struct v16i8_s {
 #define _sub_v16i8(...)		_a_v16i8(sub, _e_vv, __VA_ARGS__)
 #define _adds_v16i8(...)	_a_v16i8(adds, _e_vv, __VA_ARGS__)
 #define _subs_v16i8(...)	_a_v16i8(subs, _e_vv, __VA_ARGS__)
+#define _addus_v16i8(...)	_a_v16u8(adds, _e_vv, __VA_ARGS__)
+#define _subus_v16i8(...)	_a_v16u8(subs, _e_vv, __VA_ARGS__)
 #define _max_v16i8(...)		_a_v16i8(max, _e_vv, __VA_ARGS__)
 #define _min_v16i8(...)		_a_v16i8(min, _e_vv, __VA_ARGS__)
 

@@ -48,6 +48,7 @@ typedef struct v32i8_s {
 
 /* expand intrinsic name */
 #define _i_v32i8(intrin) 			_mm_##intrin##_epi8
+#define _i_v32u8(intrin) 			_mm_##intrin##_epu8
 #define _i_v32i8x(intrin)			_mm_##intrin##_si128
 
 /* apply */
@@ -55,6 +56,12 @@ typedef struct v32i8_s {
 	(v32i8_t) { \
 		_i_v32i8(intrin)(expander##_v32i8_1(__VA_ARGS__)), \
 		_i_v32i8(intrin)(expander##_v32i8_2(__VA_ARGS__)) \
+	} \
+)
+#define _a_v32u8(intrin, expander, ...) ( \
+	(v32i8_t) { \
+		_i_v32u8(intrin)(expander##_v32i8_1(__VA_ARGS__)), \
+		_i_v32u8(intrin)(expander##_v32i8_2(__VA_ARGS__)) \
 	} \
 )
 #define _a_v32i8x(intrin, expander, ...) ( \
@@ -103,6 +110,8 @@ typedef struct v32i8_s {
 #define _sub_v32i8(...)		_a_v32i8(sub, _e_vv, __VA_ARGS__)
 #define _adds_v32i8(...)	_a_v32i8(adds, _e_vv, __VA_ARGS__)
 #define _subs_v32i8(...)	_a_v32i8(subs, _e_vv, __VA_ARGS__)
+#define _addus_v32i8(...)	_a_v32u8(adds, _e_vv, __VA_ARGS__)
+#define _subus_v32i8(...)	_a_v32u8(subs, _e_vv, __VA_ARGS__)
 #define _max_v32i8(...)		_a_v32i8(max, _e_vv, __VA_ARGS__)
 #define _min_v32i8(...)		_a_v32i8(min, _e_vv, __VA_ARGS__)
 
