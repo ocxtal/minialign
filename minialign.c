@@ -4251,7 +4251,7 @@ uint64_t mm_post_map(
 		lsc = MIN2(lsc, res[i].score);
 		tsc += res[i].score;
 	}
-	lsc = (lsc == INT32_MAX)? 0 : lsc;
+	lsc = (lsc == INT32_MAX) ? 0 : lsc;
 
 	/* calc mapq for primary and supplementary alignments */
 	double tpc = 1.0;
@@ -5006,26 +5006,6 @@ typedef struct {
 })
 
 /**
- * @fn mm_cigar_printer
- * @brief callback function passed to gaba_print_cigar_*
- */
-static
-int mm_cigar_printer(void *_b, uint64_t len, char c)
-{
-	mm_print_t *b = (mm_print_t *)_b;
-	if(len < 41) {
-		_flush(b, 16);
-		*b->p++ = (b->conv[len-1]&0x0f) + '0';
-		*b->p++ = (b->conv[len-1]>>4) + '0';
-		b->p -= len<10;
-		*b->p++ = c;
-	} else {
-		len = _putn(b, (uint32_t)len); _put(b, c);
-	}
-	return(len+1);
-}
-
-/**
  * @fn mm_print_sam_num
  * @brief print number in sam tag format
  */
@@ -5249,7 +5229,7 @@ static _force_inline
 void mm_print_sam_md(
 	mm_print_t *b,
 	mm_idx_seq_t const *r,
-	bseq_seq_t const *t,
+	bseq_seq_t const *q,
 	uint32_t const *path,
 	gaba_path_section_t const *s)
 {
@@ -5262,6 +5242,53 @@ void mm_print_sam_md(
 	if((f & 0x01ULL<<MM_MD) == 0) { return; }				/* skip if disabled */
 	uint32_t rs = s->apos, qs = s->bpos;
 
+	#define _fwap_v16i8(_v, _l)	( (_v) )
+	#define _fwbp_v16i8(_v, _l)	( (_v) )
+	#define _rvbp_v16i8(_v, _l)	( _xor_v16i8(_set_v16i8(0x03), _swapn_v16i8((_v), (_l))) )
+	#define _dump_f(_c) { \
+		for(uint64_t i = (_c); i > 0; i -= _gaba_parse_min2(i, 16)) { \
+			uint64_t l = _gaba_parse_min2(i, 16); \
+			v16i8_t rv = _fwap_v16i8(_loadu_v16i8(rp), l); \
+			_storeu_v16i8(b, rv); rp += l; b += l; \
+		} \
+	}
+	#define _dump_r(_c) { \
+		for(uint64_t i = (_c); i > 0; i -= _gaba_parse_min2(i, 16)) { \
+			uint64_t l = _gaba_parse_min2(i, 16); \
+			v16i8_t rv = _fwap_v16i8(_loadu_v16i8(rp), l); \
+			_storeu_v16i8(b, rv); rp += l; b += l; \
+		} \
+	}
+	#define _del_f(_c) { if((_c) > 0) { _putn(b, rp - rb); _put(b, '^'); rb = rp; _dump_f(_c); } }
+	#define _del_r(_c) { if((_c) > 0) { _putn(b, rb - rp); _put(b, '^'); rb = rp; _dump_r(_c); } }
+	#define _ins_f(_c) { qp += (_c); }
+	#define _ins_r(_c) { qp -= (_c); }
+	#define _match_core(_rv, _qv, _c) { \
+		uint64_t mc = tzcnt(((v16i8_masku_t){ .mask = _mask_v16i8(_eq_v16i8(rv, qv)) }).all); \
+		if(mc < (_c)) { _putn(b, (sidx - idx)>>1); _put(b, rp[mc]); sidx = idx; } \
+	}
+	#define _match_ff(_c) { \
+		v16i8_t rv = _fwap_v16i8(_loadu_v16i8(rp), (_c)), qv = _fwbp_v16i8(_loadu_v16i8(qp), (_c)); \
+		rp += (_c); qp += (_c); _match_core(rv, qv, _c); \
+	}
+	#define _match_fr(_c) { \
+		v16i8_t rv = _fwap_v16i8(_loadu_v16i8(rp), (_c)), qv = _rvbp_v16i8(_loadu_v16i8(qp - (_c)), (_c)); \
+		rp += (_c); qp -= (_c); _match_core(rv, qv, _c); \
+	}
+	#define _acc(_c) { (void)(_c); }
+
+	uint32_t rev = ~s->bid & 0x01, rid = s->aid>>1, qid = s->bid>>1;
+	uint8_t const *rp = &r[rid].seq[r[rid].l_seq - s->apos - s->alen], *rb = rp;
+	uint8_t const *qp = rev ? &q[qid].seq[q[qid].l_seq - s->bpos - s->blen] : gaba_mirror(&q[qid].seq[q[qid].l_seq - s->bpos], 0);
+
+	_parser_init_rv(path, s->ppos, gaba_plen(s));
+	switch(rev) {
+		case 0: _parser_loop_rv(_del_f, _ins_f, _match_ff, _acc); break;
+		case 1: _parser_loop_rv(_del_f, _ins_r, _match_fr, _acc); break;
+		default: break;
+	}
+
+	#if 0
 	_puts(b, "\tMD:Z:");
 	uint64_t const *p = (uint64_t const *)((uint64_t)path & ~(sizeof(uint64_t) - 1));
 	uint64_t lim = s->ppos + (((uint64_t)path & sizeof(uint32_t)) ? 32 : 0) + gaba_plen(s);
@@ -5329,6 +5356,7 @@ void mm_print_sam_md(
 		}
 	}
 	_putn(b, (int32_t)(rp - rb));						/* always print tail even if # == 0 */
+	#endif
 	return;
 }
 
