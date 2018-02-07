@@ -2650,7 +2650,7 @@ uint64_t leaf_search(
 	// if((b[-1].xstat & ROOT_HEAD) == ROOT_HEAD) { debug("reached root, xstat(%x)", b[-1].xstat); return(0); }	/* actually unnecessary but placed as a sentinel */
 	while(1) {
 		if(((--b)->xstat & ROOT) == ROOT) { debug("reached root, xstat(%x)", b->xstat); return(0); }	/* actually unnecessary but placed as a sentinel */
-		while(_unlikely(b->xstat & HEAD)) { fprintf(stderr, "reload, tail(%p), blk(%p, %p)\n", tail, b, _phantom(b)->blk); b = _phantom(b)->blk; }	/* sometimes head chains more than one */
+		while(_unlikely(b->xstat & HEAD)) { b = _phantom(b)->blk; }	/* sometimes head chains more than one */
 
 		/* first adjust ridx to the head of this block then test mask was updated in this block */
 		v2i8_t cnt = _load_v2i8(&b->acnt);
