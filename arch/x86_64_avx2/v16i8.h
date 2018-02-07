@@ -115,8 +115,8 @@ typedef struct v16i8_s {
 #define _sub_v16i8(...)		_a_v16i8(sub, _e_vv, __VA_ARGS__)
 #define _adds_v16i8(...)	_a_v16i8(adds, _e_vv, __VA_ARGS__)
 #define _subs_v16i8(...)	_a_v16i8(subs, _e_vv, __VA_ARGS__)
-#define _addus_v16i8(...)	_a_v16i8(addus, _e_vv, __VA_ARGS__)
-#define _subus_v16i8(...)	_a_v16i8(subus, _e_vv, __VA_ARGS__)
+#define _addus_v16i8(...)	_a_v16i8(adds, _e_vv, __VA_ARGS__)
+#define _subus_v16i8(...)	_a_v16i8(subs, _e_vv, __VA_ARGS__)
 #define _max_v16i8(...)		_a_v16i8(max, _e_vv, __VA_ARGS__)
 #define _min_v16i8(...)		_a_v16i8(min, _e_vv, __VA_ARGS__)
 
