@@ -1657,7 +1657,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 }
 #endif /* MODEL */
 
-#if 1	//def DEBUG
+#if 0	//def DEBUG
 #define _check_overflow(_delta, _drop) { \
 	int8_t b[_W], d[_W], flag = 0; int16_t adj[_W], m1[_W], m2[_W]; \
 	_storeu_n(b, _delta); _storeu_n(d, _drop); \
