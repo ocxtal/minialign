@@ -1661,7 +1661,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 #define _check_overflow(_delta, _drop) { \
 	int8_t b[_W], d[_W], flag = 0; int16_t adj[_W], m1[_W], m2[_W]; \
 	_storeu_n(b, _delta); _storeu_n(d, _drop); \
-	wvec_t adjv = _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_addus_n(delta, drop), delta))); \
+	wvec_t adjv = _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_add_n(drop, delta), _and_n(drop, delta)))); \
 	_storeu_w(adj, adjv); _storeu_w(m1, md); _storeu_w(m2, _add_w(md, adjv)); \
 	for(uint64_t i = 0; i < _W - 1; i++) { if(b[i + 1] > b[i] + 32) { flag = 1; } if(b[i + 1] < b[i] - 32) { flag = 1; } } \
 	if(flag == 1) { \
@@ -1706,7 +1706,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 	md = _add_w(md, _cvt_n_w(delta)); \
 	_check_overflow(delta, drop); \
 	/* rescue overflow */ \
-	md = _add_w(md, _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_addus_n(delta, drop), delta)))); \
+	md = _add_w(md, _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_add_n(drop, delta), _and_n(drop, delta))))); \
 	/* rescue underflow */ \
 	/*md = _add_w(md, _and_w(_set_w(0x0100), _cvt_n_w(_or_n(_sub_n(delta, drop), drop)))); cofs += 0x0100; */ \
 	md = _add_w(md, _set_w(-cofs));		/* fixup offset adjustment */ \
