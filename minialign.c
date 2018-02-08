@@ -2405,7 +2405,7 @@ mm_sketch_cap_t const *mm_sketch(mm_sketch_t *sk, uint8_t const *seq, uint32_t l
 {
 	static mm_sketch_cap_t const init = { 0 };
 	_loop_init(len, &init);			/* initialize working buffers */
-	debug("p(%p), t(%p), len(%u, %lu)", p, t, len, t - p);
+	debug("p(%p), t(%p), len(%u, %lu), k(%lu), mask(%lu), w(%lu)", p, t, len, t - p, kk, mask, w);
 	for(uint64_t i = 0; i < kk && p < t; i++) { _push_kmer(); }
 	while((int64_t)(t - p) >= (int64_t)w) {		/* signed compare to prevent overrun */
 		/* calculate hash values for the current block */
@@ -2728,6 +2728,7 @@ v2u32_t const *mm_idx_get(
 		return((v2u32_t const *)p);
 	} else {
 		*n = (uint32_t)*p;
+		debug("multiple hit, n(%u)", n);
 		return((v2u32_t const *)&b->v.p[(*p>>32) & 0x7fffffff]);
 	}
 }
@@ -2894,7 +2895,7 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 	mm_idx_bkt_t *bt = &mii->mi.bkt[(1ULL<<mii->mi.b) * (i + 1) / mii->nth];
 
 	debug("i(%lu), (%llu, %llu)", i, (1ULL<<mii->mi.b) * i / mii->nth, (1ULL<<mii->mi.b) * (i+1) / mii->nth);
-	debug("b(%p), t(%p)", b, bt);
+	debug("b(%p), t(%p), max_cnt(%lu)", b, bt,  mii->mi.occ[mii->mi.n_occ - 1]);
 	while(++b < bt) {
 		uint64_t n_arr = b->w.a.n;
 		if(n_arr == 0) { continue; }
@@ -2905,7 +2906,8 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 			uint64_t key = q->hrem, val = _loadu_u64(&q->pos);	/* uint32_t pos, rid; */ \
 			if(++q < p) { \
 				r[++sp] = val; val = sp<<32 | 0x01ULL<<63 | 1;	/* swap val with a (base_idx, cnt) tuple */ \
-				do { r[++sp] = _loadu_u64(&q->pos); val++; } while(++q < p); \
+				/* debug("multi keys, sp(%lu), val(%lu)", sp, val); */ \
+				do { r[++sp] = _loadu_u64(&q->pos); val++; /* debug("multi keys, sp(%lu), val(%lu)", sp, val); */ } while(++q < p); \
 			} \
 			kh_put(&b->w.h, key, val); \
 		}
@@ -2913,7 +2915,7 @@ void *mm_idx_build_hash(uint32_t tid, void *arg, void *item)
 		kh_init_static(&b->w.h, 1.1 * b->v.n.keys / KH_THRESH);	/* make the hash table occupancy equal to (or slightly smaller than) KH_THRESH */
 		uint64_t max_cnt = mii->mi.occ[mii->mi.n_occ - 1], sp = 0, *r = (uint64_t *)arr;	/* reuse minimizer array */
 		mm_mini_t *p = arr, *q = p, *t = &arr[n_arr];
-		for(uint64_t ph = p++->hrem; p < t; q = p, ph = p++->hrem) {
+		for(uint64_t ph = p++->hrem; p < t; ph = p++->hrem) {
 			if(ph != p->hrem && (uint64_t)(p - q) <= max_cnt) { _fill_body(); }	/* skip if occurs more than the max_cnt threshold */
 		}
 		if((uint64_t)(p - q) <= max_cnt) { _fill_body(); }
@@ -3423,7 +3425,7 @@ void mm_expand(
 			.vpos = _v(_rs, _qs),
 			.rid = rid>>1, .lid = INT32_MAX	/* first prev node is initialized with zero */
 		};
-		// debug("n(%lu), abpos(%d, %d), pos(%d, %d), uvpos(%d, %d)", self->seed.n, rs, qs, _rs, _qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
+		debug("i(%lu), n(%u), n(%lu), rid(%u), abpos(%d, %d), pos(%d, %d), uvpos(%d, %d)", i, n, self->seed.n, rid>>1, rs, qs, _rs, _qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
 	}
 	return;
 }
@@ -3516,10 +3518,11 @@ uint64_t mm_seed(
 	/* sort seed array */
 	debug("sort seed, n(%zu)", self->seed.n);
 	radix_sort_128x((v4u32_t *)self->seed.a, self->seed.n);
+	/*
 	for(uint64_t i = 0, rid = UINT32_MAX; i < self->seed.n - 1; i++) {
 		if(rid != self->seed.a[i].rid) { rid = self->seed.a[i].rid; debug("ref(%lu, %s)", rid, self->mi.s[rid].name); }
 		debug("i(%lu), rid(%u), uv(%d, %d), ab(%d, %d)", i, self->seed.a[i].rid, _bare(self->seed.a[i].upos), _bare(self->seed.a[i].vpos), _as(&self->seed.a[i]), _bs(&self->seed.a[i]));
-	}
+	}*/
 	return(self->seed.n);						/* report #seeds found */
 }
 
@@ -3762,11 +3765,12 @@ void mm_init_query(
 /**
  * @fn mm_search_init
  */
+#define MM_CREM					( 50 )
 static _force_inline
 mm_search_t mm_search_init(
 	mm_tbuf_t *self)
 {
-	return((mm_search_t){ .crem = 3, .min_score = self->min_score });
+	return((mm_search_t){ .crem = MM_CREM, .min_score = self->min_score });
 }
 
 /**
@@ -3784,7 +3788,7 @@ uint64_t mm_finish_root(
 		st->crem--;
 		debug("remove bin, bid(%zu), n_res(%u)", self->bin.n, self->n_res);
 	} else {
-		st->crem = st->crem != 0 ? 3 : 0;
+		st->crem = st->crem != 0 ? MM_CREM : 0;
 	}
 	debug("finish root, crem(%u)", st->crem);
 	return(st->crem == 0);

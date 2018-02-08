@@ -1664,7 +1664,8 @@ struct gaba_joint_tail_s *fill_create_tail(
 	wvec_t adjv = _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_add_n(drop, delta), _and_n(drop, delta)))); \
 	_storeu_w(adj, adjv); _storeu_w(m1, md); _storeu_w(m2, _add_w(md, adjv)); \
 	for(uint64_t i = 0; i < _W - 1; i++) { if(b[i + 1] > b[i] + 32) { flag = 1; } if(b[i + 1] < b[i] - 32) { flag = 1; } } \
-	if(flag == 1) { \
+	for(uint64_t i = 0; i < _W - 1; i++) { if(m2[i + 1] > m2[i] + 32) { flag = 2; } if(m2[i + 1] < m2[i] - 32) { flag = 2; } } \
+	if(flag == 2) { \
 		fprintf(stderr, "delta("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", b[i]); } fprintf(stderr, ")\n"); \
 		fprintf(stderr, " drop("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", d[i]); } fprintf(stderr, ")\n"); \
 		fprintf(stderr, "   md("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", self->w.r.md.delta[i]); } fprintf(stderr, ")\n"); \
