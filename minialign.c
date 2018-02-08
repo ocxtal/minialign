@@ -3425,7 +3425,7 @@ void mm_expand(
 			.vpos = _v(_rs, _qs),
 			.rid = rid>>1, .lid = INT32_MAX	/* first prev node is initialized with zero */
 		};
-		debug("i(%lu), n(%u), n(%lu), rid(%u), abpos(%d, %d), pos(%d, %d), uvpos(%d, %d)", i, n, self->seed.n, rid>>1, rs, qs, _rs, _qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
+		// debug("i(%lu), n(%u), n(%lu), rid(%u), abpos(%d, %d), pos(%d, %d), uvpos(%d, %d)", i, n, self->seed.n, rid>>1, rs, qs, _rs, _qs, _bare(_u(_rs, _qs)), _bare(_v(_rs, _qs)));
 	}
 	return;
 }
@@ -3518,11 +3518,10 @@ uint64_t mm_seed(
 	/* sort seed array */
 	debug("sort seed, n(%zu)", self->seed.n);
 	radix_sort_128x((v4u32_t *)self->seed.a, self->seed.n);
-	/*
 	for(uint64_t i = 0, rid = UINT32_MAX; i < self->seed.n - 1; i++) {
 		if(rid != self->seed.a[i].rid) { rid = self->seed.a[i].rid; debug("ref(%lu, %s)", rid, self->mi.s[rid].name); }
 		debug("i(%lu), rid(%u), uv(%d, %d), ab(%d, %d)", i, self->seed.a[i].rid, _bare(self->seed.a[i].upos), _bare(self->seed.a[i].vpos), _as(&self->seed.a[i]), _bs(&self->seed.a[i]));
-	}*/
+	}
 	return(self->seed.n);						/* report #seeds found */
 }
 
@@ -4043,7 +4042,7 @@ uint64_t mm_search_record(
 	}
 	st->srem = 5; st->narrow = 0;
 	st->min_score = MAX2(st->min_score, a->score * self->min_ratio);
-	if((self->qlen - bin->ub + bin->lb) * self->mcoef < st->min_score) { st->crem = 0; }
+	// if((self->qlen - bin->ub + bin->lb) * self->mcoef < st->min_score) { st->crem = 0; }
 
 	debug("record h(%lx, %u, %u), t(%lx, %u, %u), bid(%u, %u), srem(%u), narrow(%u), min_score(%d), brange(%d, %d), brem(%d)",
 		h[-1].u64[0], h->u32[0], h->u32[1], t[-1].u64[0], t->u32[0], t->u32[1], st->iid, nid, st->srem, st->narrow, st->min_score, bin->lb, bin->ub, self->qlen - bin->ub + bin->lb);
