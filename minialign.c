@@ -10,7 +10,7 @@
 #ifndef NDEBUG
 #  define DEBUG
 #endif
-#define COLLECT_FAIL_SEQ
+// #define COLLECT_FAIL_SEQ
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -2531,6 +2531,8 @@ typedef struct {
 #define MM_SA			( 7 )				/* Z: supplementary records */
 #define MM_MD			( 8 )				/* Z: mismatch positions */
 #define MM_CG			( 9 )				/* Z: CIGAR */
+#define MM_ID			( 10 )				/* f: identity */
+#define MM_SQ			( 11 )				/* Z: sequence */
 
 /* formats */
 #define MM_SAM			( 0x00ULL )
@@ -4977,8 +4979,8 @@ typedef struct {
  * @macro _putd
  * @brief print direction ('+' for forward, '-' for reverse)
  */
-#define _putds(b, _id)		_put(b, ((_id) & 0x01) ? '-' : '+');
-#define _putdn(b, _id)		_put(b, ((_id) & 0x01) ? '1' : '0');
+#define _putds(b, _id)		_put(b, ((_id) & 0x01) ? '+' : '-');
+#define _putdn(b, _id)		_put(b, ((_id) & 0x01) ? '0' : '1');
 
 /**
  * @macro _t, _c, _sp, _cr
@@ -5667,7 +5669,9 @@ void mm_print_paf_mapped(
 		/* print optional tags */
 		uint64_t const f = b->tags;
 		if(f & 0x01ULL<<MM_AS) { _putsk(b, "\tAS:i:"); _putn(b, a->a->score); }
+		if(f & 0x01ULL<<MM_ID) { _putsk(b, "\tID:f:"); _putfi(uint32_t, b, (uint32_t)(a->a->identity * 10000.0), 4); }
 		if(f & 0x01ULL<<MM_NM) { _putsk(b, "\tNM:i:"); _putn(b, (dcnt - mcnt) + gcnt); }
+		if(f & 0x01ULL<<MM_SQ) { _putsk(b, "\tSQ:i:"); _putsnt(b, q[qid].seq, q[qid].l_seq, decaf); }
 		if(f & 0x01ULL<<MM_CG) {
 			_putsk(b, "\tCG:Z:");
 			_with_buffer(b, a->a->plen, {
@@ -5696,7 +5700,7 @@ uint64_t mm_print_tag2flag(
 	uint64_t f = 0;
 	#define _t(_str)		{ if(mm_encode_tag(#_str) == *p) { f |= 0x01ULL<<MM_##_str; } }
 	for(uint16_t const *p = tag, *t = &tag[n_tag]; p < t; p++) {
-		_t(RG) _t(CO) _t(NH) _t(IH) _t(AS) _t(XS) _t(NM) _t(SA) _t(MD)
+		_t(RG) _t(CO) _t(NH) _t(IH) _t(AS) _t(XS) _t(NM) _t(SA) _t(MD) _t(CG) _t(ID) _t(SQ)
 	}
 	return(f);
 	#undef _t
@@ -5990,6 +5994,7 @@ static void mm_opt_tags(mm_opt_t *o, char const *arg)
 		oassert(o, l == 2, "unknown tag: `%.*s'.", l, p);
 		kv_push(uint16_t, o->tags, mm_encode_tag(p));
 	});
+	o->r.tag = o->tags.a; o->r.n_tag = o->tags.n;
 	return;
 }
 
@@ -6101,7 +6106,7 @@ static void mm_opt_mod(mm_opt_t *o, char const *arg) {
 	mm_split_foreach(arg, ",;:/", {
 		oassert(o, idxaf[(uint64_t)p[0]] != 0, "unknown base `%c' in modifier `%.*s'.", p[0], l, p);
 		oassert(o, idxaf[(uint64_t)p[1]] != 0, "unknown base `%c' in modifier `%.*s'.", p[1], l, p);
-		o->a.p.score_matrix[idxaf[(uint64_t)p[1]] * 4 + idxaf[(uint64_t)p[0]]] += atoi(&p[2]);
+		o->a.p.score_matrix[(idxaf[(uint64_t)p[1]] - 1) * 4 + (idxaf[(uint64_t)p[0]] - 1)] += atoi(&p[2]);
 	});
 }
 static void mm_opt_gi(mm_opt_t *o, char const *arg) {
