@@ -72,6 +72,8 @@
 #define _sub_n			_vec_alias_join2(_sub_, nvec_prefix)
 #define _adds_n			_vec_alias_join2(_adds_, nvec_prefix)
 #define _subs_n			_vec_alias_join2(_subs_, nvec_prefix)
+#define _addus_n		_vec_alias_join2(_addus_, nvec_prefix)
+#define _subus_n		_vec_alias_join2(_subus_, nvec_prefix)
 #define _max_n			_vec_alias_join2(_max_, nvec_prefix)
 #define _min_n			_vec_alias_join2(_min_, nvec_prefix)
 

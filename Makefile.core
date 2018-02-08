@@ -1,7 +1,7 @@
 
 # load architecture-dependent optimization flags, the default is `-march=native'
 ARCH = NATIVE
-NATIVE_FLAGS = -march=native
+NATIVE_FLAGS = $(shell bash -c "if [[ $(CC) = icc* ]]; then echo '-march=native -msse4.2' ; else echo '-march=native -msse4.2 -mpopcnt'; fi")
 SSE41_FLAGS = $(shell bash -c "if [[ $(CC) = icc* ]]; then echo '-msse4.2'; else echo '-msse4.2 -mpopcnt'; fi")
 AVX2_FLAGS = $(shell bash -c "if [[ $(CC) = icc* ]]; then echo '-march=core-avx2'; else echo '-mavx2 -mbmi -mbmi2 -mlzcnt -mpopcnt'; fi")
 ARCHFLAGS = $($(ARCH)_FLAGS)
@@ -29,7 +29,7 @@ $(GABA_OBJS): gaba.c
 
 nowrap: minialign.c gaba.c
 	$(CC) -c -o minialign.o $(CFLAGS_INTL) -DGABA_NOWRAP minialign.c
-	$(CC) -c -o gaba.o $(CFLAGS_INTL) -DMODEL=AFFINE -DBW=32 -DBIT=2 gaba.c
+	$(CC) -c -o gaba.o $(CFLAGS_INTL) -DMODEL=COMBINED -DBW=64 -DBIT=2 gaba.c
 
 gaba.c: gaba.h log.h unittest.h sassert.h
 minialign.c: kvec.h ksort.h gaba_wrap.h gaba.h lmm.h unittest.h sassert.h

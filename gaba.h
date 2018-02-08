@@ -81,10 +81,6 @@ struct gaba_params_s {
 	/** filtering parameters */
 	uint8_t filter_thresh;		/** popcnt filter threshold, set zero if you want to disable it */
 
-	/** output options */
-	uint32_t head_margin;		/** margin at the head of gaba_alignment_t */
-	uint32_t tail_margin;		/** margin at the tail of gaba_alignment_t */
-
 	/* internal */
 	void *reserved;
 	uint64_t _pad;
@@ -177,6 +173,7 @@ typedef struct gaba_fill_s gaba_fill_t;
 struct gaba_pos_pair_s {
 	uint32_t aid, bid;
 	uint32_t apos, bpos;
+	uint64_t plen;
 };
 typedef struct gaba_pos_pair_s gaba_pos_pair_t;
 

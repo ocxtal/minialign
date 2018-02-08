@@ -1276,7 +1276,7 @@ static inline
 char *ut_build_short_option_string(struct option const *opts)
 {
 	char *str = NULL, *ps;
-	int len = 0;
+	uint64_t len = 0;
 	struct option const *po = NULL;
 
 	for(po = opts; po->name != NULL; po++) { len++; }
