@@ -3761,10 +3761,13 @@ void mm_init_query(
 	return;
 }
 
+/* trial counts */
+#define MM_CREM					( 50 )
+#define MM_SREM					( 8 )
+
 /**
  * @fn mm_search_init
  */
-#define MM_CREM					( 50 )
 static _force_inline
 mm_search_t mm_search_init(
 	mm_tbuf_t *self)
@@ -3850,7 +3853,7 @@ uint64_t mm_search_load_root(
 	st->aid = p->rid;	st->bid = self->qid;
 	st->iid = iid;		st->eid = eid;		st->sid = rsid;
 	st->prem = plen;	st->pacc = 0;
-	st->srem = 3;		st->narrow = 0;
+	st->srem = MM_SREM;	st->narrow = 0;
 
 	mm_idx_seq_t const *ref = &self->mi.s[st->aid];
 	mm_init_ref(self, ref->l_seq, ref->seq, st->aid, ref->circular);
@@ -4040,7 +4043,7 @@ uint64_t mm_search_record(
 		if(b[0] != a) { b[0] = a; }
 		*h = *t = (v2u32_t){ .u32 = { st->eid, nid } };
 	}
-	st->srem = 5; st->narrow = 0;
+	st->srem = MM_SREM; st->narrow = 0;
 	st->min_score = MAX2(st->min_score, a->score * self->min_ratio);
 	// if((self->qlen - bin->ub + bin->lb) * self->mcoef < st->min_score) { st->crem = 0; }
 
