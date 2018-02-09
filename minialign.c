@@ -3942,7 +3942,7 @@ uint64_t mm_search_test_dup(
 	gaba_pos_pair_t const *cp)
 {
 	uint64_t k = _key(_loadu_u64(&cp->apos), _loadu_u64(&st->aid));
-	v2u32_t *t = (v2u32_t *)kh_put_ptr(&self->pos, k, 0);
+	v2u32_t *t = (v2u32_t *)kh_put_ptr(&self->pos, k, 1);
 	uint64_t prev = t->u64[0];
 	debug("pos(%u, %u), key(%lx), prev(%lx)", cp->apos, cp->bpos, k, prev);
 
