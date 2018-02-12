@@ -7,10 +7,7 @@
  * @author Hajime Suzuki (original files by Heng Li)
  * @license MIT
  */
-#ifndef NDEBUG
-#  define DEBUG
-#endif
-// #define COLLECT_FAIL_SEQ
+
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -4598,25 +4595,7 @@ void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 	for(uint64_t i = 0; i < r->n_seq; i++) {
 		mm_reg_t *reg = (mm_reg_t *)r->seq[i].u64;
 		debug("i(%lu), reg(%p)", i, reg);
-
-		/* debug hook */
-		#ifdef COLLECT_FAIL_SEQ
-		if(reg != NULL) {
-			uint64_t flag = 0;
-			for(uint64_t j = 0; j < reg->n_all; j++) {
-				mm_aln_t const *a = reg->aln[j];
-				for(uint64_t k = 0; k < a->a->slen; k++) { if(a->a->seg[k].aid > INT32_MAX || a->a->seg[k].bid > INT32_MAX) { flag = 1; } }
-			}
-			if(flag) {
-				fprintf(stderr, ">%s\n", r->seq[i].name);
-				for(uint64_t j = 0; j < r->seq[i].l_seq; j++) { fprintf(stderr, "%c", decaf[r->seq[i].seq[j]]); }
-				fprintf(stderr, "\n");
-			}
-		}
-		#else
-			mm_print_mapped(b->pr, b->u.mi.s, &r->seq[i], reg);	/* mapped */
-		#endif
-
+		mm_print_mapped(b->pr, b->u.mi.s, &r->seq[i], reg);	/* mapped */
 		if(reg != NULL) {
 			for(uint64_t j = 0; j < reg->n_all; j++) {
 				lmm_free(s->lmm, (void *)reg->aln[j]->a);
