@@ -442,12 +442,7 @@ gaba_score_t *gaba_dp_calc_score(
 	gaba_section_t const *a,
 	gaba_section_t const *b)
 {
-	gaba_score_t *sc = _import(gaba_dp_calc_score_linear_64)(dp, path, s, a, b);
-	fprintf(stderr, "sc(%p)\n", sc);
-	fprintf(stderr, "score(%ld), identity(%f), gcnt(%u, %u), mcnt(%u, %u), icnt(%u, %u)\n",
-		sc->score, sc->identity,
-		sc->mcnt, sc->xcnt, sc->aicnt, sc->bicnt);
-	return(sc);
+	return(_import(gaba_dp_calc_score_linear_64)(dp, path, s, a, b));
 }
 
 #if 0
