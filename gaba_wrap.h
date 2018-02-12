@@ -140,6 +140,7 @@ _decl(gaba_fill_t *, gaba_dp_merge, gaba_dp_t *self, gaba_fill_t const *const *s
 _decl(gaba_pos_pair_t *, gaba_dp_search_max, gaba_dp_t *self, gaba_fill_t const *sec);
 _decl(gaba_alignment_t *, gaba_dp_trace, gaba_dp_t *self, gaba_fill_t const *tail, gaba_alloc_t const *alloc);
 _decl(void, gaba_dp_res_free, gaba_dp_t *dp, gaba_alignment_t *res);
+_decl(gaba_score_t *, gaba_dp_calc_score, gaba_dp_t *dp, uint32_t const *path, gaba_path_section_t const *s, gaba_section_t const *a, gaba_section_t const *b);
 // _decl(int64_t, gaba_dp_print_cigar_forward, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
 // _decl(int64_t, gaba_dp_print_cigar_reverse, gaba_dp_printer_t printer, void *fp, uint32_t const *path, uint32_t offset, uint32_t len);
 // _decl(int64_t, gaba_dp_dump_cigar_forward, char *buf, uint64_t buf_size, uint32_t const *path, uint32_t offset, uint32_t len);
@@ -428,6 +429,25 @@ void gaba_dp_res_free(
 {
 	_import(gaba_dp_res_free_linear_64)(dp, res);
 	return;
+}
+
+/**
+ * @fn gaba_dp_calc_score
+ */
+static inline
+gaba_score_t *gaba_dp_calc_score(
+	gaba_dp_t *dp,
+	uint32_t const *path,
+	gaba_path_section_t const *s,
+	gaba_section_t const *a,
+	gaba_section_t const *b)
+{
+	gaba_score_t *sc = _import(gaba_dp_calc_score_linear_64)(dp, path, s, a, b);
+	fprintf(stderr, "sc(%p)\n", sc);
+	fprintf(stderr, "score(%ld), identity(%f), gcnt(%u, %u), mcnt(%u, %u), icnt(%u, %u)\n",
+		sc->score, sc->identity,
+		sc->mcnt, sc->xcnt, sc->aicnt, sc->bicnt);
+	return(sc);
 }
 
 #if 0

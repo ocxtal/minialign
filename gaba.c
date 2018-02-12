@@ -8,7 +8,7 @@
  * @date 2016/1/11
  * @license Apache v2
  */
-#define DEBUG_MEM
+// #define DEBUG_MEM
 /*
  * debug print configuration: -DDEBUG to enable debug print, -DDEBUG_ALL to print all the vectors, arrays, and bitmasks
  * NOTE: dumping all the vectors sometimes raises SEGV due to a stack shortage. use `ulimit -s 65536' to avoid it.
@@ -581,7 +581,7 @@ struct gaba_dp_context_s {
 	int8_t tf;							/** (1) filter threshold */
 	int8_t gi, ge, gfa, gfb;			/** (4) negative integers */
 	uint8_t aflen, bflen;				/** (2) short-gap length thresholds */
-	uint32_t _pad1[2];					/** (16) */
+	uint8_t ofs,  _pad1[7];				/** (16) */
 	/** 192; 64byte aligned */
 
 	_barrier(mid);
@@ -1657,7 +1657,7 @@ struct gaba_joint_tail_s *fill_create_tail(
 }
 #endif /* MODEL */
 
-#if 1	//def DEBUG
+#ifdef DEBUG
 #define _check_overflow(_delta, _drop) { \
 	int8_t b[_W], d[_W], flag = 0; int16_t adj[_W], m1[_W], m2[_W]; \
 	_storeu_n(b, _delta); _storeu_n(d, _drop); \
@@ -3344,35 +3344,61 @@ void _export(gaba_dp_res_free)(
 })
 #define _del(_c) { \
 	v2i32_t cnt = _seta_v2i32((_c) > 0, _c); \
+	debug("del, cnt(%u)", _c); \
 	gbc = _add_v2i32(gbc, cnt); fbc = (_c) > self->bflen ? fbc : _add_v2i32(fbc, cnt); \
+	_print_v2i32(gbc); \
 }
 #define _del_f(_c) { ap += (_c); _del(_c); }
 #define _del_r(_c) { ap -= (_c); _del(_c); }
 #define _ins(_c) { \
 	v2i32_t cnt = _seta_v2i32((_c) > 0, _c); \
+	debug("ins, cnt(%u)", _c); \
 	gac = _add_v2i32(gac, cnt); fac = (_c) > self->aflen ? fac : _add_v2i32(fac, cnt); \
+	_print_v2i32(gac); \
 }
 #define _ins_f(_c) { bp += (_c); _ins(_c); }
 #define _ins_r(_c) { bp -= (_c); _ins(_c); }
 #define _match_core(_rv, _qv, _c) { \
+	_print_v16i8(_rv); _print_v16i8(_qv); \
 	v16i8_t sp = _swapn_v16i8(_shuf_v16i8(sb, _match_v16i8((_rv), (_qv))), (_c));				/* masked score profile */ \
-	score += _hadd_v16i8(sp); xc += popcnt(((v16i8_masku_t){ .mask = _mask_v16i8(sp) }).all);	/* count mismatches */ \
+	debug("hadd(%d), cnt(%u), xcnt(%u)", _hadd_v16i8(sp), _c, popcnt(((v16i8_masku_t){ .mask = _mask_v16i8(sp) }).all)); \
+	sacc = _add_v16i8(sacc, sp); xc += popcnt(((v16i8_masku_t){ .mask = _mask_v16i8(sp) }).all);/* count mismatches */ \
 }
 #define _match_ff(_c) { \
-	v16i8_t av = _fwap_v16i8(_loadu_v16i8(ap), (_c)), bv = _fwbp_v16i8(_loadu_v16i8(bp), (_c)); \
-	dc += (_c); ap += (_c); bp += (_c); _match_core(av, bv, _c); \
+	v16i8_t sacc = _zero_v16i8(); \
+	dc += (_c); ap += (_c); bp += (_c); debug("cnt(%lu)", _c); \
+	for(uint64_t i = (_c); i > 0; i -= _gaba_parse_min2(i, 16)) { \
+		uint64_t l = _gaba_parse_min2(i, 16); \
+		v16i8_t av = _fwap_v16i8(_loadu_v16i8(ap - i), l), bv = _fwbp_v16i8(_loadu_v16i8(bp - i), l); _match_core(av, bv, l); \
+	} \
+	score += _hadd_v16i8(sacc); debug("score(%ld), dcnt(%lu), xcnt(%lu)", score, dc, xc); \
 }
 #define _match_fr(_c) { \
-	v16i8_t av = _fwap_v16i8(_loadu_v16i8(ap), (_c)), bv = _rvbp_v16i8(_loadu_v16i8(bp - (_c)), (_c)); \
-	dc += (_c); ap += (_c); bp -= (_c); _match_core(av, bv, _c); \
+	v16i8_t sacc = _zero_v16i8(); \
+	dc += (_c); ap += (_c); bp -= (_c); debug("cnt(%lu)", _c); \
+	for(uint64_t i = (_c); i > 0; i -= _gaba_parse_min2(i, 16)) { \
+		uint64_t l = _gaba_parse_min2(i, 16); \
+		v16i8_t av = _fwap_v16i8(_loadu_v16i8(ap - i), l), bv = _rvbp_v16i8(_loadu_v16i8(bp + i - l), l); _match_core(av, bv, l); \
+	} \
+	score += _hadd_v16i8(sacc); debug("score(%ld), dcnt(%lu), xcnt(%lu)", score, dc, xc); \
 }
 #define _match_rf(_c) { \
-	v16i8_t av = _rvap_v16i8(_loadu_v16i8(ap - (_c)), (_c)), bv = _fwbp_v16i8(_loadu_v16i8(bp), (_c)); \
-	dc += (_c); ap -= (_c); bp += (_c); _match_core(av, bv, _c); \
+	v16i8_t sacc = _zero_v16i8(); \
+	dc += (_c); ap -= (_c); bp += (_c); debug("cnt(%lu)", _c); \
+	for(uint64_t i = (_c); i > 0; i -= _gaba_parse_min2(i, 16)) { \
+		uint64_t l = _gaba_parse_min2(i, 16); \
+		v16i8_t av = _rvap_v16i8(_loadu_v16i8(ap + i - l), l), bv = _fwbp_v16i8(_loadu_v16i8(bp - i), l); _match_core(av, bv, l); \
+	} \
+	score += _hadd_v16i8(sacc); debug("score(%ld), dcnt(%lu), xcnt(%lu)", score, dc, xc); \
 }
 #define _match_rr(_c) { \
-	v16i8_t av = _rvap_v16i8(_loadu_v16i8(ap - (_c)), (_c)), bv = _rvbp_v16i8(_loadu_v16i8(bp - (_c)), (_c)); \
-	dc += (_c); ap -= (_c); bp -= (_c); _match_core(av, bv, _c); \
+	v16i8_t sacc = _zero_v16i8(); \
+	dc += (_c); ap -= (_c); bp -= (_c); debug("cnt(%lu)", _c); \
+	for(uint64_t i = (_c); i > 0; i -= _gaba_parse_min2(i, 16)) { \
+		uint64_t l = _gaba_parse_min2(i, 16); \
+		v16i8_t av = _rvap_v16i8(_loadu_v16i8(ap + i - l), l), bv = _rvbp_v16i8(_loadu_v16i8(bp + i - l), l); _match_core(av, bv, l); \
+	} \
+	score += _hadd_v16i8(sacc); debug("score(%ld), dcnt(%lu), xcnt(%lu)", score, dc, xc); \
 }
 #define _nop(_c) { (void)(_c); }
 
@@ -3381,7 +3407,7 @@ void _export(gaba_dp_res_free)(
  * @brief calculate score, match count, mismatch count, and gap counts for the section
  * NOTE: this function depends on the _parser_init_* and _parser_loop_* macros defined in gaba_parse.h
  */
-gaba_score_t *_export(gaba_dp_calc_score)(
+struct gaba_score_s *_export(gaba_dp_calc_score)(
 	struct gaba_dp_context_s *self,
 	uint32_t const *path,
 	gaba_path_section_t const *s,
@@ -3391,7 +3417,7 @@ gaba_score_t *_export(gaba_dp_calc_score)(
 	self = _restore_dp_context(self);
 	_init_bar(head); _init_bar(mid); _init_bar(tail);
 
-	v16i8_t sb = _to_v16i8_n(_load_sb(self->scv));
+	v16i8_t sb = _sub_v16i8(_to_v16i8_n(_load_sb(self->scv)), _set_v16i8(self->ofs));
 	v2i32_t gac = _zero_v2i32(), fac = _zero_v2i32(), gbc = _zero_v2i32(), fbc = _zero_v2i32();
 	uint64_t xc = 0, dc = 0;
 	int64_t score = 0;
@@ -3399,7 +3425,7 @@ gaba_score_t *_export(gaba_dp_calc_score)(
 	uint8_t const *ap = a->base < GABA_EOU ? &a->base[s->apos] : gaba_mirror(&a->base[s->apos], 0);
 	uint8_t const *bp = b->base < GABA_EOU ? &b->base[s->bpos] : gaba_mirror(&b->base[s->bpos], 0);
 	_parser_init_fw(path, s->ppos, gaba_plen(s));
-	switch(((a->base < GABA_EOU)<<1) | (b->base < GABA_EOU)) {
+	switch(((a->base >= GABA_EOU)<<1) | (b->base >= GABA_EOU)) {
 		case 0x00: _parser_loop_fw(_del_f, _ins_f, _match_ff, _nop); break;
 		case 0x01: _parser_loop_fw(_del_f, _ins_r, _match_fr, _nop); break;
 		case 0x02: _parser_loop_fw(_del_r, _ins_f, _match_rf, _nop); break;
@@ -3408,8 +3434,18 @@ gaba_score_t *_export(gaba_dp_calc_score)(
 	}
 
 	struct gaba_score_s *sc = gaba_dp_malloc(self, sizeof(struct gaba_score_s));
-	sc->score = score;
-	sc->identity = (double)xc / (double)dc;
+	v2i32_t gc = _sub_v2i32(_add_v2i32(gac, gbc), _add_v2i32(fac, fbc));
+	_print_v2i32(_add_v2i32(gac, gbc));
+	_print_v2i32(_add_v2i32(fac, fbc));
+	_print_v2i32(gc);
+
+	sc->score = (score
+		+ (int64_t)self->gi * _hi32(gc)
+		+ (int64_t)self->ge * _lo32(gc)
+		+ (int64_t)self->gfa * _lo32(fac)
+		+ (int64_t)self->gfb * _lo32(fbc)
+	);
+	sc->identity = (double)(dc - xc) / (double)dc;
 	_store_v2i32(&sc->agcnt, _lo_v2i32(gbc, gac));
 	sc->mcnt = dc - xc; sc->xcnt = xc;
 	_store_v2i32(&sc->aicnt, _hi_v2i32(gbc, gac));
@@ -3684,6 +3720,8 @@ void gaba_init_dp_context(
 
 		.gi = -p->gi, .ge = -p->ge, .gfa = -p->gfa, .gfb = -p->gfb,
 		.imx = 1 / (m - x), .xmx = x / (m - x),
+		.ofs = 2 * (p->ge + p->gi),
+		.aflen = p->gi / (p->gfa - p->ge), .bflen = p->gi / (p->gfb - p->ge),
 
 		/* pointers to root vectors */
 		.root = {

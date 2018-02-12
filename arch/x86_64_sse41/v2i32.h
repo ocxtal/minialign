@@ -192,13 +192,13 @@ typedef uint64_t v2i8_t;
 )
 
 /* debug print */
-#ifdef _LOG_H_INCLUDED
+// #ifdef _LOG_H_INCLUDED
 #define _print_v2i32(a) { \
 	debug("(v2i32_t) %s(%d, %d)", #a, _ext_v2i32(a, 1), _ext_v2i32(a, 0)); \
 }
-#else
-#define _print_v2i32(x)		;
-#endif
+// #else
+// #define _print_v2i32(x)		;
+// #endif
 
 #endif /* _V2I32_H_INCLUDED */
 /**

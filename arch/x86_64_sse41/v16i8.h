@@ -198,7 +198,7 @@ typedef struct v16i8_s {
 )
 
 /* debug print */
-#ifdef _LOG_H_INCLUDED
+// #ifdef _LOG_H_INCLUDED
 #define _print_v16i8(a) { \
 	debug("(v16i8_t) %s(%d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d, %d)", \
 		#a, \
@@ -219,9 +219,9 @@ typedef struct v16i8_s {
 		_ext_v16i8(a, 1), \
 		_ext_v16i8(a, 0)); \
 }
-#else
-#define _print_v16i8(x)		;
-#endif
+// #else
+// #define _print_v16i8(x)		;
+// #endif
 
 #endif /* _V16I8_H_INCLUDED */
 /**
