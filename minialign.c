@@ -6101,6 +6101,7 @@ uint64_t mm_opt_check_sanity(mm_opt_t *o)
 		o->log(o, 'W', __func__, "index will be loaded from file `%s'. circular option is ignored.", *o->parg.a);
 	}
 
+	o->r.flag |= o->a.flag;			/* transfer flags */
 	if(o->c.w >= 32) { o->c.w = (int)(2.0/3.0 * o->c.k + .499); }		/* calc. default window size (proportional to kmer length) if not specified */
 	return(o->ecnt);
 }
