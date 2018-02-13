@@ -966,10 +966,12 @@ void fill_fetch_seq_a_n(
 	uint8_t const *pos,
 	uint64_t len)
 {
+	#ifdef DEBUG
 	if(len > _W + BLK) {
 		fprintf(stderr, "invalid len(%lu)\n", len);
 		*((volatile uint8_t *)NULL);
 	}
+	#endif
 
 	if(pos < GABA_EOU) {
 		debug("reverse fetch a: pos(%p), len(%lu)", pos, len);
@@ -1037,10 +1039,12 @@ void fill_fetch_seq_b_n(
 	uint8_t const *pos,
 	uint64_t len)
 {
+	#ifdef DEBUG
 	if(len > _W + BLK) {
 		fprintf(stderr, "invalid len(%lu)\n", len);
 		*((volatile uint8_t *)NULL);
 	}
+	#endif
 
 	if(pos < GABA_EOU) {
 		debug("forward fetch b: pos(%p), len(%lu)", pos, len);
