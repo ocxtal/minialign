@@ -7,10 +7,7 @@
  * @author Hajime Suzuki (original files by Heng Li)
  * @license MIT
  */
-#ifndef NDEBUG
-#  define DEBUG
-#endif
-// #define COLLECT_FAIL_SEQ
+
 /* configurations */
 /**
  * @macro MM_VERSION
@@ -2344,7 +2341,7 @@ unittest( .name = "bseq.fastq.skip" ) {
 /**
  * @fn hash64
  */
-#define hash64(k0, k1, mask)		( (_mm_crc32_u64((k0), (k0)) ^ (k1)) & (mask) )
+#define hash64(k0, k1, mask)		( (_mm_crc32_u64((k0), (k0)) ^ (k0)) & (mask) )
 // #define hash64(k0, k1, mask)		( (k0) & (mask) )
 
 /**
@@ -2728,7 +2725,6 @@ v2u32_t const *mm_idx_get(
 		return((v2u32_t const *)p);
 	} else {
 		*n = (uint32_t)*p;
-		debug("multiple hit, n(%u)", n);
 		return((v2u32_t const *)&b->v.p[(*p>>32) & 0x7fffffff]);
 	}
 }
@@ -3544,7 +3540,7 @@ uint64_t mm_chain_seeds(
 		uint32_t lid = nlid++;						/* open new leaf for the new branch */
 		_l(s)[lid] = (mm_leaf_t){ .rsid = nlsid, .lsid = nlsid, .rid = s[nlsid].rid, .cid = UINT32_MAX };
 
-		uint32_t plen = _ps(&s[nlsid]);
+		uint32_t plen = _ps(&s[nlsid]), scnt = 1;
 		uint64_t nrsid = nlsid; nlsid = UINT32_MAX;	/* root seed id */
 		while(1) {
 			uint32_t rsid = nrsid; nrsid = 0;		/* front seed id, extract lower 32bit */
@@ -3570,7 +3566,7 @@ uint64_t mm_chain_seeds(
 			/* terminate if no linkable seed is found, or hit at the middle of an existing chain */
 			if(nrsid == 0) { /* debug("no chainable seed remains, nrsid(%lu)", _lo32(nrsid)); */ nrsid = rsid; break; }
 			if(s[_lo32(nrsid)].lid != INT32_MAX) { nrsid = _lo32(nrsid); break; }
-			s[_lo32(nrsid)].lid = lid;				/* mark the seed chained */
+			s[_lo32(nrsid)].lid = lid; scnt++;		/* mark the seed chained */
 			if(nlsid <= nrsid) { nlsid = UINT32_MAX; }
 		}
 		if(nrsid == _l(s)[lid].lsid) { continue; }
@@ -3594,7 +3590,7 @@ uint64_t mm_chain_seeds(
 		_l(s)[lid].rsid = nrsid;
 
 		/* update chain length */
-		plen = _ofs(_ps(&s[nrsid]) - plen);
+		plen = _ofs(((uint32_t)((1.0 - 1.0 / (double)scnt) * (double)(_ps(&s[nrsid]) - plen))));
 		debug("sid(%u, %lu), rid(%u), (%d, %d) -> (%d, %d), plen(%d)", _l(s)[lid].lsid, nrsid, s[nrsid].rid,
 			_as(&s[_l(s)[lid].lsid]), _bs(&s[_l(s)[lid].lsid]),
 			_as(&s[nrsid]), _bs(&s[nrsid]),
@@ -3763,7 +3759,7 @@ void mm_init_query(
 }
 
 /* trial counts */
-#define MM_CREM					( 50 )
+#define MM_CREM					( 50000 )
 #define MM_SREM					( 8 )
 
 /**
@@ -3785,7 +3781,8 @@ uint64_t mm_finish_root(
 	mm_search_t *st)
 {
 	mm_res_t *r = (mm_res_t *)self->root.a;
-	if(r[st->eid].score > (uint32_t)_ofs(self->min_score)) {/* _ofs() inverts the sign */
+	mm_bin_t *bin = (mm_bin_t *)&self->bin.a[st->iid];
+	if(bin->n_aln == 0 || r[st->eid].score > (uint32_t)_ofs(self->min_score)) {/* _ofs() inverts the sign */
 		self->bin.n = st->iid;					/* clear alignment bin */
 		self->n_res--;							/* clear res bin (chain bin) */
 		st->crem--;
@@ -3881,8 +3878,8 @@ uint64_t mm_search_load_next(
 
 	mm_seed_t const *s = self->seed.a;
 	v2u32_t *n = self->next.a;
-	uint64_t ncnt = self->next.n, ofs = 2 * self->twlen;
-	v4i32_t tv = _window(self->twlen), ev = _window(128);		/* exclude near seeds */
+	uint64_t ncnt = self->next.n, ofs = 2 * self->tglen;
+	v4i32_t tv = _window(self->tglen), ev = _window(128);		/* exclude near seeds */
 	v4i32_t fv = _posv_v4i32(st->aid, st->bid,
 		st->cp.apos,
 		st->cp.bpos - (st->rev ? self->qlen : 0)
@@ -4024,10 +4021,11 @@ uint64_t mm_search_record(
 
 	/* update res */
 	mm_res_t *r = (mm_res_t *)self->root.a;
-	r[st->eid].score -= a->score;
+	mm_bin_t *bin = (mm_bin_t *)&self->bin.a[st->iid];
+	uint32_t ovl = MAX2(bin->lb, p.u32[1]) - MIN2(bin->ub, p.u32[3]) - p.u32[1] + p.u32[3];
+	r[st->eid].score -= a->score + (uint32_t)((ovl * 2) * a->identity);
 
 	/* update bin */
-	mm_bin_t *bin = (mm_bin_t *)&self->bin.a[r[st->eid].iid];
 	bin->n_aln += new;
 	bin->plen += a->plen;
 	bin->lb = MIN2(bin->lb, p.u32[1]);
@@ -4211,9 +4209,9 @@ uint64_t mm_collect_supp(
 		for(uint64_t i = p; i < q; i++) {
 			/* bin[0] holds a tuple (bpos, blen) */
 			mm_bin_t *s = (mm_bin_t *)&bin[res[i].iid];
-			uint64_t lb = s->lb, ub = s->ub, span = ub - lb;
+			int64_t lb = s->lb, ub = s->ub, span = ub - lb;
 
-			debug("bid(%u), s(%u, %u)", res[i].iid, lb, ub);
+			debug("bid(%u), s(%ld, %ld), span(%ld)", res[i].iid, lb, ub, span);
 
 			for(uint64_t j = 0; j < p; j++) {
 				mm_bin_t *t = (mm_bin_t *)&bin[res[j].iid];
@@ -4224,7 +4222,7 @@ uint64_t mm_collect_supp(
 				} else {
 					ub = MIN2(ub, t->lb);
 				}
-				debug("bid(%u), t(%u, %u), s(%u, %u)", res[j].iid, t->lb, t->ub, lb, ub);
+				debug("bid(%u), t(%u, %u), s(%ld, %ld), 1.2*(ub-lb)(%ld), span(%ld)", res[j].iid, t->lb, t->ub, lb, ub, (int64_t)(1.2 * (ub - lb)), span);
 
 				/* calculate covered length */
 				if(1.2 * (ub - lb) < span) {		/* check if covered by j */
@@ -4260,20 +4258,22 @@ uint64_t mm_post_map(
 
 	/* collect supp */
 	uint64_t p = mm_collect_supp(self->n_res, res, self->bin.a);
+	debug("p(%lu), n_res(%u)", p, self->n_res);
 
 	/* extract shortest repeat element */
-	int32_t usc = 0, lsc = INT32_MAX, tsc = 0;
+	int64_t usc = 0, lsc = INT64_MAX, tsc = 0;
 	for(uint64_t i = p; i < self->n_res; i++) {
-		usc = MAX2(usc, res[i].score);
-		lsc = MIN2(lsc, res[i].score);
-		tsc += res[i].score;
+		usc = MAX2(usc, _ofs(res[i].score));
+		lsc = MIN2(lsc, _ofs(res[i].score));
+		tsc += _ofs(res[i].score);
+		debug("i(%lu), score(%u), usc(%d), lsc(%d)", i, _ofs(res[i].score), usc, lsc);
 	}
 	lsc = (lsc == INT32_MAX) ? 0 : lsc;
 
 	/* calc mapq for primary and supplementary alignments */
 	double tpc = 1.0, x = self->xcoef, mx = self->mcoef + self->xcoef;
 	for(uint64_t i = 0; i < p; i++) {
-		uint32_t score = res[0].score;
+		uint32_t score = _ofs(res[i].score);
 		mm_bin_t *bin = (mm_bin_t *)&self->bin.a[res[i].iid];
 
 		/* calc identity */
@@ -4286,11 +4286,13 @@ uint64_t mm_post_map(
 
 		/* estimate unique length */
 		double ec = 2.0 / (pid * mx - x);
-		double ulen = ec * (score - usc), pe = 1.0 / (ulen * ulen + (double)(self->n_res - p + 1));
+		double ulen = ec * MAX2((int64_t)score - usc, 0), pe = 1.0 / (ulen * ulen + 1 /*(double)(self->n_res - p + 1)*/);
 
 		/* estimate mapq */
 		bin->plen = _clip(-10.0 * MAPQ_COEF * log10(pe));
 		tpc *= 1.0 - pe;
+
+		debug("i(%lu), score(%u), usc(%d), ec(%f), ulen(%f), mapq(%d), tpc(%f)", i, MAX2((int64_t)score - usc, 0), usc, ec, ulen, bin->plen / MAPQ_COEF, tpc);
 	}
 
 	/* calc mapq for secondary (repetitive) alignments */
@@ -4445,7 +4447,7 @@ mm_reg_t const *mm_align_seq(
 		debug("bid(%u)", self->root.a[i].lid);
 		mm_bin_t *bin = (mm_bin_t *)&self->bin.a[self->root.a[i].lid];
 
-		debug("n_aln(%u), plen(%u), lb(%u), ub(%u)", bin->n_aln, bin->plen, bin->lb, bin->ub);
+		debug("n_aln(%u), mapq(%u), lb(%u), ub(%u)", bin->n_aln, bin->plen / MAPQ_COEF, bin->lb, bin->ub);
 		for(uint64_t j = 0; j < bin->n_aln; j++) {
 			debug("j(%lu), aln(%p)", j, bin->aln[j]);
 		}
@@ -4593,25 +4595,7 @@ void mm_align_drain_intl(mm_align_t *b, mm_align_step_t *s)
 	for(uint64_t i = 0; i < r->n_seq; i++) {
 		mm_reg_t *reg = (mm_reg_t *)r->seq[i].u64;
 		debug("i(%lu), reg(%p)", i, reg);
-
-		/* debug hook */
-		#ifdef COLLECT_FAIL_SEQ
-		if(reg != NULL) {
-			uint64_t flag = 0;
-			for(uint64_t j = 0; j < reg->n_all; j++) {
-				mm_aln_t const *a = reg->aln[j];
-				for(uint64_t k = 0; k < a->a->slen; k++) { if(a->a->seg[k].aid > INT32_MAX || a->a->seg[k].bid > INT32_MAX) { flag = 1; } }
-			}
-			if(flag) {
-				fprintf(stderr, ">%s\n", r->seq[i].name);
-				for(uint64_t j = 0; j < r->seq[i].l_seq; j++) { fprintf(stderr, "%c", decaf[r->seq[i].seq[j]]); }
-				fprintf(stderr, "\n");
-			}
-		}
-		#else
-			mm_print_mapped(b->pr, b->u.mi.s, &r->seq[i], reg);	/* mapped */
-		#endif
-
+		mm_print_mapped(b->pr, b->u.mi.s, &r->seq[i], reg);	/* mapped */
 		if(reg != NULL) {
 			for(uint64_t j = 0; j < reg->n_all; j++) {
 				lmm_free(s->lmm, (void *)reg->aln[j]->a);
@@ -5261,7 +5245,7 @@ void mm_print_sam_md(
 	#define _fwbp_v16i8(_v, _l)	( (_v) )
 	#define _rvbp_v16i8(_v, _l)	( _xor_v16i8(_set_v16i8(0x03), _swapn_v16i8((_v), (_l))) )
 	#define _dump_f(_c) { _putsnt(b, rp, (_c), decaf); rp += (_c); }
-	#define _del_f(_c) { if((_c) > 0) { _putn(b, rp - rb); _put(b, '^'); rb = rp; _dump_f(_c); } }
+	#define _del_f(_c) { if((_c) > 0) { _putn(b, rp - rb); _put(b, '^'); rb = rp + (_c); _dump_f(_c); } }
 	#define _ins_f(_c) { qp += (_c); }
 	#define _ins_r(_c) { qp -= (_c); }
 	#define _match_ff(_c) { \
@@ -5271,9 +5255,8 @@ void mm_print_sam_md(
 			v16i8_t rv = _fwap_v16i8(_loadu_v16i8(rp - i), l), qv = _fwbp_v16i8(_loadu_v16i8(qp - i), l); \
 			_print_v16i8(rv); _print_v16i8(qv); \
 			uint64_t mc = tzcnt(~((v16i8_masku_t){ .mask = _mask_v16i8(_eq_v16i8(rv, qv)) }).all); \
-			if(mc < l) { _putn(b, (sidx - idx)>>1); _put(b, decaf[rp[mc]]); sidx = idx; l = mc + 1; } \
+			if(mc < l) { _putn(b, rp - i + mc - rb); _put(b, decaf[rp[-i + mc]]); rb = rp - i + mc + 1; l = mc + 1; } \
 		} \
-		debug("rp(%p), qp(%p), rb(%p), cnt(%lu)", rp, qp, rb, _c); \
 	}
 	#define _match_fr(_c) { \
 		rp += (_c); qp -= (_c); \
@@ -5282,9 +5265,8 @@ void mm_print_sam_md(
 			v16i8_t rv = _fwap_v16i8(_loadu_v16i8(rp - i), l), qv = _rvbp_v16i8(_loadu_v16i8(qp + i - l), l); \
 			_print_v16i8(rv); _print_v16i8(qv); \
 			uint64_t mc = tzcnt(~((v16i8_masku_t){ .mask = _mask_v16i8(_eq_v16i8(rv, qv)) }).all); \
-			if(mc < l) { _putn(b, (sidx - idx)>>1); _put(b, decaf[rp[mc]]); sidx = idx; l = mc + 1; } \
+			if(mc < l) { _putn(b, rp - i + mc - rb); _put(b, decaf[rp[-i + mc]]); rb = rp - i + mc + 1; l = mc + 1; } \
 		} \
-		debug("rp(%p), qp(%p), rb(%p), cnt(%lu)", rp, qp, rb, _c); \
 	}
 	#define _acc(_c) { (void)(_c); }
 
@@ -5294,82 +5276,12 @@ void mm_print_sam_md(
 	uint8_t const *qp = rev ? &q[qid].seq[q[qid].l_seq - s->bpos] : &q[qid].seq[q[qid].l_seq - s->bpos - s->blen];
 
 	_parser_init_rv(path, s->ppos, gaba_plen(s));
-	debug("rp(%p), qp(%p), plen(%u)", rp, qp, gaba_plen(s));
 	switch(rev) {
 		case 0: _parser_loop_rv(_del_f, _ins_f, _match_ff, _acc); break;
 		case 1: _parser_loop_rv(_del_f, _ins_r, _match_fr, _acc); break;
 		default: break;
 	}
-
-	#if 0
-	_puts(b, "\tMD:Z:");
-	uint64_t const *p = (uint64_t const *)((uint64_t)path & ~(sizeof(uint64_t) - 1));
-	uint64_t lim = s->ppos + (((uint64_t)path & sizeof(uint32_t)) ? 32 : 0) + gaba_plen(s);
-	uint64_t ridx = gaba_plen(s);
-
-	uint64_t dir = (s->bid & 0x01)? 1 : 0;
-	static uint8_t const comp[16] __attribute__(( aligned(16) )) = {
-		0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
-		0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
-	};
-	static uint8_t const id[16] __attribute__(( aligned(16) )) = {
-		0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-		0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f
-	};
-	v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(dir ? comp : id));
-	uint8_t const *rp = &r->seq[rs], *rb = rp, *qp = &t->seq[dir ? (uint64_t)t->l_seq - qs - 32 : qs];
-	while(ridx > 0) {
-		/* suppose each indel block is shorter than 32 bases */
-		uint64_t arr = _loadb_u64(p, lim - ridx);
-		uint64_t cnt = tzcnt(~arr) - (arr & 0x01);		/* count #ins */
-		ridx -= cnt;
-		qp += dir ? -cnt : cnt;
-
-		if((arr & 0x01) == 0) {							/* is_del */
-			ridx -= cnt = tzcnt(arr);					/* count #del */
-			_putn(b, (int32_t)(rp - rb));
-			_put(b, '^');
-			_putsnt32(b, rp, cnt, decaf);
-			rp += cnt;
-			rb = rp;
-		}
-
-		/* match or mismatch */
-		uint64_t acnt = 32;
-		while(acnt == 32) {
-			/* count diagonal */
-			arr = _loadb_u64(p, lim - ridx);
-			acnt = MIN2(tzcnt(arr ^ 0x5555555555555555), ridx)>>1;
-
-			/* load sequence to detect mismatch */
-			v32i8_t rv = _shuf_v32i8(cv, _loadu_v32i8(rp)), qv = _loadu_v32i8(qp);
-			if(dir) { qv = _swap_v32i8(qv); }
-
-			/* compare and count matches */
-			uint64_t mmask = (uint64_t)((v32_masku_t){ .mask = _mask_v32i8(_eq_v32i8(rv, qv)) }).all;
-			uint64_t mcnt = MIN2(acnt, tzcnt(~mmask));
-
-			/* adjust pos */
-			ridx -= 2*mcnt;
-			rp += mcnt;
-			qp += dir ? -mcnt : mcnt;
-
-			if(mcnt >= acnt) { continue; }				/* continues longer than 32bp */
-			_putn(b, (int32_t)(rp - rb));				/* print match length */
-			ridx -= 2*(cnt = MIN2(tzcnt(mmask>>mcnt), acnt - mcnt));
-			qp += dir ? -cnt : cnt;
-			for(uint64_t i = 0; i < cnt - 1; i++) {
-				_put(b, decaf[*rp]);		/* print mismatch base */
-				_put(b, '0');							/* padding */
-				rp++;
-			}
-			_put(b, decaf[*rp]);			/* print mismatch base */
-			rp++;
-			rb = rp;
-		}
-	}
-	_putn(b, (int32_t)(rp - rb));						/* always print tail even if # == 0 */
-	#endif
+	_putn(b, rp - rb);									/* always print tail even if # == 0 */
 	return;
 }
 
@@ -5448,7 +5360,6 @@ uint64_t mm_print_sam_primary_tags(
 			uint32_t gcnt = a->a->agcnt + a->a->bgcnt;
 			for(uint64_t j = a->a->slen; j > 0; j--) {
 				if(i == 0 && j == a->a->slen) { continue; }
-				debug("print supp, i(%lu), j(%lu)", i, j);
 				mm_print_sam_supp(b, ref, query, a->a->path, &a->a->seg[j - 1], xcnt + gcnt, a->mapq);
 			}
 		}
@@ -5470,9 +5381,7 @@ void mm_print_sam_mapped(
 	bseq_seq_t const *query,
 	mm_reg_t const *reg)
 {
-	debug("b(%p), reg(%p)", b, reg);
 	if(reg == NULL) { mm_print_sam_unmapped(b, query); return; }
-	debug("n_uniq(%u), n_all(%u)", reg->n_uniq, reg->n_all);
 
 	/* two-pass printer: first accumulate alignment information */
 
@@ -5938,18 +5847,28 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 	};
 	#define _pre(_k, _v, ...)	&((struct mm_preset_s const){ .key = (_k), .val = (_v), .children = { __VA_ARGS__ } })
 	struct mm_preset_s const *presets[] = {
-		_pre("pacbio", "-k15 -w10 -a2 -b4 -p4 -q1 -Y50 -s50 -m0.3",
+		_pre("pacbio", "-k15 -w10 -a2 -b4 -p4 -q1 -r2,2 -Y50 -s50 -m0.3",
 			_pre("clr", "-q1 -r2,2", NULL),
 			_pre("ccs", "-b3 -p5", NULL)
 		),
-		_pre("ont", "-k15 -w10 -a2 -b4 -p4 -q1 -r2,2 -Y50 -s50 -m0.3",
-			_pre("r7", "-b2 -p2",
+		_pre("ont", "-k15 -w10 -a3 -b5 -p6 -q2 -r3,3 -Y50 -s50 -m0.3",
+			_pre("r7", "-b4",
 				_pre("1d", "", NULL), _pre("2d", "", NULL)
 			),
-			_pre("r9", "",
-				_pre("1d", "", NULL), _pre("1dsq", "", NULL), _pre("2d", "", NULL)
+			_pre("r9", "", 
+				_pre("4", "-a2",
+					_pre("1", "", _pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL), NULL),
+					_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
+					NULL
+				),
+				_pre("5", "-a2",
+					_pre("1", "", _pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL), NULL),
+					_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
+					NULL
+				),
+				_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
+				NULL
 			),
-			_pre("1d", "", NULL), _pre("1dsq", "", NULL), _pre("2d", "", NULL)
 		),
 		_pre("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05", NULL),
 		NULL
@@ -6089,7 +6008,7 @@ static void mm_opt_frq(mm_opt_t *o, char const *arg) {
 	mm_split_foreach(arg, ",;:/", {
 		float f = o->c.frq[o->c.n_frq++] = mm_opt_atof(o, p, l);
 		oassert(o, i < MAX_FRQ_CNT, "#thresholds must not exceed %d.", MAX_FRQ_CNT);
-		oassert(o, f > 0.0 && f < 1.0, "invalid threshold `%f' parsed from `%.*s'.", f, l, p);
+		oassert(o, f >= 0.0 && f < 1.0, "invalid threshold `%f' parsed from `%.*s'.", f, l, p);
 		oassert(o, i == 0 || (o->c.frq[i-1] > o->c.frq[i]), "frequency thresholds must be descending.");
 	});
 }
@@ -6314,7 +6233,7 @@ void mm_print_help(mm_opt_t const *o)
 	_msg(2, "                   {pacbio.{clr,ccs},ont.{r7,r9}.{1d,1dsq,2d},ava}");
 	_msg(2, "    -t INT       number of threads [%d]", o->nth);
 	_msg(2, "    -d FILE      index construction mode, dump index to FILE");
-	_msg(3, "    -X           all-versus-all mode, `-XA' to calculate both A~B and B~A.");
+	_msg(3, "    -X           all-versus-all mode.");
 	_msg(2, "    -v [INT]     show version number / set verbose level");
 	_msg(2, "  Indexing:");
 	_msg(2, "    -k INT       k-mer size [%d]", o->c.k);
@@ -6324,7 +6243,7 @@ void mm_print_help(mm_opt_t const *o)
 	_msg(3, "    -C INT[,INT] set base rid and qid, `*' to infer from seq. name [%u, %u]", o->a.base_rid, o->a.base_qid);
 	_msg(3, "    -L INT       min seq length; 0 to disable [%u]", o->b.min_len);
 	_msg(2, "  Mapping:");
-	_msg(3, "    -f FLOAT,... occurrence thresholds [%rf]", o->c.n_frq, o->c.frq);
+	_msg(3, "    -f FLOAT,... occurrence thresholds [0.5,0.1,0.01]");
 	_msg(2, "    -a INT       match award [%d]", o->a.p.score_matrix[0]);
 	_msg(2, "    -b INT       mismatch penalty [%d]", o->a.p.score_matrix[1]);
 	_msg(2, "    -e STR,...   score matrix modifier, `GA+3' adds 3 to (r,q)=(G,A) pair");
