@@ -6205,9 +6205,9 @@ mm_opt_t *mm_opt_init(char const *const *argv)
  * @fn mm_print_help
  */
 static
-void mm_print_help(mm_opt_t const *o)
+int mm_print_help(mm_opt_t const *o)
 {
-	if(o->verbose == 0) { return; }
+	if(o->verbose == 0) { return(0); }
 
 	#define _msg(_level, ...) { \
 		o->log(o, 16 + _level, __func__, __VA_ARGS__); \
@@ -6270,7 +6270,7 @@ void mm_print_help(mm_opt_t const *o)
 	}
 
 	#undef _msg
-	return;
+	return(1);
 }
 
 /**
@@ -6438,7 +6438,7 @@ int _export(main)(int argc, char *argv[])
 	o->log(o, 1, __func__, "Version: %s, Build: %s", mm_version(), MM_ARCH);		/* always print version */
 	if(o->help || o->parg.n == 0) {								/* when -h is passed or no input file is given, print help message */
 		if(o->help) { o->fp = stdout; ret = 0; }				/* set logger to stdout when invoked by -h option, also exit status is 0 (not an error) */
-		mm_print_help(o);
+		ret = mm_print_help(o);
 		goto _main_final;
 	}
 	if((ret = (o->fnw ? main_index : main_align)(o)) == 0) {	/* dispatch tasks and get return code */
