@@ -16,21 +16,22 @@ C99 compiler (gcc / clang / icc) is required to build the program.
 
 ```
 $ make && make install	# PREFIX=/usr/local by default
-$ minialign -xont reference.fa reads.[fa,fq,bam] > read_to_ref.sam
-$ minialign -X -xava reads.[fa,fq,bam] > all_versus_all.paf
+$ make universal && make install        # universal binary for HPC clusters
+$ minialign -xont.1dsq reference.fa reads.[fa,fq,bam] > read_to_ref.sam
 ```
 
 Reference sequence index can be stored in separate. Using prebuilt index saves around a minute per run for a human haploid (~3G) genome.
 
 ```
 $ minialign -d index.mai reference.fa	# build index
-$ minialign -l index.mai reads.[fa,fq,bam] > out.sam	# mapping on prebuilt index
+$ minialign index.mai reads.[fa,fq,bam] > out.sam	# mapping on prebuilt index
 ```
 
 Frequently used options are: scoring parameters, minimum score cut-offs, and number of threads.
 
 ```
-$ minialign -a1 -b2 -p2 -q1		# match, mismatch, gap-open and gap-extend
+$ minialign -a2 -b5 -p5 -q1 -r3,3		# match, mismatch, (gap-open for gap-extend large gaps), and gap-extend for short gaps
+$ minialign -eAG+2,GA+1                 # score matrix modifier: add 2 to A -> G substitution, and 1 to G -> A substitution
 $ minialign -s1000	# set minimum score threshold to 1000
 $ minialign -m0.8	# set report threshold at 0.8 of the highest score for every read
 $ minialign -t10	# minialign is now 10x faster!!!
