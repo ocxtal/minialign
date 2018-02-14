@@ -6207,7 +6207,7 @@ mm_opt_t *mm_opt_init(char const *const *argv)
 static
 int mm_print_help(mm_opt_t const *o)
 {
-	if(o->verbose == 0) { return(0); }
+	if(o->verbose <= 1) { return(0); }
 
 	#define _msg(_level, ...) { \
 		o->log(o, 16 + _level, __func__, __VA_ARGS__); \
