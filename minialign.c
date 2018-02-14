@@ -108,7 +108,6 @@ void oom_abort(
  * @macro mm_malloc
  */
 #define mm_malloc(_x) ({ \
-	if((_x) > 20ULL * 1024 * 1024 * 1024) { fprintf(stderr, "size(%lu)\n", (_x)); *((volatile uint8_t *)NULL); } \
 	void *_ptr = malloc((size_t)(_x)); \
 	if(_unlikely(_ptr == NULL)) { \
 		oom_abort(__func__, (_x)); \
@@ -126,7 +125,6 @@ void oom_abort(
  * @macro mm_realloc
  */
 #define mm_realloc(_x, _y) ({ \
-	if((_y) > 20ULL * 1024 * 1024 * 1024) { fprintf(stderr, "size(%lu)\n", (_y)); *((volatile uint8_t *)NULL); } \
 	void *_ptr = realloc((void *)(_x), (size_t)(_y)); \
 	if(_unlikely(_ptr == NULL)) { \
 		oom_abort(__func__, (_y)); \
@@ -1960,7 +1958,6 @@ uint64_t bseq_read_bam(
 		_m1 = _match(_r, _dv); _m2 = _match(_r, _lv); \
 		ZCNT_RESULT uint64_t _l = MIN2(tzcnt(_m1 | _m2), (uint64_t)(_t - _p)); \
 		_len = _l; _p += 32; _q += 32; \
-		if(_p > (_t + 32) || _q > mem->a + mem->m) { fprintf(stderr, "buffer overrun, p(%p), fp(%p, %lu, %p), q(%p), mem(%p, %lu, %p)\n", _p, fp->a, fp->n, _t, _q, mem->a, mem->m, mem->a + mem->m); *((volatile uint8_t *)NULL); } \
 	} while(_len >= 32); \
 	_p += _len - 32; _q += _len - 32; _q -= _q[-1] == '\r'; _m1>>_len; \
 })
@@ -2071,10 +2068,12 @@ uint64_t bseq_read_fasta(
 _refill:
 	debug("return, p(%p), t(%p)", p, t);
 	fp->p = p; mem->n = q - mem->a;				/* write back pointers */
+	#ifdef DEBUG
 	if(mem->n > mem->m) {
 		fprintf(stderr, "buffer overrun, mem->n(%lu), mem->m(%lu)\n", mem->n, mem->m);
 		*((volatile uint8_t *)NULL);
 	}
+	#endif
 	return(p >= t);
 
 	#undef _id
@@ -6293,6 +6292,7 @@ int main_index(mm_opt_t *o)
 	br.keep_qual = 0; br.n_tag = 0;		/* overwrite */
 	kv_foreach(void *, o->parg, {
 		bseq_file_t *fp = bseq_open(&br, *p);
+		if(fp == NULL) { fn = *p; goto _main_index_fail; }
 		mm_idx_t *mi = mm_idx_gen(&o->c, fp, o->pt);
 		o->a.base_rid += bseq_close(fp);
 
