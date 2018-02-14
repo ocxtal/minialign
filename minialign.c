@@ -5868,6 +5868,8 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 				_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
 				NULL
 			),
+			_pre("1d", "-a2", NULL), _pre("1dsq", "-a2 -b6 -r4,4", NULL), _pre("2d", "-a2 -b6 -r4,4", NULL),
+			NULL
 		),
 		_pre("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05", NULL),
 		NULL
@@ -6224,16 +6226,18 @@ int mm_print_help(mm_opt_t const *o)
 			"    $ minialign [indexing options] -d index.mai ref.fa\n"
 			"    $ minialign index.mai reads.fq > mapping.sam\n"
 			"");
+	/*
 	_msg(2, "  all-versus-all alignment in a read set:\n"
 			"    $ minialign -X -xava reads.fa [reads.fa ...] > allvsall.paf\n"
 			"");
+	*/
 	_msg(2, "Options:");
 	_msg(2, "  Global:");
 	_msg(2, "    -x STR       load preset params [ont]");
 	_msg(2, "                   {pacbio.{clr,ccs},ont.{r7,r9}.{1d,1dsq,2d},ava}");
 	_msg(2, "    -t INT       number of threads [%d]", o->nth);
 	_msg(2, "    -d FILE      index construction mode, dump index to FILE");
-	_msg(3, "    -X           all-versus-all mode.");
+	// _msg(3, "    -X           all-versus-all mode.");
 	_msg(2, "    -v [INT]     show version number / set verbose level");
 	_msg(2, "  Indexing:");
 	_msg(2, "    -k INT       k-mer size [%d]", o->c.k);
