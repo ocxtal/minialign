@@ -1179,15 +1179,6 @@ void fill_restore_fetch(
 	struct gaba_joint_tail_s const *prev_tail = tail->tail;
 	_print_v2i32(sridx);
 
-	/* windback tail if ridx stick out from the section */
-	// _test_v2i32(_gt_v2i32(ridx, sridx))) {
-	if(_lo32(sridx) < _lo32(ridx) || _hi32(sridx) < _hi32(ridx)) {
-		fprintf(stderr, "windback ptr tail(%p), prev_tail(%p)\n", tail, prev_tail);
-		// tail = prev_tail; ridx = _sub_v2i32(ridx, sridx);
-		// sridx = _add_v2i32(_load_v2i32(&tail->aridx), _load_v2i32(&tail->aadv));
-		// prev_tail = tail->tail;
-	}
-
 	/* calc fetch positions and lengths */
 	v2i32_t dridx = _add_v2i32(ridx, _set_v2i32(_W));	/* desired fetch pos */
 	v2i32_t cridx = _min_v2i32(dridx, sridx);			/* might be clipped at the head of sequence section */
