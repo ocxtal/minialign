@@ -2340,7 +2340,7 @@ unittest( .name = "bseq.fastq.skip" ) {
 /**
  * @fn hash64
  */
-#define hash64(k0, k1, mask)		( (_mm_crc32_u64((k0), (k0)) ^ (k0)) & (mask) )
+#define hash64(k0, k1, mask)		( (_mm_crc32_u64((k1), (k1)) ^ (k0)) & (mask) )
 // #define hash64(k0, k1, mask)		( (k0) & (mask) )
 
 /**
