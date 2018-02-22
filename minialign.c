@@ -5391,7 +5391,7 @@ void mm_print_sam_mapped(
 		if(i >= reg->n_uniq) { flag = 0x100; }/* overwrite the flag as secondary */
 
 		mm_aln_t const *a = reg->aln[i];
-		for(uint64_t j = a->a->slen; j > 0; j--) {
+		for(uint64_t j = a->a->slen; j > 0; flag = 0x800, j--) {
 			/* print body */
 			mm_print_sam_mapped_core(b, ref, query, &a->a->seg[j - 1], a->a->path, flag, a->mapq);
 
@@ -5407,7 +5407,6 @@ void mm_print_sam_mapped(
 			}
 			_cr(b);
 		}
-
 		flag = 0x800;					/* mark supplementary */
 	}
 	return;
