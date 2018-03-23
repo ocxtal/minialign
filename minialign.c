@@ -5391,7 +5391,7 @@ void mm_print_sam_mapped(
 		if(i >= reg->n_uniq) { flag = 0x100; }/* overwrite the flag as secondary */
 
 		mm_aln_t const *a = reg->aln[i];
-		for(uint64_t j = a->a->slen; j > 0; flag = 0x800, j--) {
+		for(uint64_t j = a->a->slen; j > 0; j--) {
 			/* print body */
 			mm_print_sam_mapped_core(b, ref, query, &a->a->seg[j - 1], a->a->path, flag, a->mapq);
 
@@ -5402,7 +5402,7 @@ void mm_print_sam_mapped(
 			mm_print_sam_md(b, ref, query, a->a->path, &a->a->seg[j - 1]);
 
 			/* primary-specific tags */
-			if(i == 0 && j == a->a->slen && mm_print_sam_primary_tags(b, ref, query, reg)) {
+			if(i == 0 && j == a->a->slen && (flag = 0x800, mm_print_sam_primary_tags(b, ref, query, reg))) {
 				i = n; j = 1;			/* skip supplementary records when SA tag is enabled */
 			}
 			_cr(b);
