@@ -14,6 +14,14 @@
 #ifndef _GABA_WRAP_H_INCLUDED
 #define _GABA_WRAP_H_INCLUDED
 
+#if !defined(_GABA_WRAP_EXPORT_LEVEL)
+#  define _GABA_WRAP_EXPORT_LEVEL	static inline		/* hidden by default */
+#endif
+
+#if !defined(_GABA_PARSE_EXPORT_LEVEL)
+#  define _GABA_PARSE_EXPORT_LEVEL	static inline		/* hidden by default */
+#endif
+
 /* combined gap penalty is not implemented yet */
 // #define DISABLE_COMBINED
 
@@ -233,7 +241,7 @@ void *gaba_set_api(
 /**
  * @fn gaba_init
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_t *gaba_init(
 	gaba_params_t const *params)
 {
@@ -289,7 +297,7 @@ gaba_t *gaba_init(
 /**
  * @fn gaba_clean
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 void gaba_clean(
 	gaba_t *ctx)
 {
@@ -301,7 +309,7 @@ void gaba_clean(
 /**
  * @fn gaba_dp_init
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_dp_t *gaba_dp_init(
 	gaba_t const *ctx)
 {
@@ -311,7 +319,7 @@ gaba_dp_t *gaba_dp_init(
 /**
  * @fn gaba_dp_flush
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 void gaba_dp_flush(
 	gaba_dp_t *self)
 {
@@ -322,7 +330,7 @@ void gaba_dp_flush(
 /**
  * @fn gaba_dp_save_stack
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_stack_t const *gaba_dp_save_stack(
 	gaba_dp_t *self)
 {
@@ -332,7 +340,7 @@ gaba_stack_t const *gaba_dp_save_stack(
 /**
  * @fn gaba_dp_flush_stack
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 void gaba_dp_flush_stack(
 	gaba_dp_t *self,
 	gaba_stack_t const *stack)
@@ -344,7 +352,7 @@ void gaba_dp_flush_stack(
 /**
  * @fn gaba_dp_clean
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 void gaba_dp_clean(
 	gaba_dp_t *self)
 {
@@ -355,7 +363,7 @@ void gaba_dp_clean(
 /**
  * @fn gaba_dp_fill_root
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_fill_t *gaba_dp_fill_root(
 	gaba_dp_t *self,
 	gaba_section_t const *a,
@@ -371,7 +379,7 @@ gaba_fill_t *gaba_dp_fill_root(
  * @fn gaba_dp_fill
  * @brief fill dp matrix inside section pairs
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_fill_t *gaba_dp_fill(
 	gaba_dp_t *self,
 	gaba_fill_t const *prev_sec,
@@ -385,7 +393,7 @@ gaba_fill_t *gaba_dp_fill(
 /**
  * @fn gaba_dp_merge
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_fill_t *gaba_dp_merge(
 	gaba_dp_t *self,
 	gaba_fill_t const *const *sec,
@@ -399,7 +407,7 @@ gaba_fill_t *gaba_dp_merge(
 /**
  * @fn gaba_dp_search_max
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_pos_pair_t *gaba_dp_search_max(
 	gaba_dp_t *self,
 	gaba_fill_t const *sec)
@@ -410,7 +418,7 @@ gaba_pos_pair_t *gaba_dp_search_max(
 /**
  * @fn gaba_dp_trace
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_alignment_t *gaba_dp_trace(
 	gaba_dp_t *self,
 	gaba_fill_t const *tail,
@@ -422,7 +430,7 @@ gaba_alignment_t *gaba_dp_trace(
 /**
  * @fn gaba_dp_res_free
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 void gaba_dp_res_free(
 	gaba_dp_t *dp,
 	gaba_alignment_t *res)
@@ -434,7 +442,7 @@ void gaba_dp_res_free(
 /**
  * @fn gaba_dp_calc_score
  */
-static inline
+_GABA_WRAP_EXPORT_LEVEL
 gaba_score_t *gaba_dp_calc_score(
 	gaba_dp_t *dp,
 	uint32_t const *path,

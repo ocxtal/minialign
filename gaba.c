@@ -8,7 +8,10 @@
  * @date 2016/1/11
  * @license Apache v2
  */
+// #define DEBUG
 // #define DEBUG_MEM
+// #define DEBUG_OVERFLOW
+// #define DEBUG_ALL
 /*
  * debug print configuration: -DDEBUG to enable debug print, -DDEBUG_ALL to print all the vectors, arrays, and bitmasks
  * NOTE: dumping all the vectors sometimes raises SEGV due to a stack shortage. use `ulimit -s 65536' to avoid it.
@@ -34,6 +37,9 @@
 #include <stdint.h>				/* uint32_t, uint64_t, ... */
 #include <stddef.h>				/* offsetof */
 #include <string.h>				/* memset, memcpy */
+#include <inttypes.h>
+
+#define _GABA_PARSE_EXPORT_LEVEL	static inline
 #include "gaba.h"
 #include "gaba_parse.h"
 #include "log.h"
@@ -446,7 +452,7 @@ struct gaba_aln_intl_s {
 	uint32_t dcnt;						/** (4) unused in the loop */
 	uint32_t slen;						/** (4) section length (counter) */
 	struct gaba_segment_s *seg;			/** (8) section ptr */
-	uint64_t plen;						/** (8) path length (psum; save) */
+	uint32_t plen, padding;				/** (8) path length (psum; save) */
 };
 
 _static_assert(sizeof(struct gaba_alignment_s) == sizeof(struct gaba_aln_intl_s));
@@ -804,21 +810,24 @@ struct gaba_dir_s {
 
 /**
  * @macro _max_match, _gap_h, _gap_v
- * @brief calculate scores
+ * @brief calculate scores (_gap: 0 for horizontal gap, 1 for vertical gap)
  */
 #define _max_match(_p)				( _hmax_v16i8(_loadu_v16i8((_p)->score_matrix)) )
 #define _min_match(_p)				( -_hmax_v16i8(_sub_v16i8(_zero_v16i8(), _loadu_v16i8((_p)->score_matrix))) )
 #if MODEL == LINEAR
 #define _gap_h(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
 #define _gap_v(_p, _l)				( -1 * ((_p)->gi + (_p)->ge) * (_l) )
+#define _gap(_p, _d, _l)			_gap_h(_p, _l)
 #elif MODEL == AFFINE
 #define _gap_h(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
 #define _gap_v(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
+#define _gap(_p, _d, _l)			_gap_h(_p, _l)
 #define _gap_e(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
 #define _gap_f(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
 #else /* MODEL == COMBINED */
-#define _gap_h(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (_p)->gfa * (_l)) )
-#define _gap_v(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (_p)->gfb * (_l)) )
+#define _gap_h(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (_p)->gfb * (_l)) )
+#define _gap_v(_p, _l)				( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (_p)->gfa * (_l)) )
+#define _gap(_p, _d, _l)			( MAX2(-1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l), -1 * (&(_p)->gfb)[-(_d)] * (_l)) )
 #define _gap_e(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
 #define _gap_f(_p, _l)				( -1 * ((_l) > 0) * (_p)->gi - (_p)->ge * (_l) )
 #endif
@@ -846,6 +855,10 @@ enum BASES { A = 0x01, C = 0x02, G = 0x04, T = 0x08, N = 0x00 };
  */
 #if BIT == 2
 /* 2bit encoding */
+static uint8_t const decode_table[16] __attribute__(( aligned(16) )) = {
+	'A', 'C', 'G', 'T', 'N', 'N', 'N', 'N',
+	'N', 'N', 'N', 'N', 'N', 'N', 'N', 'N'
+};
 static uint8_t const comp_mask_a[16] __attribute__(( aligned(16) )) = {
 	0x03, 0x02, 0x01, 0x00, 0x04, 0x04, 0x04, 0x04,
 	0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04
@@ -859,7 +872,7 @@ static uint8_t const compshift_mask_b[16] __attribute__(( aligned(16) )) = {
 	0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02, 0x02
 };
 /* q-fetch (anti-diagonal matching for vector calculation) */
-
+#ifdef UNSAFE_FETCH
 #  define _fwaq_v16i8(_v)		( _shuf_v16i8((_load_v16i8(comp_mask_a)), (_v)) )
 #  define _fwaq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask_a))), (_v)) )
 #  define _rvaq_v16i8(_v)		( _swap_v16i8((_v)) )
@@ -868,15 +881,14 @@ static uint8_t const compshift_mask_b[16] __attribute__(( aligned(16) )) = {
 #  define _fwbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(shift_mask_b))), (_v)) )
 #  define _rvbq_v16i8(_v)		( _shuf_v16i8((_load_v16i8(compshift_mask_b)), _swap_v16i8(_v)) )
 #  define _rvbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(compshift_mask_b))), _swap_v32i8(_v)) )
-
-#if 0
+#else
 #  define _fwaq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask_a)), (_v)) )	/* _l is ignored */
 #  define _fwaq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask_a))), (_v)) )
 #  define _rvaq_v16i8(_v, _l)	( _swapn_v16i8((_v), (_l)) )
 #  define _rvaq_v32i8(_v)		( _swap_v32i8((_v)) )
 #  define _fwbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(shift_mask_b)), (_v)) )	/* _l is ignored */
 #  define _fwbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(shift_mask_b))), (_v)) )
-#  define _rvbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(compshift_mask_b)), _swap_v16i8(_v)) )	/* _l is ignored */
+#  define _rvbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(compshift_mask_b)), _swapn_v16i8((_v), (_l))) )
 #  define _rvbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(compshift_mask_b))), _swap_v32i8(_v)) )
 #endif
 
@@ -891,12 +903,19 @@ static uint8_t const compshift_mask_b[16] __attribute__(( aligned(16) )) = {
 
 #else
 /* 4bit encoding */
+static uint8_t const decode_table[16] __attribute__(( aligned(16) )) = {
+	'N', 'A', 'C', 'M', 'G', 'R', 'S', 'V',
+	'T', 'W', 'Y', 'H', 'K', 'D', 'B', 'N'
+};
 static uint8_t const comp_mask[16] __attribute__(( aligned(16) )) = {
 	0x00, 0x08, 0x04, 0x0c, 0x02, 0x0a, 0x06, 0x0e,
 	0x01, 0x09, 0x05, 0x0d, 0x03, 0x0b, 0x07, 0x0f
 };
+#define comp_mask_a				comp_mask
+#define compshift_mask_b		comp_mask
 
 /* q-fetch (anti-diagonal matching for vector calculation) */
+#ifdef UNSAFE_FETCH
 #  define _fwaq_v16i8(_v)		( _shuf_v16i8((_load_v16i8(comp_mask)), (_v)) )
 #  define _fwaq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask))), (_v)) )
 #  define _rvaq_v16i8(_v)		( _swap_v16i8((_v)) )
@@ -905,15 +924,14 @@ static uint8_t const comp_mask[16] __attribute__(( aligned(16) )) = {
 #  define _fwbq_v32i8(_v)		( (_v) )
 #  define _rvbq_v16i8(_v)		( _shuf_v16i8((_load_v16i8(comp_mask)), _swap_v16i8(_v)) )
 #  define _rvbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask))), _swap_v32i8(_v)) )
-
-#if 0
+#else
 #  define _fwaq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask)), (_v)) )		/* _l is ignored */
 #  define _fwaq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask))), (_v)) )
 #  define _rvaq_v16i8(_v, _l)	( _swapn_v16i8((_v), (_l)) )
 #  define _rvaq_v32i8(_v)		( _swap_v32i8((_v)) )
 #  define _fwbq_v16i8(_v, _l)	( (_v) )											/* id(x); _l is ignored */
 #  define _fwbq_v32i8(_v)		( (_v) )
-#  define _rvbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask)), _swap_v16i8(_v)) )	/* _l is ignored */
+#  define _rvbq_v16i8(_v, _l)	( _shuf_v16i8((_load_v16i8(comp_mask)), _swapn_v16i8((_v), (_l))) )
 #  define _rvbq_v32i8(_v)		( _shuf_v32i8((_from_v16i8_v32i8(_load_v16i8(comp_mask))), _swap_v32i8(_v)) )
 #endif
 
@@ -939,18 +957,24 @@ void fill_fetch_seq_a(
 	if(pos < GABA_EOU) {
 		debug("reverse fetch a: pos(%p), len(%lu)", pos, len);
 		/* reverse fetch: 2 * alen - (2 * alen - pos) + (len - 32) */
+		#ifdef UNSAFE_FETCH
 		v32i8_t ach = _loadu_v32i8(pos + (len - BLK));					/* this may touch the space before the array */
 		_storeu_v32i8(_rd_bufa(self, _W, len), _rvaq_v32i8(ach));		/* reverse */
-		// v32i8_t ach = _loadu_v32i8(pos);								/* this will not touch the space before the array, but will touch at most 31bytes after the array */
-		// _storeu_v32i8(_rd_bufa(self, _W, BLK), _rvaq_v32i8(ach));	/* reverse; will not invade any buf */
+		#else
+		v32i8_t ach = _loadu_v32i8(pos);								/* this will not touch the space before the array, but will touch at most 31bytes after the array */
+		_storeu_v32i8(_rd_bufa(self, _W, BLK), _rvaq_v32i8(ach));	/* reverse; will not invade any buf */
+		#endif
 	} else {
 		debug("forward fetch a: pos(%p), len(%lu), p(%p)", pos, len, _rev(pos + (len - 1)));
 		/* forward fetch: 2 * alen - pos */
+		#ifdef UNSAFE_FETCH
 		v32i8_t ach = _loadu_v32i8(_rev(pos + (len - 1)));
 		_storeu_v32i8(_rd_bufa(self, _W, len), _fwaq_v32i8(ach));		/* complement */
-		// v32i8_t ach = _loadu_v32i8(_rev(pos + (len - 1)));
+		#else
+		v32i8_t ach = _loadu_v32i8(_rev(pos + (len - 1)));
 		// _print_v32i8(ach); _print_v32i8(_fwaq_v32i8(ach));
-		// _storeu_v32i8(_rd_bufa(self, _W, len), _fwaq_v32i8(ach));	/* complement; will invade bufa[BLK..BLK+_W] */
+		_storeu_v32i8(_rd_bufa(self, _W, len), _fwaq_v32i8(ach));	/* complement; will invade bufa[BLK..BLK+_W] */
+		#endif
 	}
 	return;
 }
@@ -979,10 +1003,13 @@ void fill_fetch_seq_a_n(
 		pos += len; ofs += len;		/* fetch in reverse direction */
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);
+			#ifdef UNSAFE_FETCH
 			v16i8_t ach = _loadu_v16i8(pos - 16);
 			_storeu_v16i8(_rd_bufa(self, ofs - l, l), _rvaq_v16i8(ach));/* reverse */
-			// v16i8_t ach = _loadu_v16i8(pos - l);						/* fetch in the reverse order */
-			// _storeu_v16i8(_rd_bufa(self, ofs - l, l), _rvaq_v16i8(ach, l));	/* reverse; this will invade bufa[BLK..BLK+_W] */
+			#else
+			v16i8_t ach = _loadu_v16i8(pos - l);						/* fetch in the reverse order */
+			_storeu_v16i8(_rd_bufa(self, ofs - l, l), _rvaq_v16i8(ach, l));	/* reverse; this will invade bufa[BLK..BLK+_W] */
+			#endif
 			len -= l; pos -= l; ofs -= l;
 		}
 	} else {
@@ -991,11 +1018,14 @@ void fill_fetch_seq_a_n(
 		pos += len - 1; ofs += len;
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);
+			#ifdef UNSAFE_FETCH
 			v16i8_t ach = _loadu_v16i8(_rev(pos));
 			_storeu_v16i8(_rd_bufa(self, ofs - l, l), _fwaq_v16i8(ach));/* complement */
-			// v16i8_t ach = _loadu_v16i8(_rev(pos));					/* fetch in the forward order */
+			#else
+			v16i8_t ach = _loadu_v16i8(_rev(pos));					/* fetch in the forward order */
 			// _print_v16i8(ach); _print_v16i8(_fwaq_v16i8(ach, l));
-			// _storeu_v16i8(_rd_bufa(self, ofs - l, l), _fwaq_v16i8(ach, l));	/* complement; will invade bufa[BLK..BLK+_W] */
+			_storeu_v16i8(_rd_bufa(self, ofs - l, l), _fwaq_v16i8(ach, l));	/* complement; will invade bufa[BLK..BLK+_W] */
+			#endif
 			len -= l; pos -= l; ofs -= l;
 		}
 	}
@@ -1019,11 +1049,14 @@ void fill_fetch_seq_b(
 	} else {
 		debug("reverse fetch b: pos(%p), len(%lu), p(%p)", pos, len, _rev(pos + len - 1));
 		/* reverse fetch: 2 * blen - pos + (len - 32) */
+		#ifdef UNSAFE_FETCH
 		v32i8_t bch = _loadu_v32i8(_rev(pos) - (BLK - 1));
 		_storeu_v32i8(_rd_bufb(self, _W, len), _rvbq_v32i8(bch));		/* reverse complement */
-		// v32i8_t bch = _loadu_v32i8(_rev(pos + (len - 1)));
+		#else
+		v32i8_t bch = _loadu_v32i8(_rev(pos + (len - 1)));
 		// _print_v32i8(bch); _print_v32i8(_rvbq_v32i8(bch));
-		// _storeu_v32i8(_rd_bufb(self, _W + len - BLK, BLK), _rvbq_v32i8(bch));	/* reverse complement; not to use swapn for v32i8_t, will invade bufb[0.._W] and bufa */
+		_storeu_v32i8(_rd_bufb(self, _W + len - BLK, BLK), _rvbq_v32i8(bch));	/* reverse complement; not to use swapn for v32i8_t, will invade bufb[0.._W] and bufa */
+		#endif
 	}
 	return;
 }
@@ -1052,7 +1085,11 @@ void fill_fetch_seq_b_n(
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);									/* advance length */
 			v16i8_t bch = _loadu_v16i8(pos);
+			#ifdef UNSAFE_FETCH
 			_storeu_v16i8(_rd_bufb(self, ofs, l), _fwbq_v16i8(bch));	/* FIXME: will invade a region after bufb, will break arlim..bid */
+			#else
+			_storeu_v16i8(_rd_bufb(self, ofs, l), _fwbq_v16i8(bch, l));	/* FIXME: will invade a region after bufb, will break arlim..bid */
+			#endif
 			len -= l; pos += l; ofs += l;
 		}
 	} else {
@@ -1060,11 +1097,14 @@ void fill_fetch_seq_b_n(
 		/* reverse fetch: 2 * blen - pos + (len - 16) */
 		while(len > 0) {
 			uint64_t l = MIN2(len, 16);									/* advance length */
+			#ifdef UNSAFE_FETCH
 			v16i8_t bch = _loadu_v16i8(_rev(pos + (16 - 1)));
 			_storeu_v16i8(_rd_bufb(self, ofs, l), _rvbq_v16i8(bch));
-			// v16i8_t bch = _loadu_v16i8(_rev(pos + (l - 1)));			/* reverse fetch */
+			#else
+			v16i8_t bch = _loadu_v16i8(_rev(pos + (l - 1)));			/* reverse fetch */
 			// _print_v16i8(bch); _print_v16i8(_rvbq_v16i8(bch, l));
-			// _storeu_v16i8(_rd_bufb(self, ofs, l), _rvbq_v16i8(bch, l));	/* FIXME: will invade a region after bufb */
+			_storeu_v16i8(_rd_bufb(self, ofs, l), _rvbq_v16i8(bch, l));	/* FIXME: will invade a region after bufb */
+			#endif
 			len -= l; pos += l; ofs += l;
 		}
 	}
@@ -1090,8 +1130,8 @@ void fill_fetch_core(
 
 	/* fetch seq b */
 	nvec_t b = _loadu_n(_rd_bufb(self, bcnt, _W));		/* unaligned */
-	_store_n(_rd_bufb(self, 0, _W), b);					/* always aligned */
 	fill_fetch_seq_b(self, self->w.r.btptr - self->w.r.brem, blen);		/* will invade bufa */
+	_store_n(_rd_bufb(self, 0, _W), b);					/* always aligned */
 
 	_print_n(a); _print_n(b);
 	return;
@@ -1557,22 +1597,22 @@ struct gaba_joint_tail_s *fill_create_tail(
 #else /* MODEL == COMBINED */
 #define _fill_body() { \
 	register nvec_t t = _match_n(_loadu_n(aptr), _loadu_n(bptr)); \
-	register nvec_t di = _add_n(dv, _load_gfv(self->scv)); \
-	register nvec_t dd = _sub_n(_load_gfh(self->scv), dh); \
+	register nvec_t dfh = _add_n(dv, _load_gfh(self->scv)); \
+	register nvec_t dfv = _sub_n(_load_gfv(self->scv), dh); \
 	_print_n(_sub_n(_zero_n(), dh)); _print_n(dv); _print_n(de); _print_n(df); \
-	_print_n(dd); _print_n(di); \
+	_print_n(dfv); _print_n(dfh); \
 	_print_n(_loadu_n(aptr)); _print_n(_loadu_n(bptr)); \
 	register nvec_t s = _max_n(de, df); \
 	t = _shuf_n(_load_sb(self->scv), t); _print_n(t); \
-	s = _max_n(s, di); \
-	t = _max_n(t, dd); \
+	s = _max_n(s, dfh); \
+	t = _max_n(t, dfv); \
 	t = _max_n(t, s); \
 	_print_n(t); \
-	uint64_t mask_gfa = _mask_u64(_mask_n(_eq_n(t, di))), mask_gh = _mask_u64(_mask_n(_eq_n(t, de))); \
-	uint64_t mask_gfb = _mask_u64(_mask_n(_eq_n(t, dd))), mask_gv = _mask_u64(_mask_n(_eq_n(t, df))); \
-	debug("mask_gfa(%lx), mask_gh(%lx), mask_gfb(%lx), mask_gv(%lx)", mask_gfa, mask_gh, mask_gfb, mask_gv); \
-	ptr->h.all = mask_gfa | mask_gh; mask_gh &= ~mask_gfa; \
-	ptr->v.all = mask_gfb | mask_gv; mask_gv &= ~mask_gfb; \
+	uint64_t mask_gfh = _mask_u64(_mask_n(_eq_n(t, dfh))), mask_gh = _mask_u64(_mask_n(_eq_n(t, de))); \
+	uint64_t mask_gfv = _mask_u64(_mask_n(_eq_n(t, dfv))), mask_gv = _mask_u64(_mask_n(_eq_n(t, df))); \
+	debug("mask_gfh(%lx), mask_gh(%lx), mask_gfv(%lx), mask_gv(%lx)", mask_gfh, mask_gh, mask_gfv, mask_gv); \
+	ptr->h.all = mask_gfh | mask_gh; mask_gh &= ~mask_gfh; \
+	ptr->v.all = mask_gfv | mask_gv; mask_gv &= ~mask_gfv; \
 	/* update de and dh */ \
 	de = _add_n(de, _load_adjh(self->scv)); \
 	nvec_t te = _max_n(de, t); \
@@ -1652,23 +1692,29 @@ struct gaba_joint_tail_s *fill_create_tail(
 }
 #endif /* MODEL */
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(DEBUG_OVERFLOW)
 #define _check_overflow(_delta, _drop) { \
-	int8_t b[_W], d[_W], flag = 0; int16_t adj[_W], m1[_W], m2[_W]; \
+	int8_t b[_W], d[_W], flag = 0; int16_t ovf[_W], udf[_W], m1[_W], m2[_W], m3[_W]; \
 	_storeu_n(b, _delta); _storeu_n(d, _drop); \
-	wvec_t adjv = _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_add_n(drop, delta), _and_n(drop, delta)))); \
-	_storeu_w(adj, adjv); _storeu_w(m1, md); _storeu_w(m2, _add_w(md, adjv)); \
-	for(uint64_t i = 0; i < _W - 1; i++) { if(b[i + 1] > b[i] + 128) { flag = 1; } if(b[i + 1] < b[i] - 128) { flag = 1; } } \
-	for(uint64_t i = 0; i < _W - 1; i++) { if(m2[i + 1] > m2[i] + 128) { flag = 2; } if(m2[i + 1] < m2[i] - 128) { flag = 2; } } \
-	if(flag == 2) { \
-		fprintf(stderr, "delta("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", b[i]); } fprintf(stderr, ")\n"); \
-		fprintf(stderr, " drop("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", d[i]); } fprintf(stderr, ")\n"); \
-		fprintf(stderr, "   md("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", self->w.r.md.delta[i]); } fprintf(stderr, ")\n"); \
-		fprintf(stderr, "   m1("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", m1[i]); } fprintf(stderr, ")\n"); \
-		fprintf(stderr, "  adj("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", adj[i]); } fprintf(stderr, ")\n"); \
-		fprintf(stderr, "   m2("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", m2[i]); } fprintf(stderr, ")\n"); \
-		fprintf(stderr, "  sum("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%04d, ", (int8_t)(b[i] + d[i])); } fprintf(stderr, ")\n"); \
-		fprintf(stderr, " mask("); for(uint64_t i = 0; i < _W - 1; i++) { fprintf(stderr, "%c,    ", (int8_t)(~(b[i] + d[i]) & b[i]) < 0 ? '1' : '0'); } fprintf(stderr, ")\n"); \
+	wvec_t ov = _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_add_n(drop, delta), _and_n(drop, delta)))); \
+	wvec_t uv = _and_w(_set_w(0x0100), _cvt_n_w(_or_n(_subs_n(delta, _set_n(0x40)), drop))); \
+	_storeu_w(ovf, ov); _storeu_w(udf, uv); _storeu_w(m1, md); \
+	wvec_t md2v = _add_w(_add_w(_add_w(md, ov), uv), _set_w(-cofs - 0x100)); _storeu_w(m2, md2v); \
+	wvec_t mds1v = _add_w(md2v, _cvt_n_w(drop)); _storeu_w(m3, mds1v); \
+	for(uint64_t i = 0; i < _W - 1; i++) { if(b[i + 1] > b[i] + 128) { flag |= 1; } if(b[i + 1] < b[i] - 128) { flag |= 1; } } \
+	for(uint64_t i = 0; i < _W - 1; i++) { if(m2[i + 1] > m2[i] + 128) { flag |= 2; } if(m2[i + 1] < m2[i] - 128) { flag |= 2; } } \
+	if(flag != 0) { \
+		fprintf(stderr, "overflow detected, flag(%x)\n", flag); \
+		fprintf(stderr, "delta("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", b[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, " drop("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", d[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "   md("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", self->w.r.md.delta[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "   m1("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", m1[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "  ovf("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", ovf[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "  udf("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", udf[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "   m2("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", m2[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "   m3("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", m3[i]); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, "  sum("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%04d, ", (int8_t)(b[i] + d[i])); } fprintf(stderr, ")\n"); \
+		fprintf(stderr, " mask("); for(uint64_t i = 0; i < _W; i++) { fprintf(stderr, "%c,    ", (int8_t)(~(b[i] + d[i]) & b[i]) < 0 ? '1' : '0'); } fprintf(stderr, ")\n"); \
 	} \
 }
 #else
@@ -1704,9 +1750,10 @@ struct gaba_joint_tail_s *fill_create_tail(
 	/* rescue overflow */ \
 	md = _add_w(md, _and_w(_set_w(0x0100), _cvt_n_w(_andn_n(_add_n(drop, delta), _and_n(drop, delta))))); \
 	/* rescue underflow */ \
-	/*md = _add_w(md, _and_w(_set_w(0x0100), _cvt_n_w(_or_n(_sub_n(delta, drop), drop)))); cofs += 0x0100; */ \
+	md = _add_w(md, _and_w(_set_w(0x0100), _cvt_n_w(_or_n(_subs_n(delta, _set_n(0x40)), drop)))); cofs += 0x0100; \
 	md = _add_w(md, _set_w(-cofs));		/* fixup offset adjustment */ \
 	_store_w(&self->w.r.md, md); \
+	_print_w(md); \
 }
 #if MODEL == LINEAR
 #define _fill_store_context(_blk) { \
@@ -3196,6 +3243,7 @@ void trace_init(
 	self->w.l.a.slen = 0;
 	self->w.l.a.seg = sn + (struct gaba_segment_s *)(self->w.l.aln->path + _roundup(pn, 8)),
 	self->w.l.a.plen = plen;							/* save path length */
+	self->w.l.a.padding = 0x40000000;
 
 	/* store block and coordinates */
 	self->w.l.ofs = plen & (32 - 1);
@@ -3203,9 +3251,10 @@ void trace_init(
 	self->w.l.path = self->w.l.aln->path + plen / 32;
 	debug("sn(%lu), seg(%p), pn(%lu), path(%p)", sn, self->w.l.a.seg, pn, self->w.l.path);
 
-	/* clear array */
+	/* clear array (FIXME: is head cap needed? open uint64_t head_cap; before uint32_t path[] and set 0x1<<62) if so */
 	self->w.l.path[0] = 0x01<<self->w.l.ofs;
 	self->w.l.path[1] = 0;
+	self->w.l.path[2] = 0;								/* make sure the memory is "initialized" so that not warned by valgrind */
 	return;
 }
 
@@ -3265,9 +3314,9 @@ struct gaba_alignment_s *trace_body(
 	);
 
 	uint64_t dlen = (self->w.l.a.plen - _hi32(gcnt) - _lo32(gcnt))>>1;
-	int64_t dsc = self->w.l.a.score - _hi32(g) - _lo32(g);
+	int64_t dsc = self->w.l.a.score + _hi32(g) + _lo32(g);
 
-	/* copy */
+	/* copy (overwrite identity and gap counts) */
 	_memcpy_blk_ua(self->w.l.aln, &self->w.l.a, sizeof(struct gaba_alignment_s));
 	self->w.l.aln->identity = dlen == 0 ? 0.0 : (((double)dsc / (double)dlen) * self->imx - self->xmx);
 	_store_v2i32(&self->w.l.aln->agcnt, gcnt);
@@ -3337,22 +3386,29 @@ void _export(gaba_dp_res_free)(
 	v = _add_v16i8(v, _bsr_v16i8(v, 2)); \
 	_ext_v16i8(v, 1) + _ext_v16i8(v, 0); \
 })
+
+#if MODEL == LINEAR || MODEL == AFFINE
+#define _del(_c) { \
+	v2i32_t cnt = _seta_v2i32((_c) > 0, _c); gbc = _add_v2i32(gbc, cnt); \
+}
+#define _ins(_c) { \
+	v2i32_t cnt = _seta_v2i32((_c) > 0, _c); gac = _add_v2i32(gac, cnt); \
+}
+#else
 #define _del(_c) { \
 	v2i32_t cnt = _seta_v2i32((_c) > 0, _c); \
-	debug("del, cnt(%u)", _c); \
 	gbc = _add_v2i32(gbc, cnt); fbc = (_c) > self->bflen ? fbc : _add_v2i32(fbc, cnt); \
-	_print_v2i32(gbc); \
 }
-#define _del_f(_c) { ap += (_c); _del(_c); }
-#define _del_r(_c) { ap -= (_c); _del(_c); }
 #define _ins(_c) { \
 	v2i32_t cnt = _seta_v2i32((_c) > 0, _c); \
-	debug("ins, cnt(%u)", _c); \
 	gac = _add_v2i32(gac, cnt); fac = (_c) > self->aflen ? fac : _add_v2i32(fac, cnt); \
-	_print_v2i32(gac); \
 }
-#define _ins_f(_c) { bp += (_c); _ins(_c); }
-#define _ins_r(_c) { bp -= (_c); _ins(_c); }
+#endif
+
+#define _del_f(_c) { ap += (_c); gcnt += (_c); _del(_c); }		/* horizontal gap; leaq (%r1, %r2, 2), %r1 */
+#define _del_r(_c) { ap -= (_c); gcnt += (_c); _del(_c); }
+#define _ins_f(_c) { bp += (_c); gcnt -= (_c); _ins(_c); }		/* vertical gap; leaq 1(%r1, %r2, 1), %r1 */
+#define _ins_r(_c) { bp -= (_c); gcnt -= (_c); _ins(_c); }
 #define _match_core(_rv, _qv, _c) { \
 	_print_v16i8(_rv); _print_v16i8(_qv); \
 	v16i8_t sp = _swapn_v16i8(_shuf_v16i8(sb, _match_v16i8((_rv), (_qv))), (_c));				/* masked score profile */ \
@@ -3395,7 +3451,7 @@ void _export(gaba_dp_res_free)(
 	} \
 	score += _hadd_v16i8(sacc); debug("score(%ld), dcnt(%lu), xcnt(%lu)", score, dc, xc); \
 }
-#define _nop(_c) { (void)(_c); }
+#define _match_end(_c) { gcnt += (_c)<<8; if((int64_t)ridx > 0) { gcnt = 0; } }
 
 /**
  * @fn gaba_dp_calc_score
@@ -3420,32 +3476,54 @@ struct gaba_score_s *_export(gaba_dp_calc_score)(
 	uint8_t const *ap = a->base < GABA_EOU ? &a->base[s->apos] : gaba_mirror(&a->base[s->apos], 0);
 	uint8_t const *bp = b->base < GABA_EOU ? &b->base[s->bpos] : gaba_mirror(&b->base[s->bpos], 0);
 	_parser_init_fw(path, s->ppos, gaba_plen(s));
+
+	uint64_t harr = gaba_parse_u64(p, lim - ridx - 2);
+	int32_t gcnt = 0xb3000000<<(harr & 0x07) & 0x80000000;	/* == 0 when the last element is M */
 	switch(((a->base >= GABA_EOU)<<1) | (b->base >= GABA_EOU)) {
-		case 0x00: _parser_loop_fw(_del_f, _ins_f, _match_ff, _nop); break;
-		case 0x01: _parser_loop_fw(_del_f, _ins_r, _match_fr, _nop); break;
-		case 0x02: _parser_loop_fw(_del_r, _ins_f, _match_rf, _nop); break;
-		case 0x03: _parser_loop_fw(_del_r, _ins_r, _match_rr, _nop); break;
+		case 0x00: _parser_loop_fw(_del_f, _ins_f, _match_ff, _match_end); break;
+		case 0x01: _parser_loop_fw(_del_f, _ins_r, _match_fr, _match_end); break;
+		case 0x02: _parser_loop_fw(_del_r, _ins_f, _match_rf, _match_end); break;
+		case 0x03: _parser_loop_fw(_del_r, _ins_r, _match_rr, _match_end); break;
 		default: break;
 	}
 
 	struct gaba_score_s *sc = gaba_dp_malloc(self, sizeof(struct gaba_score_s));
-	v2i32_t gc = _sub_v2i32(_add_v2i32(gac, gbc), _add_v2i32(fac, fbc));
-	_print_v2i32(_add_v2i32(gac, gbc));
-	_print_v2i32(_add_v2i32(fac, fbc));
-	_print_v2i32(gc);
+	#if MODEL == LINEAR || MODEL == AFFINE
+		v2i32_t gc = _add_v2i32(gac, gbc);
+		sc->score = (score
+			- (int64_t)self->gi * _hi32(gc)
+			- (int64_t)self->ge * _lo32(gc)
+		);
+	#else /* MODEL == COMBINED */
+		v2i32_t gc = _sub_v2i32(_add_v2i32(gac, gbc), _add_v2i32(fac, fbc));
+		sc->score = (score
+			- (int64_t)self->gi * _hi32(gc)
+			- (int64_t)self->ge * _lo32(gc)
+			- (int64_t)self->gfa * _lo32(fac)
+			- (int64_t)self->gfb * _lo32(fbc)
+		);
+	#endif
 
-	sc->score = (score
-		+ (int64_t)self->gi * _hi32(gc)
-		+ (int64_t)self->ge * _lo32(gc)
-		+ (int64_t)self->gfa * _lo32(fac)
-		+ (int64_t)self->gfb * _lo32(fbc)
-	);
-	sc->identity = (double)(dc - xc) / (double)dc;
+	sc->identity = dc > 0 ? ((double)(dc - xc) / (double)dc) : 0.0;
 	_store_v2i32(&sc->agcnt, _lo_v2i32(gbc, gac));
 	sc->mcnt = dc - xc; sc->xcnt = xc;
 	_store_v2i32(&sc->aicnt, _hi_v2i32(gbc, gac));
-	_store_v2i32(&sc->afgcnt, _lo_v2i32(fbc, fac));
+	_store_v2i32(&sc->afgcnt, _lo_v2i32(fbc, fac));			/* zero for LINEAR and AFFINE */
 	_store_v2i32(&sc->aficnt, _hi_v2i32(fbc, fac));
+	sc->adj = 0; sc->reserved = 0;
+
+	#if MODEL != LINEAR
+		if((uint32_t)(gcnt + 128) > 256) { return(sc); }	/* gap continues from the previous segment */
+
+		/* compensate gap region */
+		uint64_t dir = gcnt < 0 ? 1 : 0, sglen = gcnt < 0 ? -gcnt : gcnt;
+		uint64_t tarr = gaba_parse_u64(p, lim), tglen = tzcnt(tarr ^ (-dir)) - dir;	/* ramaining gap length */
+
+		/* split path by segments */
+		int32_t adj = _gap(self, dir, tglen + sglen) - _gap(self, dir, sglen);
+		while(tglen > 0) { uint64_t glen = (&(++s)->alen)[dir]; glen = MIN2(glen, tglen); tglen -= glen; adj -= _gap(self, dir, glen); }
+		sc->adj = adj;
+	#endif
 	return(sc);
 }
 
@@ -3509,7 +3587,7 @@ int64_t gaba_init_check_score(
 	if(_min_match(p) >= 0) { return(-1); }
 	if(_min_match(p) < -7) { return(-1); }
 	if(_min_match(p) < -2 * (p->gi + p->ge)) { return(-1); }
-	if(p->gfa != 0 && p->gfb != 0 && _min_match(p) < -1 * (p->gfa + p->gfb)) { return(-1); }
+	if(p->gfa != 0 && p->gfb != 0 && _min_match(p) <= -1 * (p->gfa + p->gfb)) { return(-1); }
 	if(p->ge <= 0) { return(-1); }
 	if(p->gi < 0) { return(-1); }
 	if(p->gfa < 0 || (p->gfa != 0 && p->gfa <= p->ge)) { return(-1); }
@@ -3518,7 +3596,7 @@ int64_t gaba_init_check_score(
 	for(int32_t i = 0; i < _W/2; i++) {
 		int32_t t1 = _ofs_h(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
 		int32_t t2 = _ofs_h(p) + (_max_match(p) + _gap_v(p, i*2 + 1)) - _gap_v(p, (i + 1) * 2);
-		int32_t t3 = _ofs_v(p) + (_max_match(p) + _gap_h(p, i*2 + 1)) - _gap_v(p, (i + 1) * 2);
+		int32_t t3 = _ofs_v(p) + (_max_match(p) + _gap_h(p, i*2 + 1)) - _gap_h(p, (i + 1) * 2);
 		int32_t t4 = _ofs_v(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
 
 		if(MAX4(t1, t2, t3, t4) > 127) { return(-1); }
@@ -3546,7 +3624,7 @@ struct gaba_score_vec_s gaba_init_score_vector(
 	#endif
 	_store_sb(sc, _add_v16i8(scv, _set_v16i8(-2 * (ge + gi))));
 
-	/* gap penalties */
+	/* gap penalties; adj, ofs, gfh, gfv */
 	#if MODEL == LINEAR
 		_store_adjh(sc, 0, ge + gi, 0, 0);
 		_store_adjv(sc, 0, ge + gi, 0, 0);
@@ -3559,10 +3637,10 @@ struct gaba_score_vec_s gaba_init_score_vector(
 		_store_ofsv(sc, -gi, ge + gi, 0, 0);
 	#else	/* COMBINED */
 		int8_t gfa = -p->gfa, gfb = -p->gfb;	/* convert to negative values */
-		_store_adjh(sc, -gi, ge + gi, -(ge + gi) + gfa, -(ge + gi) + gfb);
-		_store_adjv(sc, -gi, ge + gi, -(ge + gi) + gfa, -(ge + gi) + gfb);
-		_store_ofsh(sc, -gi, ge + gi, -(ge + gi) + gfa, -(ge + gi) + gfb);
-		_store_ofsv(sc, -gi, ge + gi, -(ge + gi) + gfa, -(ge + gi) + gfb);
+		_store_adjh(sc, -gi, ge + gi, -(ge + gi) + gfb, -(ge + gi) + gfa);
+		_store_adjv(sc, -gi, ge + gi, -(ge + gi) + gfb, -(ge + gi) + gfa);
+		_store_ofsh(sc, -gi, ge + gi, -(ge + gi) + gfb, -(ge + gi) + gfa);
+		_store_ofsv(sc, -gi, ge + gi, -(ge + gi) + gfb, -(ge + gi) + gfa);
 	#endif
 	return(sc);
 }
@@ -3605,7 +3683,7 @@ struct gaba_diff_vec_s gaba_init_diff_vectors(
 	for(int i = 0; i < _W/2; i++) {
 		diff.dh[_W/2 - 1 - i] = _ofs_h(p) + _gap_h(p, i*2 + 1) - _gap_h(p, i*2);
 		diff.dh[_W/2     + i] = _ofs_h(p) + _max_match(p) + _gap_v(p, i*2 + 1) - _gap_v(p, (i + 1) * 2);
-		diff.dv[_W/2 - 1 - i] = _ofs_v(p) + _max_match(p) + _gap_h(p, i*2 + 1) - _gap_v(p, (i + 1) * 2);
+		diff.dv[_W/2 - 1 - i] = _ofs_v(p) + _max_match(p) + _gap_h(p, i*2 + 1) - _gap_h(p, (i + 1) * 2);
 		diff.dv[_W/2     + i] = _ofs_v(p) + _gap_v(p, i*2 + 1) - _gap_v(p, i*2);
 	#if MODEL == AFFINE || MODEL == COMBINED
 		diff.de[_W/2 - 1 - i] = _ofs_e(p) + diff.dv[_W/2 - 1 - i] + _gap_e(p, i*2 + 1) - _gap_h(p, i*2 + 1);
@@ -3713,7 +3791,7 @@ void gaba_init_dp_context(
 		.tx = p->xdrop - 128,
 		.tf = p->filter_thresh,
 
-		.gi = -p->gi, .ge = -p->ge, .gfa = -p->gfa, .gfb = -p->gfb,
+		.gi = p->gi, .ge = p->ge, .gfa = p->gfa, .gfb = p->gfb,
 		.imx = 1 / (m - x), .xmx = x / (m - x),
 		.ofs = 2 * (p->ge + p->gi),
 		.aflen = p->gi / (p->gfa - p->ge), .bflen = p->gi / (p->gfb - p->ge),
@@ -3983,36 +4061,36 @@ struct unittest_context_s {
  */
 #if MODEL == LINEAR
 static struct gaba_params_s const *unittest_default_params[8] = {
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 0, 6)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(1, 2, 0, 1)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 4, 0, 3)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 6, 0, 3)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(4, 5, 0, 8)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(4, 7, 0, 8)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 3, 0, 8)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 7, 0, 5))
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 3, 0, 6)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(1, 2, 0, 1)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 4, 0, 3)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 6, 0, 3)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(4, 5, 0, 8)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(4, 7, 0, 8)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(5, 3, 0, 8)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(5, 7, 0, 5))
 };
 #elif MODEL == AFFINE
 static struct gaba_params_s const *unittest_default_params[8] = {
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 5, 1)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(1, 2, 2, 1)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(1, 3, 2, 1)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 6, 3, 1)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(4, 5, 8, 2)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(6, 7, 5, 3)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 3, 8, 2)),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 7, 10, 2))
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 3, 5, 1)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(1, 2, 2, 1)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(1, 3, 2, 1)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 6, 3, 1)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(4, 5, 8, 2)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(6, 7, 5, 3)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(5, 3, 8, 2)),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(5, 7, 10, 2))
 };
 #else
 static struct gaba_params_s const *unittest_default_params[8] = {
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 2, .gfb = 2),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 4, 5, 1), .gfa = 2, .gfb = 2),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 4, .gfb = 2),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 2, .gfb = 4),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(4, 5, 8, 2), .gfa = 3, .gfb = 3),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(6, 7, 5, 3), .gfa = 4, .gfb = 4),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 3, 5, 2), .gfa = 3, .gfb = 3),
-	GABA_PARAMS(.xdrop = 100, GABA_SCORE_SIMPLE(5, 7, 10, 2), .gfa = 4, .gfb = 4)
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 2, .gfb = 2),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 4, 5, 1), .gfa = 3, .gfb = 3),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 4, .gfb = 2),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(2, 3, 5, 1), .gfa = 2, .gfb = 4),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(4, 5, 8, 2), .gfa = 3, .gfb = 3),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(6, 7, 5, 3), .gfa = 4, .gfb = 4),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(5, 3, 5, 2), .gfa = 3, .gfb = 3),
+	GABA_PARAMS(.xdrop = 80, GABA_SCORE_SIMPLE(5, 7, 10, 2), .gfa = 4, .gfb = 4)
 };
 #endif
 static
@@ -4038,6 +4116,7 @@ void unittest_clean_context(void *gctx)
 	struct unittest_context_s *c = (struct unittest_context_s *)gctx;
 	_export(gaba_dp_clean)(c->dp);
 	_export(gaba_clean)(c->ctx);
+	free(c);
 	return;
 }
 
@@ -4058,6 +4137,86 @@ unittest()
 	assert(c != NULL, "%p", c->params);
 	assert(c != NULL, "%p", c->ctx);
 	assert(c != NULL, "%p", c->dp);
+}
+
+/**
+ * internal tests
+ */
+/* fetchers */
+unittest( .name = "fetch" ) {
+	struct gaba_dp_context_s dp = { { 0 } };		/* clear all */
+	uint64_t lens[] = { 0, 1, 2, 12, 13, 23, 24, 25, 31, 32, 33, 40, 41, 47, 48, 49, 62, 63, 64 };
+	uint64_t ofss[] = { 0, 1, 2, 7, 8, 9, 12, 15, 16, 17, 31, 32, 33, 45, 47, 48 };
+	uint8_t const c[72] = {
+		A, C, G, T, C, T, G, T, A,
+		A, C, G, T, C, T, G, T, A,
+		A, C, G, T, C, T, G, T, A,
+		A, C, G, T, C, T, G, T, A,
+		A, C, G, T, C, T, G, T, A,
+		A, C, G, T, C, T, G, T, A,
+		A, C, G, T, C, T, G, T, A,
+		A, C, G, T, C, T, G, T, A
+	};
+
+	#define _clear() { \
+		memset(dp.w.r.bufa, 0xff, sizeof(dp.w.r.bufa)); \
+		memset(dp.w.r.bufb, 0xff, sizeof(dp.w.r.bufb)); \
+	}
+
+	#define _test_buffer(_msg, _ev, _len, _ofs) { \
+		uint64_t fail = 0; \
+		for(uint64_t idx = 0; idx < (_len); idx++) { if(!(_ev)) { fail++; } } \
+		assert(fail == 0, "%s, len(%lu), ofs(%lu)", _msg, (_len), (_ofs)); \
+		if(fail > 0) { \
+			for(uint64_t i = 0; i < 96; i++) { fprintf(stderr, "%c", decode_table[dp.w.r.bufa[i] & 0x0f]); } fprintf(stderr, "\n"); \
+			for(uint64_t i = 0; i < 96; i++) { fprintf(stderr, "%c", decode_table[dp.w.r.bufb[i] & 0x0f]); } fprintf(stderr, "\n"); \
+		} \
+	}
+
+	/* test seq_a */
+	for(uint64_t i = 0; i < sizeof(lens) / sizeof(uint64_t); i++) {
+		if(lens[i] >= BLK) { continue; }
+		/* fw */
+		_clear(); fill_fetch_seq_a(&dp, c, lens[i]);
+		_test_buffer("seq_a, fw", *_rd_bufa(&dp, BW + idx, 1) == c[idx], lens[i], 0);
+
+		/* rv */
+		_clear(); fill_fetch_seq_a(&dp, gaba_mirror(c, lens[i]), lens[i]);
+		_test_buffer("seq_a, rv", *_rd_bufa(&dp, BW + idx, 1) == comp_mask_a[c[lens[i] - idx - 1]], lens[i], 0);
+	}
+
+	/* test seq_b */
+	for(uint64_t i = 0; i < sizeof(lens) / sizeof(uint64_t); i++) {
+		if(lens[i] >= BLK) { continue; }
+		_clear(); fill_fetch_seq_b(&dp, c, lens[i]);
+		_test_buffer("seq_b, fw", *_rd_bufb(&dp, BW + idx, 1) == c[idx], lens[i], 0);
+
+		_clear(); fill_fetch_seq_b(&dp, gaba_mirror(c, lens[i]), lens[i]);
+		_test_buffer("seq_b, rv", *_rd_bufb(&dp, BW + idx, 1) == compshift_mask_b[c[lens[i] - idx - 1]], lens[i], 0);
+	}
+
+	/* test seq_a_n */
+	for(uint64_t k = 0; k < sizeof(ofss) / sizeof(uint64_t); k++) {
+		for(uint64_t i = 0; i < sizeof(lens) / sizeof(uint64_t); i++) {
+			if(lens[i] + ofss[k] >= BLK + BW) { continue; }
+			_clear(); fill_fetch_seq_a_n(&dp, ofss[k], c, lens[i]);
+			_test_buffer("seq_a_n, fw", *_rd_bufa(&dp, ofss[k] + idx, 1) == c[idx], lens[i], ofss[k]);
+
+			_clear(); fill_fetch_seq_a_n(&dp, ofss[k], gaba_mirror(c, lens[i]), lens[i]);
+			_test_buffer("seq_a_n, rv", *_rd_bufa(&dp, ofss[k] + idx, 1) == comp_mask_a[c[lens[i] - idx - 1]], lens[i], ofss[k]);
+		}
+
+		/* test seq_b_n */
+		for(uint64_t i = 0; i < sizeof(lens) / sizeof(uint64_t); i++) {
+			if(lens[i] + ofss[k] >= BLK + BW) { continue; }
+			_clear(); fill_fetch_seq_b_n(&dp, ofss[k], c, lens[i]);
+			_test_buffer("seq_b_n, fw", *_rd_bufb(&dp, ofss[k] + idx, 1) == c[idx], lens[i], ofss[k]);
+
+			_clear(); fill_fetch_seq_b_n(&dp, ofss[k], gaba_mirror(c, lens[i]), lens[i]);
+			_test_buffer("seq_b_n, rv", *_rd_bufb(&dp, ofss[k] + idx, 1) == compshift_mask_b[c[lens[i] - idx - 1]], lens[i], ofss[k]);
+		}
+	}
+	#undef _clear
 }
 
 /* print_cigar test */
@@ -4455,11 +4614,11 @@ struct unittest_naive_result_s unittest_naive(
 
 	mat[s(0, 0)] = mat[e(0, 0)] = mat[f(0, 0)] = 0;
 	for(uint64_t i = 1; i < alen+1; i++) {
-		mat[s(i, 0)] = mat[e(i, 0)] = MAX3(min, gi + (int64_t)i * ge, (int64_t)i * gfa);
+		mat[s(i, 0)] = mat[e(i, 0)] = MAX3(min, gi + (int64_t)i * ge, (int64_t)i * gfb);
 		mat[f(i, 0)] = min;
 	}
 	for(uint64_t j = 1; j < blen+1; j++) {
-		mat[s(0, j)] = mat[f(0, j)] = MAX3(min, gi + (int64_t)j * ge, (int64_t)j * gfb);
+		mat[s(0, j)] = mat[f(0, j)] = MAX3(min, gi + (int64_t)j * ge, (int64_t)j * gfa);
 		mat[e(0, j)] = min;
 	}
 
@@ -4475,8 +4634,8 @@ struct unittest_naive_result_s unittest_naive(
 			);
 			int64_t score = mat[s(i, j)] = MAX4(min,
 				mat[s(i - 1, j - 1)] + m(i, j),
-				MAX2(score_e, mat[s(i - 1, j)] + gfa),
-				MAX2(score_f, mat[s(i, j - 1)] + gfb)
+				MAX2(score_e, mat[s(i - 1, j)] + gfb),
+				MAX2(score_f, mat[s(i, j - 1)] + gfa)
 			);
 			if(score > max.score
 			|| (score == max.score && (i + j) < (max.apos + max.bpos))) {
@@ -4504,7 +4663,7 @@ struct unittest_naive_result_s unittest_naive(
 	int64_t path_index = max.apos + max.bpos + 1;
 	while(curr.apos > 0 || curr.bpos > 0) {
 		/* M > I > D > X */
-		if(curr.bpos > 1 && mat[s(curr.apos, curr.bpos)] == mat[s(curr.apos, curr.bpos - 1)] + gfb) {
+		if(curr.bpos > 1 && mat[s(curr.apos, curr.bpos)] == mat[s(curr.apos, curr.bpos - 1)] + gfa) {
 			unittest_naive_test_section(&w, curr, 0, 1);
 			curr.bpos--;
 			result.path[--path_index] = 'D';
@@ -4518,7 +4677,7 @@ struct unittest_naive_result_s unittest_naive(
 			unittest_naive_test_section(&w, curr, 0, 1);
 			curr.bpos--;
 			result.path[--path_index] = 'D';
-		} else if(curr.apos > 1 && mat[s(curr.apos, curr.bpos)] == mat[s(curr.apos - 1, curr.bpos)] + gfa) {
+		} else if(curr.apos > 1 && mat[s(curr.apos, curr.bpos)] == mat[s(curr.apos - 1, curr.bpos)] + gfb) {
 			unittest_naive_test_section(&w, curr, 1, 0);
 			curr.apos--;
 			result.path[--path_index] = 'R';
@@ -4778,7 +4937,7 @@ struct gaba_section_s *unittest_build_section_forward(char const *const *p, uint
 {
 	struct gaba_section_s *s = calloc(UNITTEST_MAX_SEQ_CNT + 1, sizeof(struct gaba_section_s));
 
-	uint64_t len = pos + UNITTEST_GABA_HEAD_MARGIN + UNITTEST_GABA_TAIL_MARGIN;
+	uint64_t len = pos + UNITTEST_GABA_HEAD_MARGIN + UNITTEST_GABA_TAIL_MARGIN + _W;
 	for(char const *const *q = p; *q != NULL; q++) { len += strlen(*q) + 1; }
 	char *a = calloc(1, len); a += pos + UNITTEST_GABA_HEAD_MARGIN;
 	uint64_t i = 0;
@@ -4803,7 +4962,7 @@ struct gaba_section_s *unittest_build_section_reverse(char const *const *p, uint
 {
 	struct gaba_section_s *s = calloc(UNITTEST_MAX_SEQ_CNT + 1, sizeof(struct gaba_section_s));
 
-	uint64_t len = pos + UNITTEST_GABA_HEAD_MARGIN + UNITTEST_GABA_TAIL_MARGIN;
+	uint64_t len = pos + UNITTEST_GABA_HEAD_MARGIN + UNITTEST_GABA_TAIL_MARGIN + _W;
 	for(char const *const *q = p; *q != NULL; q++) { len += strlen(*q) + 1; }
 	char *a = calloc(1, len); a += UNITTEST_GABA_HEAD_MARGIN;
 	uint64_t i = 0;
@@ -5092,12 +5251,27 @@ void unittest_test_pair(
 	assert(unittest_check_section(r, nr.sec, nr.scnt), FMT, ARG);
 
 	/* calc score */
+	int64_t score = 0;
+	uint64_t mcnt = 0, xcnt = 0, agcnt = 0, bgcnt = 0;
 	for(uint64_t i = 0; i < r->slen; i++) {
 		struct gaba_score_s const *c = _export(gaba_dp_calc_score)(dp,
 			r->path, &r->seg[i], &s->a[r->seg[i].aid>>1], &s->b[r->seg[i].bid>>1]
 		);
-		(void)c;
+		assert(c != NULL);
+
+		score += c->score + c->adj;
+		mcnt += c->mcnt;
+		xcnt += c->xcnt;
+		agcnt += c->agcnt;
+		bgcnt += c->bgcnt;
+		assert(c->identity >= 0.0 && c->identity <= 1.0, FMT ", identity(%f)", ARG, c->identity);
 	}
+	assert(score == nr.score, FMT ", score(%ld, %ld, %ld)", ARG, score, m->max, nr.score);
+	assert((2 * (mcnt + xcnt) + agcnt + bgcnt) == nr.path_length, FMT ", path_length(%lu), mcnt(%lu), xcnt(%lu), agcnt(%lu), bgcnt(%lu)", ARG, nr.path_length, mcnt, xcnt, agcnt, bgcnt);
+	assert((mcnt + xcnt + agcnt) == nr.alen, FMT ", alen(%lu), mcnt(%lu), xcnt(%lu), agcnt(%lu), bgcnt(%lu)", ARG, nr.alen, mcnt, xcnt, agcnt, bgcnt);
+	assert((mcnt + xcnt + bgcnt) == nr.blen, FMT ", blen(%lu), mcnt(%lu), xcnt(%lu), agcnt(%lu), bgcnt(%lu)", ARG, nr.blen, mcnt, xcnt, agcnt, bgcnt);
+
+	/* FIXME: test gap counts */
 
 	/* cleanup everything */
 	unittest_clean_section(s);
@@ -5113,7 +5287,7 @@ void unittest_test_pair(
 	#undef ARG
 }
 
-unittest( .name = "base" )
+unittest( .name = "base", .params = &unittest_default_params[5] )
 {
 	struct unittest_seq_pair_s pairs[] = {
 		/**
@@ -5379,6 +5553,22 @@ unittest( .name = "base" )
 		{ .a = { "GGCATCAGGTTGCGACC", "AACGACAGATCACTGGTGTAACTTAAC", "G", "AGGCATTACTTGTAG" }, .b = { "GGCATCAGCTTGCGACC", "AAGCGCAGGATCACTGGTGTGGAAACTGTT", "G", "AGGCTGTTTACTCGTAG" } },
 		{ .a = { "GTAGT", "TCAATATTAGACGATGGCTGCTTTCCTCAG", "TTCATCTGC", "GTAGGGAAGGCCCCTTAATGCGCGGATCGATATT" }, .b = { "GTAGT", "TCCATATTAGACGAAGGCTGCGGTCTCG", "TTATCCTGC", "GCAGGAGAGGCCCCTTAATGCGTGGATCGAATATG" } },
 		{ .a = { "ACAAAAAGATCGGTC", "ATGGGACGTTGACAGCGGGGTGATCGGTCTTGGCAA", "GTACCATGTA", "CGGAATACCGCGCAATCCTTTGTAAATGTAGAGACTTCAATCTACTTTAGGTC" }, .b = { "ACTAAAAGTCGGAC", "ATAGACGTTCACAGCGGTGATCCGGACTTGGCAA", "GTACCATGTA", "CGGAGTACCACGCACTCCTTTATAAAGTAGAGACTTAAATCCTACTTGAATGGC" } },
+		{ .a = { "CTCACTGCCACACACGGTTCG", "ACCCACTTTAGCATATCC", "GCCTTTCG", "GCTTGAAGGTCCAAGATGTATTTCAGATTGGGTCCGGCAAAGCAGACCGAGGTCTTTTTGCCACGCTAGTATCGTTGACACTGAACATATCGAGTGTGTGCTCTCAGTCTAGGGGGAGCACTGCCCAATTGCGTAAAGTCGTTAGCTGAAGCTCTAGTCGGTTATTATCAATTTACATTATGGTTCTCAATGAGGTCTGTTGGGCGACCTGCCAAACTGCACTAACTCACATTTGACGCTCTATTATATCCTTATTGGAGTCGGAAGCGAATTAGTAGTATCTGCTCTCGGCTATTAGAGGCCCCAAGGAGCCCAGACGGTATGAGCAAGGGTTAATAGCAATCGTAGAGAAGTGGGAGGGACCTCCTCAAGATTGGTCTCCTTCCCTCTCTTGATTGGCGGTGGGCAGGTTTGTAAATCACCTTCGTTAACTTACCCCTTCTGTGTTGGCGTGGTTAGTCGAACACGCGGATCTTTGGCATAACGT", "GCATTATACAGGTATGCGCAAAGATGACATGGAGGTGCTTGGGCGCTATCATCGTAAACATTTACCTAGTTACCCTGCTCGAATGATTAC", "TAGTGTTG" }, .b = { "GTGTCGCTGCCCTCACACCGCTCG", "ACCACTTTAGCATTCC", "GCCTTTGG", "GCTTGAAGGTCCAAGCTGTATTTCAGATTGGGTCGGCTAAGCAGACTGAGGTCTATTTGCACACGCTAGTATCGGTGACACTTCACATATTCGAGTGTGCGCTCTCAAGTCTAGGGGAGCACGCCGACATTGCGTAAAGTCAGTTAGATAGAAGCTCTAAGTCGGTAATTATTAAGTATCATTATGGGTCTCCAGAGGTCTGTTGGGGACCTGCCAAACTGCACTAACTCACATTTGCGCTTATTATATCACTTATTGGAATCGGAAGTGAATTAGTAGTATCTGCTCTCGGCTATTAGAGGCCCCCATGACTCAGCGCGATGAGACCAAGGTCAAGTACCAATCGTAGAGTAAGGCGAGAATCCTCCTTCAGATCGGCTCTTCCCTCTCTTGATTGGCGGTGGGCAGATTTATAATCACCTTCGTTAACCCAGCCCTTACTGTGTTGTCGATGGTAAGTCGAGACCCCGGATCTTTGGCATAAGT", "GCATTATACAGGGATGGCCAAGTTGACACGGAGTGCTGGGCGCATTTTCGTAAACATTTACCTAGATTACCATGCTCGAATCAGATTAAGC", "TAGTGGTTG" } },
+		{ .a = { "GCTAGTTACAAACCCG", "AGAATCCGAAG", "TTCAGCGGAGTA", "TGTAAAAGACCCGACGGACCCCTGTCGCATTTCTTCTATTCCCTCGCTTGAATTTGCCTCAGCCCAGAAGACTCAATCTGTTTGGGATTTCAGGCTGAATGAACCCCAGATGTGACACCTAGTGACGGCGCTGGATTCTCCGTAAACACGACATAAAGTCAAAGGACCCATGTGGTGAATGACTTCTATGCTTGCCGGTAGGGCACCTCCGTCTGAAGATAGGTATCGCAGAGCCGGGCTTAGATCCATCTTTGTTCAGTAATGCAATTGGGGCTCGACCCCACTTAATGTTTGCATGAGAGAGTTTCTCGCGTGCGGCGCCCATTAGCAACTCTGAGAATGCCCTGACAGGCTGAGTTTTTAGATCCGCCCTGTCCCCGCTCGGTTCGGAGCCAGACTGGAAGGTTTAACGTGACGTGACTGTATCAAATTATCGGACGAGATCCATATTGGGCGCGGCGCAGACAGCCCCTCAAGCTTATCGCGAGAGTGAAAACATTCAAACCCAGATGTAAAGAGGGGAGGATTAGGCGTCTAGTGTGAGGATAACGGTGCCGACGGTTAGCTGTTAGCACAAAAACTTCCAGAATGGTGGCTCAGAACGCGGCGGGTCCATCTTCGCTCTCTGGTCTTGCAATGGCACTCGGGCCTTGGCGTAACTCAGTCTTACCGCTCGCTAGATCGCGAAGCCCGGAGTTCAATGCGTTTGTCGGGATCCTTGACAGCGGAAGATACCTAACTCTCTTAAATAGTCTGGCAGCGGAGTCCTCGGGCTGATGCGGTCTGTCATTCCCGTATATCGCTTACATACCGATGTGTTGTATAGTCGTATGGGCGACGAGTGTGAGCACTTCGTACAGCCCTTTACTGTTATGTCGCGGGCCAACACCGGGTCCGGTGAGCACTATGCCAATGATTAAAGTTCAA", "GTCGGTTTGTGAAACATTAGGAGGGCCTGGTACATTTGTGCCGCCTGAGGGATCTCGACAGACAAATAGGGTAAACAGGGCATACGCAGGACGCCTCATT", "CGTCTACCGAGTTGACAATGCACGCAAGTTCAGACCATGTTCGGTGTTTGGATTGATGGGGTGATTCAGTTCACTATGTGCCGAACATTTCCGTCGTGGCGCTGGGGCCGAGTGGATGTTCCAAAGGTAACGCACTGTATCACCTTCGGACTCGTGACCACGTGGACC" }, .b = { "GCTCTGTTACCAAACGCG", "AGAATCCTAAGG", "TTCAAGCGGAGTA", "TGTAAAAGCCCCGACGGATCCCCTCTCGCAGTTCTTATTCCCTTGTTAGAATTTGGCCCTCAGCCCAAACACTCATCGGTTTTGGATTTCAGACTGAATGAACCCCTGATTGTACACCTAGAGCCGGCGCTGGATTCTCCGTAAGCACACATAAAGTCAAACGACCCATGAGGTGAAAGACTTTCTAATGCTTCCGTAGGCGGACTTCCGTCTGAAGATAGGTATCGCAGGGCCGGCTTAGATCCATTTTGTTTCAGTAATCAATCGGCGCTCGCCCCCACTTATGTTTGCGTGAGAGAGTTTCTCGGGTTGCGGCGTCCATCAGCAACTCTGAGATGGCCACAAGGGTGAGTTTTAGATCCGCTCTGTGCCCGTCGTGTTCGGAGCCAACTGGAAGGTTTAAGGATCGCGATCTAGCATCTCAATTATCGGTCGAGATCGTATGGAGCGCGGCGCAGACATCCCTCAAGCTGTTATCGCCAGAATTGAAACCATACAACCCAGATGCTAAACAGGGGAGGATTAGAGCGTCTAGAGTCAGGTAACGGTGCCGCACGGGTTAGCTGTTGCACAGAAACTTCAGGAGATGTCTCTGAACGCGGCGCGTCCACTTCGCTCTTGGTTCATGTAATGGCACTTCGGGCCTTGGCGTAACCAGTCTTACACGTCGCTAGGTCGCGAGACCGGAGTTCAACTGCGTTTTGTCGGATCCTTGACAGGCGGAAGATATCTAACTATCTTAAATAGTCGTCACTGCAGCCCTCGGGCTAATGCGGTTCTTCATTTCCGTATATCGCTTACATACCGATGGTTAGTACAGTCTAGTGGGCGACGAGTGTGGGCACTCGTACAGCCCTTTAATGTAAGCCGCGGACACACCCGGCTCCGGTGAGCACTATGCAATGATTAAAGTCAA", "GTCGGGTTTATCAAACATTAGAGGGCCTGATACAATTGGTGCCGCCCGAGGGACCTGGACAGACAATCAGGTAACAGGGCATAAGCATGACGCCTCATC", "CGTATGCCGTAGTTCACAATGCACGCAAGTTCACGACCATGTTCGGTGTTTGGTTTGAGGGAGGATTCAGTTCACTATGTCGTGAACATTTCCGTGGTGGCGCTGGGGCCGGTGGCTGTCCAAAGGTAACGCGCTGCTTCACCTCGGACTGTGACGCGTGGCC" } },
+		{ .a = { "AGGTCGCGGCTTAGGCGCGATGGC" }, .b = { "GGTCGCGTCTTAGGCCGATGGC" } },
+		{ .a = { "CTCCCCAACCACAGAAGCTCTAAAGA" }, .b = { "ATCCTCAGACGAACATGTCGCCCTAGG" } },
+		{ .a = { "GGTATTTGAATCGTGAACCCC", "TCCCGAGTTCGGCCGATGAGTGCGGGTTTAGGCTATTGTGTCCCGTCGC", "AAAGGTAGGTG", "CATCTTAGCTTGAGCGAGAATAGCTGTGCGGTGGACCAAGATCACGGCCGGATACGTCAATTTCCAGGAGAAGCCTATCCGTCCTGTGTATGTGTAGGGTAGTGAAGAATCGGGTCAGAAGTGCCGCAATTAGGTGTCGTATCGCATCGTCCGAGAGAATTGCCCTAGCTGAAACAATTTAAGAGGGGGAGCTTGATTTAGCCTGGTGCGCGGTGCCCTTCCAACTCAGAAACCTTATCCCTTAGGCATATAGACTTGTCGTCTCCTCAAGCTGCGAGGTTCTCCAAAGTCAGTATATAATTCTCTCCCTAAATCGACGGAATTTTGTGTTCGAATTCACAACCTTTTACGCCCAAAGTGCGTTTAGGCGTGGCTGAGCATTCCACCAACGCTGCGGTCTGACACAGCGAGGTTTACAACCTGCCTTTTAGCCACGAAATAGCTCATGAATGTGTACGTATCCACTGGTGCTAGGGGGAGGAACGTCTGAACCCCTATCTGGGGACAGTCACCCGTATGGTGTAATAAAAGGGAGTCAGGCTTGCGGAACTTAATCTTCATTGGTCCACAGGTCACTTCAACTACGCACGACCTTCAACCAAAACACCTGCTTAAAGCCTACACATGAAAGAAGACGCGGATCTTCACTCCTGCATCTTCTCCTTGAGTTATGCTGTTTGAACGGCCTACATGCGGTTATGAGACCGAAGGAGTTACATCCTCACTGAGGTAGGCTTTAACGAAGTATAAACTCCACTCTCAATGCTGATGGCGGTGGGGGTTGACGCATCGACCGGAAGTGACCGATCTCTGACGCAAGTCATGCGAGGGCCTGGCTCGGGGAGTGATGGTTGGCTACCTATATCGAATTGCCGTACTATCTTTCAGGACGTCCCTCCGAATCGGGTGGTTCGTGGGAAGCGGGTTCCATCAGTTCCGTTCGATCGGTTGGACATATACTATAGGTTTCGGTCGGGAAGTTAAAATATTGGTCGGTCCGTAAGCGATGCCGACGACCAAAGTATCGGTTAGTAAAGAACCCTCTCCAGGCGAAGACAGAATGTTGAGTATACGGATTCCCGTGGGGTGAAGTGGTCGCAGAATGGACGCGTTCCCTTAGAAATTGGAATAGTAGCTGGCTAAGGGTCCTTCAACTGTTTTTCGTTAGCGTATAGCGCGTCGCCGGAACTTAGCTCATAGCTGATCCCGACTGGAAAAACTAGCCCTCATTCGGGGTTTCTACCGC", "GGACGGTTTGATCAATGGCCGCGCCTTACAGTGGAAA", "TTCAGGATGGCTTTACCGCAGGAACTTCTTCTTGTCCTATCGGACTCGCGGTATTCGGTCGAACGTGTGTGTCCTGACCCTTAAGTCAGAGAAGCTGTGAGCATGTGGATTAGTACGCCAGTAGGCCACAATCATTACCAAAAGTATCGCGAAGGGAAGCATACTTATACAACATACGCTTTTAGCGGCCTCATGTTGTTTTAATTAACGTCCGCTATCCAATAACATATGTGGACCAGTGCAAACTAACCCCACCGCAGATCGCCATGGGATGATTATTCCAGCGATTACATTGCAGAGAGTAATTTTTGAATTCCTCATGATTAGCAAGGTGGTCCGATTAGGGTCTAACATTTTCCTCTCCCTAGAGTACTGTCGAAGCGGACGAGTTTGCATAACCTACAATACCAGTCAGGCAGTTCGCGTATTCAGGCTGATTGTCCCCTTGTCCGGATCTTAGCACTCACCTATGGCTTAGGATTGGTGTGCTCGTGCAGGCCTCTCGTAGCGGCGCTCTGAACCTATAACTCGGGCTAATTGGCTAGGCCACGCGCCCCCGAGAGCGCCGCAATGTTACAGCGAGACTGGAATTCCATTCCAGGTACGATGGAAGTCTGTGTTCGAGGTCTCCCTACAGGTCAACTTGGCCAACCGCAACCAGTCCTTCGCCTCCAAATTCATGCCATCCGCGCGTCCATGCGAGGAGCTAGTGTAGGCTGTAACTTGAACTCTTACTGTTGCGAAGTTTGCGTGTGCCGCGCTCATTACGTATCATTTGGGAACGATTCCCATACTTATAGGACTCCGATAGTCTCCGCGAGGTGAGCAGCTAGAATCGTCTGAACGCATTACGTTGCAGTCCATGAGTGGACACCCTGCGGCTAAGGGGACTGCTACCTATACTCTCACGGTACTATCGCGAAACTATCTTATAAATCACTGATTAAGCGTTGATATTTATGCGGCTGGTTCGTCCTCACTTAGTAGTTCTGTACCCATTTGCCGGTCTTGGGTAGTGCGTACGCGAGGTGCGTTACGCACAGTTTCGCGACCTATTGCTATCTGCAAGACGTACGGTTAAATCATCTGGGGCTGTAGTTTACGCTATGTTGATAAGCTATGTCCCAGTACGAGACCAAAAAGATGACTTGTCCATGACCAGACAAGGCTGCTACGTCTGACCGGCCAGGGGAGTAGGGTCAAACCGAGCGTTACCCGGTAAGAGCAATTAATAAAGGAAATTTTAAAGGAGGGGATTCTGCTCCAGTGGAGCTCAAGCGACCTTTTGGACACCGTCAGTGGGAGTAGCCAGGCCCCAATCCAGGGCTGATAGCAAACGGGTACACGCCGCGACCGTGGCGCCCGGCGTAACTAGTCCCTTGCTTGGGCATTCAATGGCCGGTCGCAAGCTGTACGTTAATTTAAATGGCAATTCCACCTTACGCGCAGCACCTGCTCTCGTCCGGTTAAGTCTCGCGGTAGCCCTGCACGTCAATGTGGAACCTTTCCCACTCGAAACCGAATAAGGACCACGCCCAGTCGAAATAATGCCGCAGGTAGACGCATGCTAAATCATAATTGCCAGCGAATGAAAGATAGGCGGATGTTTGTCTAGGCAGGTCGACAACCGTGCGGAACATTTCTTTCATTGTACTGCTTGGGATAGTCTTATGCGCATGAGATTCGCTCACTGGGTA" }, .b = { "GGTATTTAAAATCCGTGACTCC", "TCGAGTTCTGCCGATAGTGCGGGTTTACGCTAATGTGTCCCGGTCGC", "AAAGGTAGGTG", "TATTTAGCGTGAGCGAGAATAGCTGGCGGTGGACCAAGGTCACGGCGGCTACGTCACTATGCCAGGAGAACTTTCCTCCTGTGATGTGTACGCAGTGAAGGAATCGGGTCAGGAGTGCCGCAATTAGGTCTCGTATTCTCACGTCCGAGAGAGTGACCCTTGCTGAACAATTTAAGAGGGAGCTTGATTTGAGCCTGGTGGCGGTGCCCTTCGCACCTTCCCAGAAACCTTGATCCCTAGGCATTTAGACTTGTCGTCTCCTCAAGCATGCGAGGTTCTCCAAAGTCAGTAAATACTTCCTCCCAAGAACTCAACGGAATTTTGGTTCGATTCACACCTTTTACGCCCAAAGGTGCGATATGACGTAGGCTGAGCATTCTATCCAACGCTGCGGCTGACACAGTGAAGGTTTACCACCTGCCTTTTAGCCACGAAATAGATTCATGAATGAGCACGATCCACGTCGGTGCTAGCCGGGAGGAACGTCGGAACCCCTATCTGGGGAACAGTACAGCTGTATGTGTCATAAAAGGGGTCAGTGCTTAGCCAATGTTTAATCTTCATTGGTCCAAGGGTCACTTCACTACGCAGGACCTTCACCCAGATCCATCTGCTTAAAGCCTAATCATGAAAGAAAACGCGTGATCTGTCACTCCTGCATCTTCTCCTTGAGTTATGACTGTTGAACGCGCCTTCATGCGGTTATGAACCGAAGAAGTTACATACCTCACTGTAGGTAGGCTGTAAGGCGAAGTATAAACTCCACCCTCAATGCTGATGGCGGGTGGGGGTTGACGCTATCCCCGGAATTGACCGTTTCTGACGAGTTCATGCGAGGGCCCTGGTCGGTACGAGTGATGGGTTGGCTACTATATCGATTGCCGTACTTCTCTATCATGGCCGGCCTCCGTAATCGGGTGGTTCGTGGGAGCCGGGCCATCAGTTCCGCTCGATCCGGTTGGACATATATTTGCATTATCGTCGGGGAAGTTAAAATATTGGTCCGTCCGAAGCGTGCCGCGACGAAAGTCTCGGTTGTTAAGAACCCTCTCCAGGCGGAGGAGAATGTGCAGTACTTACGGATTCCCGTGGGTTGCAGTGTCGCAGAATCGACGCGTTCCCTATAGTATTGGAATAGTAGCTTGGCTAAGGGTCCTTCAACTGTTTTGCATTAGGGTGTAGTAGAGGCCTCGCGGACTTAGCTCATAGCTTATTCGACTGGAAGACAGCCTCATTTGGGGTTTCTACCCC", "GGGACGTTTGCGCAAGTCACGCGCGTACGTGGAA", "TTCAGGATGCTTTACTGCGGAACTTCCTTCTTGTCCTATCGGACTCGCGGTATTCGGGCGAACGTTGGATTCTGACCCTCTAAGTCAGAGAAGCTGTGAGCCAGCTGGTATTAGTACGCCAGTAGGACAAATCATTACCCAATAGACGAGAAAGGAAGCATACTTAACAATACACATTTTACGGCCTCTGTTGTTTTAATTAACGTCGCTATCTCAAAAACAATGTGGACCAGTGCAATCACTAACCCGACCGCAGACGCCAAGCGGATGATTATATGCAGCGATTACATTGGAGAGCGTAATTTTTGAATGCCTCATGATCTAGCGAGGTGGTCCGATTCGGTCTAACATTTTACTCTCCCTATGAGTCTGCCAAGGCCGCGTTTCGCATAACCTTACAATAGAATCAGGAGTTGGGCGTAATAAGCGATTGTCCCCTTGTCCGGGATCTTAAGCACTCACCCTCGCCTTAGGATTGATGTGGTCGTGCATGCCTCTCGAGCGGAGCCTGAACCTATAACTCGGGTAATTGGCTAGGCCACGCGCCCCCGAGAGCGCCGAAATGTTTCAGCGATACTGAATTCCCATTCCGGTGACGATGCGAGTCTGTGTTCGGGGTCTGCTACAGAAGTCAAATTGGCCAACCCAACCTAGACCTCGCCACCACATATCATGCCATCCAGCGCGACCATGGGAGGACTAGTGTAGGCTTTAACTTGCAACTTTACTTGTGCGAAGTTTCGTCTGCCGCGGCTCATTACGTACCATCTTGGGAACGATCTCCCATACTTATAGGTCCTCGATAGTCTCCGCTGAGGTGAGCAGCTAGAATCGTACTGCCAGCCTTACGTTGCAGTCACAATGAGTGGACACTCTGCGGTAAGGGACTGCCACCTATACATTCTTCAGGTACTATCGCGAAAATATCTAATAAATTCACATGATGAGCGTTATATTTATGCGGCTGGTTCCGTCACACTTAGTAGTTCTGTACCCATTTGCCGGTCGTGGGTAGTGCGTACGCGAGGTGCTTCGACAGTTTCGCGAACATCTATAGCTATCTGCAAGACGTACGGTCAAATCTATCTGGGGCGTGTAGTTTATGCTATCGGTGATAAGCTATTTTCAGTACGAGACCAAAAAGATTATTGTCCATGACCAGACAAGGTTGCTACAGTCCACCGGTCCAGGGGATAGGGTCAACGGACGTTACGCGTTAAGAGCAATTTAATTAAGAGAAATTTTAAAGAGGGGGATCTCTGCTCCAGTGGGGCTCAAACGGACCTTTGGACACCGTCAGTGGGAGTAGCCTAGGCCCCAATCCGGGTCTGAGTTGCCAAAAGGATACACGGTGCCGACCGTGGCGCCCGGCGTAACTAGTCCTTGCTAGGCTTTCAATGGCCGGTCGCACAAGCCTGCACGTTATAATTTTAATGGCACTCCACCTTTACCGCAGAACCTGCGTTCACGTTCCGAGTTAGTCTTGCAGGAGCCCTGCACGGCACTGTGGAACCTTTCCCACTGTAACCGAATAAGACCACGGCCCAGTCGAAATATGCGTGCAGTACACGCACTGACAAATCATAATTGCCTGCGAATCAAAGGATAGGCGTTGTTTGTCGGGCAGGTGGATAATCGTGCGGACCATTTTCTTTCATTGTACTAGCTTTGGGATAGTCTTACGCGAAAGTGAGATTCGCTCACTGAGTA" } },
+		{ .a = { "GGGCATCCGCGAGTCTGACCAACTTGATTTGGCATCAA", "GG", "GA", "TATACAAGGTCATCTGTCAACCACAGTGAATAAGACGATATCAGGAACCACGGCAGTTAATTATCACAAAATCCCTCCCGGGCAACGTATTAGTTATAATCAGGCTGGCTCTCGTCTCCTAATTATTTTTTATCTCCCTGAACCGATCCACGAACATAATTTTGAGTCTTTTTACGAATGAAAACCCACCTAATGACGGCCCAAGCGGCGACGAGTCTAGATGAGCAATGCAACAGTTAACCGTCATTTTCTGATCCTCAGGAGTAAGTATACCATCTGAGTTATGCACGATAACACCGAGCCTGCGTAATGAGGTAAAGGACTCTTGACGGTTGCAACACAGCTCATCACTCTGGGCAGTGCGGTTGTATACCCAGGTTGCTTACCGTCAGACAGATAAATACCGCTAATGCGGCTTTGCAACCATGATGATGCAAGTAGGTAACCAACGCCTGGTCATCGTACAACGTGCGCCGGGGGTCAAAGTTATTCGGCTTCACAGGGTTCCGTACAAGAGCAGATTGCACACGGGAAAAACCGCCTCCCGAGGGTCGCGGTTACCGCCGCCATTCATGGAAGTGAGTGTGCGCCTGTCTCGCCCAGGTCAACGTAGCTCACGTGTGAGTATGCCTCTCCACCGTAGGCCTCTCACATGGGGCATGAAGCCGTGAGGGATATCTACAAAGGTAATTGTAACCTAATGGGTGGGTCTACTCAGAAGTAATACACAACTGACCGTACATCGGGGAGGGGGTCGACAACCTTCCCTACACAGTGACTTTCCGAGAATAAAGATTCATCCTGCCCAGGTCGAGACAACTCGTTGGGTTCAACTGGAGATCCCCTCGTCAGGGCCAAATTCTTGGCCTTCGATTGGAAGCAAAGGCGGCCCTCACTGGGCAAGTTACTATCCACTGGGAATCTACAATTGCTTTGGTTGTTTATAACGGCGCGCGTGGTCAAATTGGGCACATGTTGACACACTCTTTCGAGGACCGTTATAAGGACAATAGTGCACAATGACACGCTGATCCAATACAAAAGTGAAAAATTAATCGCCACAGGAGGATGCAGTTCTTCATATAAGCGTGTCTCTTTCAGTCGGAGTACAACATCACGGCCCGAGCTCTTAGAGACATCGTCTTAATCGGGTTATGGTTCGTTTGAAGTCATGTGGTGTGAGCTGCCAACCGACCGCCCAGCTAC", "GAAGGAAATGCCTCGATGC", "CGGGTCTGCAAACAGTAGTAAACTCTACCCGGAAATCACTAGTCGCCTTATTCATGTTTAACTAGTTTTCGATCCCGGACTTCATAGGTGTTTGACCTCCATCTCGCTCCCACGAAGGTCAGAAAACCAGGAGTATGCGTGTTTCTATCTAGCCGCCTGCGCGAAGTGTCCCCACGTCGCAGTCTCGCAAGGCAGGGCACTGTAGAGGCATCTGGGTATTAGGGGAACGAGCGCCCCTTGAGTTACCTCCGGTAACCAGTACATGCAAATGACGTCTCACGGTCTTGATCTTGTGAAGAACTCGCATACTCTGAACTTCGAAGGTAGTTTTAGATTCGTGGCGACGCCCGTCGCTCGGACCTCTAAGCTCTCGCCAAGCCAATGGGTAATCCGGAGTGTGATTGAAGAGTGGACAGTTGAGTCACGTAAGGACCTGCCGTCACCCCTCACCGAGTCAGGCAACGGAATGGTTTAAAGTCGAGCACACCGTGGAAAGAACGTACGCCGTAACAGGATGGCACTTCTTTAACGTCACGCTCGTTGGCTCACGAGGTACTTCTAAGGATACGGTGCGAGCCGGATAGGATCACAACGGCCTGACGGGAGACTTTTGTCAACGAGGATCTAGGGGTAACAGCCGAACGATTAACAGTACATCTCTCAAGCAATGGTGAGGTCGTGGCCTGGGTCAGGAGAGTCCCTATTGGGTACCTGTGACATGAGACACTTGAACAACTGTGGCACTTTAAATGACGCGTACCAGTCGAAATGGAGAACTACTTTACGCTCGATGGGTAGTACGTGATGGGGTGCTGGCTCGCGCAATTCCTCTCACCTTTGCTAGGGCTCGCTATTCGGGACTTGAAATTTCAGCGATTTCGCAGATTGCCGTCCCCCCAACGATTTATGTAAAATATGTAACTCTCGAGGCTACTAATTTGTTTTGTGCGGCAGGTTATCGACTGATGTGCCCCAATAGAGACGGTCCTCTGCACTAAGTGTATACTACCATCGGACTCCAATGAACAATTGTACTCATGCACGGTGTTAATATCCTTCTGCCCCGCGGAATACGGCAGAAGTCGCGCATCGAGACCCTTCTTGCCAGCGGGCCTTGCAGACCCACGCGGATCTCGAGAGAGACATAGACCAGGCGTATCGAATTGGAAGGACGGCCGTCTACGGTACTAGCATATCGTCCCCGTTTAGGCCTTTCGATCACGAAG" }, .b = { "GGAGCCTCGCGAGATCTGACCAAATTGATAAGGCATCAA", "GG", "GT", "CATACGAAGGGCATCTGTCAACCAAGTGATAAGACGATAACAGGACTCACGGCAATTTAATTATCACAAAATCCTTCCCGGGCACCGTATTAGTTAAGATCAGGCTGGCTCTCGTCTCCTAGTTAATTTTTTATCTCCCTGAAGCCGTCTCAACGAACATTATTTGTGAGCTATTACGAATGAAAACCCACCCTGATGCGGCCAGCCGCGACGAGTCTAGTTGAAGCATGCAACAGTTAACCTCTATTTTCTTATCTAAGGAGTAATTATACCATCTGAGTCTATGCGCGATAACAACGAGACACGCGATGAGAATAGGACCTGACGGTTGCAACACTAGCTCATCACTCTGGGCGTCGAGTTGTGTATACCCAGGTTGCTATCCGTCAGACAGATAAATACCCAATGCGGCTTTGCACTCCAGGATCATGCAGTAGGTAACCAACGCCTGGTAGCGTAGAAGTGTGTTGGGGGTCCAGTGATTCGGCTTCAAGGGTTCCGTACAAAGCTAGATTGCAGCACGGAAAAACCGCCCCCAAGGGTTCGCTGGTTAGCCGCGCCATTACTGGAGGTGGTGTGTCGCTCGTTCGCCGGGGTCCACGTAGCTCACTGTGAGTATGCCTCTCCAACGTAGCTCTCACATGGGGCATGACAGCCGTGAGGGAATATCTACAAAGGTAATGTAATCTAACGGGTGGGTGTAGTAGAGTAATCCCAATCTGACCGTACATCGGGGAGGGGGTCGCAACCTTCCTACACAGGACTTTCCGGACACAAAAGATTCTGGCTCCCAGGCGAGACAACGTCGTTGAGGTTCAACTGGATATCCCCTCGTCAGGGACCAACATTTCTTGACTTCGTTGGAAGCAAAGGGGCCTCACTGGGCAGTTCACTTGGCCTGGGAACTCTACAATTCTGTCTGCTTATTTATAACGGCGCGCGTGTAATATTGGGCACATGTGACACACTCTCTCGCAGACGTTATGAGGACAATACTGCACAATGACACGGAATACAAACCAAAAGTAAAAATTAATCGCCACAGTAGATGCTATTCTTCATAGTACGCGATGCTCGTTCAGTCGAGTACAAACCATCCCGGCTCGAGCCTTAGAGACATCGCCTGAATCGGGCTTATGGTTCGTTTGAGGTCATGTGGGGTGAGCTGCCAACCGACCGCCCTAGCTAC", "GAAGGAATGTTCCTCAAGTGC", "CGGTCCTGCAAACAGTGGTAAGCTCTACCCGGAAATCACTGAGTCGCCTTAAATTATGTTTAACTTAGCTTTCGATCCGGACTTCAAAGTGTTTGACCCCCATCCTCGCTCCCACGAAGGTCAGGAAACCAGAGATATCGGGTTACTATCTAGCCGCTGCGATAATTGCCCCCGGCTCACGTCTCTCAAGGCAGGGCATTGTAAAGGCATCTGGGTATTAAGGGGAACAGCGCCACCCTTGAGTAACCTCGTAACCAGTAAATGCAATGACGTCGTCATGGTCTTGATTCTTGGTGACGAACTCGCATAACTCTGACCTTCGAAGGCAGTTTTAGTTCGTGGCGGCGCCCGTGGTCGGACCTCTAAGCTCTCACCAAGCCAATGGGTAATCCGGAGTATGATTACGAGTGGACACGTTGGGTCACGTAAGGACCTTCTCGTCACCCCCCAACGAAGGCAGGCCACGAATGTTTAAAGTCGAGCATCTACCGTGGAAAGAACGTACGCCGTAACAGGATGGCACTTCTTTAACGTCACGCTCGTTGGCTCACGAGGTACTCACAGGATAGGGCGACCGGATAGGATCACATCGGCCTGACGGGAGACATTTGACAACGAGGATCAAACGGGTAAAACATCCGATCGGATTAACAGGATCATCTATCAGCATGTGGTGAGTCGTTGGCCGTGGGTCAGGAGAGTCCCTTTGGGTACGGTGACATGAGACACTTGAACTACTTGGCACCATAAATGACGTGAACCCAGTGAAATGGAGAACTAGTTTACGCTCGATCGGTGTAGGTGATCGGGTGCTGGCTCGCGCATGTTCCTCTCACCATTTCCTAGGGCTCGCTATCGGGACTGAAATTTCTGCGATTTCGCAGTATTCGCGGCCCCCCAACGCTTTATGTAACATATTTAACTCTCGAGGCCTACTAATTTGCTTTGTGCCGATGAACGACCGATGTGCTCTCAAATGGCACGGTCCTGCTGCAAGAAGTGTATACTACCATCGGACTCCAAGATGAACAATTGTGCACATGCACGGTGTTAATATCCTCAGCCACGCGGAAACCAGCAGCAGTCGCGCTCGACACCCTTGTTCCAGCGGGCCATGCGACCCAGGCGGATCTCGGAGAGAGTCATGGACCTAGGCGTTACGATTGGAAGGGCGGCCGCTACGCTGACTAGCATACCGTCCCCCGTTAGACTTTCGTCACGAAG" } },
+		{ .a = { "ATACTCAATGAGCGCATCCGTCTGAAGCAATATACGC", "TAATGCCTGACTGAAGTAGCCGCCGCCATGGGTGCCTTCCTGC", "GCACGGGTCAATCCT", "ACTTTAATTCATTCCGTCTCTGAAGCATGTTGCGCATGTGTACTCGCATACTGGTATTTCTTAACCAATATTAAGCTTGGTTCGCCGAAGGTCGTGTATTAGGAGACCTTAGTCAAGTCTCTGGCGAAGTTGCCGACTCATCTGTTGCGTATGTCTCGATCTCTCTTGGATCGGTCCGGACTTAGCTTTTGATTTAGGGATCGCTCGCTACCTACCCAAAAGCTCATTTCAGTGTGTCTTCAACCCGGCTTCCAATATGTCGCAAAGACGTTGTATAGGCCCTTCTGCTACATGATTGTAAGTTCTGCGATTCGGGCAAACCAATATGTTTTCGGTGCAACTTTCGCTGCTTGATGATATGTTTGCGAGTAAGTTACATAGGTAGTGTGTGAGCTATGACCACTAATCCGCTCCTTAGGGCCGTGCACTATACAACCTGGGACTCAGCGCTTGCTAGTGGTCGACGCGGAAAACTCGCGAGCAAGTCAGTGCACGCTTACTACTGAAAGGAATACCTGGCCATCCCGCAGGATATCAACGGCTGGATCGCTTGGATTGATCTTATTCTTGGCTCTCCTTTAGGGAGGTAGGCCGCACGAAAGCATCCAAATAGCTGTCCTTACCGGCTCCTCTACGCTGCTCGGGCACGGCCGGGAAATCCGTCGATATGCTTTCGACTGTAACGGCTGAAAGTCCAACTGGGGGTAGCTCAACGGTTCGAGGGCTTCTACGTTACTATATAATCGGCGTTGCCATA", "ATACCTCCAACAACAAAGTGTCGGTTTTGTTTGAAATCCACTACAAGAGCTCGCTCAGATCAGAAGATACTCA", "TAACCGGAAACTCCGC" }, .b = { "ATACTCAAAGAAGCATCCTCTATGCAATATATGC", "TAATGCCTGACTGAAGTAGCCGCCGCCATGGGTGCCTTCCCGC", "GCAGGCAACCCT", "ACTTTAATTCATCCGCTCTCATGAACTGTTCGCGCATGTGTACTCGCATACTGGCTTTTCTTAACATATTAAGCTTGGTTCGCCAAAGGTCGTGTATGAGAGCTTTTAGGTCAATCTCCTGTCAAGTTGCCGACTCATCTGTTGCGTATGTCACGATCGCTCTTAGATAGTTCCCGGACTAACTTTTGATTTAGGATCGCTCGCTACCTCCCAAAACCTCATGTCAGAGTGTCCTTCAAATCCCGGCTTCCAATATGTCGCAAAGGGGTTGTATGGCCCTTCTGCGAATGATTGTAGTTCTGCGATTCGGGCAAACCAATATGTTTTCGGTGCAACTTTCCTTCTTGATGATAATTTTGCCGTTAAGTTACATAGGCTGGTCTGGTGAGCTAAGACCACTAAATCCGTCCACTTACGGCCGTGCACTGATACAACTGGCTCAGCGCTGTCTTAGTCGTCGACCGGAAATACTCGGCGAGCAGCAAAGCACTCTTACTACTCAAAGGAATACCTCGCATCCGCGGCTATCAACGGCTGGTCGTTGGATTGATACTTATTCTTGGCTCTCCTTTGGGGAGGTAGGCCGCACGAAACATCCCCGATAGCTGCCCTTTACAGGTCCTCTAACGCTGATGTGGGAGGCCGGGGAAATACGTGATATGCTTCACGCCCTTCACAGTGAAGAGTCCACGGGGGTAGCTCAACGTTCAGGGTTTCTACGTTAGTATATAATCGGAGGTTGCCATA", "ATACCCCAACAACAAAAATTCGGGCTTTGTTGAATCCACTACAAGTCGTTCAGACAGAATACTCA", "TAACCGGCAACTCGGC" } },
+		{ .a = { "AAAAGCGGGA", "CCCAATATTCACTTGATTCGTCTTTA" }, .b = { "AAAAGCGG", "CGCAATAATTCACTTATTCGACTCTGA" } },
+		{ .a = { "C", "TATAGCCTGTTGAAACAAACATGGATCTTGGGGCTCGAAAATTATTCTACCACTGCGTAC" }, .b = { "G", "TTCTAGCCTGTTGAAAGCAACAATGGATCTTGGGGCTCGAAATTATTACTACCATTGTGTAC" } },
+		{ .a = { "C", "CAACCGAGCCCGTAATTAAA" }, .b = { "A", "TAGCCGAGCCCGAAATTAAA" } },
+		{ .a = { "GACGTTT", "TCCTCCGGCTCGCATGAAATA" }, .b = { "GACGTA", "GCCTCCGGCGCGCATGAAATA" } },
+		{ .a = { "AGGTCACCTGCACCCTTGC", "CCTATAGCAGCCATACTCGGTTTACATATAGAGGCCGTGGCTTGTTTGAGCTCAT" }, .b = { "AGGTCAACTGCACCCTTGA", "GAGTATAGAGCCATACTAGGTTTACATATAAGGCCGTTGGTCTTGTTTGAGCTCAT" } },
+		{ .a = { "TATGCCT", "CTGTTATTGGTCACACTA" }, .b = { "TATGCA", "ATGTTATTGGGTCACACTA" } },
+		{ .a = { "ATAGTCAACAACTGAGCAGAGCATATTATCCAACGTGT", "TTTAGCCAGCGTATTTAGGACTCC" }, .b = { "ATAGTCAATAATCTGACCGGAGTCATATTATATCCAACGTGG", "GAGGCGCCAGCGTATTTAGGAATTCC" } },
+		{ .a = { "CTAAACTCTTGTTTT", "CCTCATCTCACCACCCACGATCGGAACAAAGCCCGGATCGT" }, .b = { "CTAAACTCTAGTAA", "CCTCATTCAACCACCCCGCGTCGAACAAGACCGGATCGT" } },
+
 		/* fails for affine-16 due to the bandwidth shotage */
 #if 0
 		{
@@ -5387,13 +5577,20 @@ unittest( .name = "base" )
 		}
 #endif
 	};
+	uint64_t j = 5; {
+	// for(uint64_t j = 0; j < sizeof(unittest_default_params) / sizeof(struct gaba_params_s *); j++) {
+		struct gaba_params_s const *p = unittest_default_params[j];
+		struct gaba_context_s *g = _export(gaba_init)(p);
+		struct gaba_dp_context_s *l = _export(gaba_dp_init)(g);
 
-	struct unittest_context_s *c = (struct unittest_context_s *)gctx;
+		for(uint64_t i = 0; i < sizeof(pairs) / sizeof(struct unittest_seq_pair_s); i++) {
+			_export(gaba_dp_flush)(l);
+			unittest_test_pair(UNITTEST_ARG_LIST, p, l, &pairs[i], 0);
+			unittest_test_pair(UNITTEST_ARG_LIST, p, l, &pairs[i], 1);
+		}
 
-	for(uint64_t i = 0; i < sizeof(pairs) / sizeof(struct unittest_seq_pair_s); i++) {
-		_export(gaba_dp_flush)(c->dp);
-		unittest_test_pair(UNITTEST_ARG_LIST, c->params, c->dp, &pairs[i], 0);
-		unittest_test_pair(UNITTEST_ARG_LIST, c->params, c->dp, &pairs[i], 1);
+		_export(gaba_dp_clean)(l);
+		_export(gaba_clean)(g);
 	}
 }
 
@@ -5467,6 +5664,7 @@ unittest( .name = "cross" )
 	uint64_t const cnt = 5000;
 
 	struct unittest_context_s *c = (struct unittest_context_s *)gctx;
+	struct gaba_stack_s const *stack = NULL;
 
 	for(uint64_t i = 0; i < cnt; i++) {
 		struct unittest_seq_pair_s pair = {
@@ -5484,6 +5682,14 @@ unittest( .name = "cross" )
 		for(uint64_t j = 0; pair.a[j] != NULL; j++) {
 			// pair.b[j] = pair.a[j];
 			pair.b[j] = unittest_generate_mutated_sequence(pair.a[j], 0.1, 0.1, _W);
+		}
+
+		/* issue flush / save-reload randomly */
+		switch(rand() % 100) {
+			case 0: _export(gaba_dp_flush)(c->dp);							/* fall through to save the head */
+			case 1: stack = _export(gaba_dp_save_stack)(c->dp); break;		/* always overwrite */
+			case 2: if(stack != NULL) { _export(gaba_dp_flush_stack)(c->dp, stack); stack = NULL; } break;
+			default: break; /* do nothing */
 		}
 
 		unittest_test_pair(UNITTEST_ARG_LIST, c->params, c->dp, &pair, 0);
