@@ -4,7 +4,9 @@ CC = gcc
 GIT = git
 
 # compiler flags
-CFLAGS = -O3 -Wall -Wno-unused-function -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
+OFLAGS = -O3
+WFLAGS = -Wall -Wno-unused-function
+CFLAGS = $(OFLAGS) $(WFLAGS) -std=c99 -pipe -DMM_VERSION=\"$(VERSION)\"
 LDFLAGS = -lm -lz -lpthread
 
 # default version string is parsed from git tags, otherwise extracted from the source
