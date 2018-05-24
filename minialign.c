@@ -5808,7 +5808,7 @@ static void mm_opt_parse_line(mm_opt_t *o, char const *arg)
 	kv_foreach(char const *, ptr, { *p += (ptrdiff_t)str.a; });
 	kv_push(char const *, ptr, NULL);
 	mm_opt_parse_argv(o, ptr.a);
-	free(ptr.a);
+	free(str.a); free(ptr.a);
 	return;
 }
 
