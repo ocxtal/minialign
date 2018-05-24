@@ -3686,10 +3686,8 @@ uint64_t mm_chain(
 {
 	/* reserve space for map and chain */
 	kv_reserve(mm_seed_t, self->seed, self->seed.n + self->seed.n);
-	if(cnt == 0) {
-		kv_reserve(mm_root_t, self->root, self->seed.n);
-		kv_reserve(uint64_t, self->next, self->seed.n);
-	}
+	kv_reserve(mm_root_t, self->root, self->seed.n);
+	kv_reserve(uint64_t, self->next, self->seed.n);
 	self->root.n = 0;
 	self->next.n = 0;
 
