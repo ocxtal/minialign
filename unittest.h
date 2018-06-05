@@ -267,7 +267,7 @@ struct ut_s {
 	static void ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__)(UNITTEST_ARG_DECL); \
 	static struct ut_s const ut_build_name(ut_info_, UNITTEST_UNIQUE_ID, __LINE__) = { \
 		/* file, unique_id, line, exec, fn, name, depends_on */ \
-		__FILE__, UNITTEST_UNIQUE_ID, __LINE__, 1, ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__), \
+		__FILE__, UNITTEST_UNIQUE_ID, __LINE__, 0, ut_build_name(ut_body_, UNITTEST_UNIQUE_ID, __LINE__), \
 		__VA_ARGS__ \
 	}; \
 	struct ut_s ut_build_name(ut_get_info_, UNITTEST_UNIQUE_ID, __LINE__)(void) \
@@ -292,9 +292,8 @@ struct ut_s {
 #if UNITTEST != 0
 #define unittest_config(...) \
 	static struct ut_group_config_s const ut_build_name(ut_config_, UNITTEST_UNIQUE_ID, __LINE__) = { \
-		.file = __FILE__, \
-		.line = __LINE__, \
-		.unique_id = UNITTEST_UNIQUE_ID, \
+		/* file, unique_id, line, exec, name, depends_on */ \
+		__FILE__, UNITTEST_UNIQUE_ID, __LINE__, 0, \
 		__VA_ARGS__ \
 	}; \
 	struct ut_group_config_s ut_build_name(ut_get_config_, UNITTEST_UNIQUE_ID, 0)(void) \
