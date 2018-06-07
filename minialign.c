@@ -5926,6 +5926,9 @@ static void mm_opt_tags(mm_opt_t *o, char const *arg)
 		oassert(o, l == 2, "unknown tag: `%.*s'.", l, p);
 		kv_push(uint16_t, o->tags, mm_encode_tag(p));
 	});
+
+	/* alias tag array */
+	o->b.tag = o->tags.a; o->b.n_tag = o->tags.n;
 	o->r.tag = o->tags.a; o->r.n_tag = o->tags.n;
 	return;
 }
