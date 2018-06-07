@@ -6263,10 +6263,11 @@ int mm_print_help(mm_opt_t const *o)
 	_msg(3, "    -P           omit secondary (repetitive) alignments");
 	_msg(2, "    -Q           include quality string");
 	_msg(3, "    -R STR       read group header line, such as `@RG\\tID:1' [%s]", o->r.rg_line ? o->r.rg_line : "");
-	_msg(3, "    -T STR,...   optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []");
+	_msg(3, "    -T STR,...   optional tags: {RG,CO,AS,XS,NM,NH,IH,SA,MD} []");
 	_msg(3, "                   RG is also inferred from `-R'");
 	_msg(3, "                   supp. records are omitted when SA is enabled");
 	_msg(3, "                   tags in the input BAM file will also transferred");
+	_msg(3, "                   fasta/q comments are saved in CO tag");
 	_msg(2, "");
 	if(o->verbose < 3) {
 		_msg(2, "  Pass -hh to show all the options.");
