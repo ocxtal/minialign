@@ -2360,7 +2360,7 @@ static _force_inline
 void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k, uint64_v *b)
 {
 	sk->w = w; sk->k = k; sk->b = b;
-	_memset_blk_u(sk->r, UINT64_MAX, sizeof(uint64_t) * 32);	/* fill UINT64_MAX */
+	_memset_blk_u(sk->r, 0xff, sizeof(uint64_t) * 32);			/* fill UINT64_MAX */
 	return;
 }
 
