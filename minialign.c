@@ -5850,37 +5850,34 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 		char const *key; char const *val;
 		struct mm_preset_s const *children[6];
 	};
-	#define _pre(_k, _v, ...)	&((struct mm_preset_s const){ .key = (_k), .val = (_v), .children = { __VA_ARGS__ } })
+	#define _n(_k, ...)		&((struct mm_preset_s const){ (_k), __VA_ARGS__ })
 	struct mm_preset_s const *presets[] = {
-		_pre("pacbio", "-k15 -w10 -a2 -b4 -p4 -q2 -r3,3 -Y50 -s50 -m0.3",
-			_pre("clr", "", NULL),
-			_pre("ccs", "-b5 -p6 -p2", NULL)
-		),
-		_pre("ont", "-k15 -w10 -a3 -b5 -p6 -q2 -r3,3 -Y50 -s50 -m0.3",
-			_pre("r7", "-b4",
-				_pre("1d", "", NULL), _pre("2d", "", NULL)
-			),
-			_pre("r9", "", 
-				_pre("4", "-a2",
-					_pre("1", "", _pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL), NULL),
-					_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
-					NULL
-				),
-				_pre("5", "-a2",
-					_pre("1", "", _pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL), NULL),
-					_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
-					NULL
-				),
-				_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
-				NULL
-			),
-			_pre("1d", "-a2", NULL), _pre("1dsq", "-a2 -b6 -r4,4", NULL), _pre("2d", "-a2 -b6 -r4,4", NULL),
-			NULL
-		),
-		_pre("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05", NULL),
-		NULL
+		_n("pacbio", "-k15 -w10 -a2 -b4 -p4 -q2 -r3,3 -Y50 -s50 -m0.3", {
+			_n("clr", ""),
+			_n("ccs", "-b5 -p6 -p2")
+		}),
+		_n("ont", "-k15 -w10 -a3 -b5 -p6 -q2 -r3,3 -Y50 -s50 -m0.3", {
+			_n("r7", "-b4", { _n("1d", ""), _n("2d", "") }),
+			_n("r9", "", {
+				_n("4", "-a2", {
+					_n("1", "", {
+						_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4")
+					}),
+					_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4"),
+				}),
+				_n("5", "-a2", {
+					_n("1", "", {
+						_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4")
+					}),
+					_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4"),
+				}),
+				_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4"),
+			}),
+			_n("1d", "-a2"), _n("1dsq", "-a2 -b6 -r4,4"), _n("2d", "-a2 -b6 -r4,4"),
+		}),
+		_n("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05")
 	};
-	#undef _pre
+	#undef _n
 
 	struct mm_preset_s const *const *c = presets - 1;
 	mm_split_foreach(arg, ".:", {		/* traverse preset param tree along with parsing */
