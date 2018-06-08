@@ -6233,7 +6233,7 @@ int mm_print_help(mm_opt_t const *o)
 	*/
 	_msg(2, "Options:");
 	_msg(2, "  General:");
-	_msg(2, "    -x STR       load preset params [ont]");
+	_msg(2, "    -x STR/FILE  load preset params [ont] / load config file");
 	_msg(2, "                   {pacbio.{clr,ccs},ont.{r7,r9}.{1d,1dsq,2d},ava}");
 	_msg(2, "    -t INT       number of threads [%d]", o->nth);
 	_msg(2, "    -d FILE      index construction mode, dump index to FILE");
