@@ -2360,7 +2360,7 @@ static _force_inline
 void mm_sketch_init(mm_sketch_t *sk, uint32_t w, uint32_t k, uint64_v *b)
 {
 	sk->w = w; sk->k = k; sk->b = b;
-	_memset_blk_u(sk->r, UINT64_MAX, sizeof(uint64_t) * 32);	/* fill UINT64_MAX */
+	_memset_blk_u(sk->r, 0xff, sizeof(uint64_t) * 32);			/* fill UINT64_MAX */
 	return;
 }
 
@@ -3686,10 +3686,8 @@ uint64_t mm_chain(
 {
 	/* reserve space for map and chain */
 	kv_reserve(mm_seed_t, self->seed, self->seed.n + self->seed.n);
-	if(cnt == 0) {
-		kv_reserve(mm_root_t, self->root, self->seed.n);
-		kv_reserve(uint64_t, self->next, self->seed.n);
-	}
+	kv_reserve(mm_root_t, self->root, self->seed.n);
+	kv_reserve(uint64_t, self->next, self->seed.n);
 	self->root.n = 0;
 	self->next.n = 0;
 
@@ -5810,7 +5808,7 @@ static void mm_opt_parse_line(mm_opt_t *o, char const *arg)
 	kv_foreach(char const *, ptr, { *p += (ptrdiff_t)str.a; });
 	kv_push(char const *, ptr, NULL);
 	mm_opt_parse_argv(o, ptr.a);
-	free(ptr.a);
+	free(str.a); free(ptr.a);
 	return;
 }
 
@@ -5829,7 +5827,16 @@ static int mm_opt_load_conf(mm_opt_t *o, char const *arg)
 		kv_reserve(char, str, 2 * str.n);
 	}
 	fclose(fp); kv_push(char, str, '\0');
+	for(uint64_t i = 0; i < str.n; i++) {
+		if(str.a[i] == '\n' || str.a[i] == '\t') { str.a[i] = ' '; }
+	}
+
+	/* parse */
 	mm_opt_parse_line(o, str.a);
+
+	/* cleanup */
+	o->log(o, 1, __func__, "loading preset params from `%s': `%s'", arg, str.a);
+	free(str.a);
 	return(1);
 }
 
@@ -5843,37 +5850,34 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 		char const *key; char const *val;
 		struct mm_preset_s const *children[6];
 	};
-	#define _pre(_k, _v, ...)	&((struct mm_preset_s const){ .key = (_k), .val = (_v), .children = { __VA_ARGS__ } })
+	#define _n(_k, ...)		&((struct mm_preset_s const){ (_k), __VA_ARGS__ })
 	struct mm_preset_s const *presets[] = {
-		_pre("pacbio", "-k15 -w10 -a2 -b4 -p4 -q2 -r3,3 -Y50 -s50 -m0.3",
-			_pre("clr", "", NULL),
-			_pre("ccs", "-b5 -p6 -p2", NULL)
-		),
-		_pre("ont", "-k15 -w10 -a3 -b5 -p6 -q2 -r3,3 -Y50 -s50 -m0.3",
-			_pre("r7", "-b4",
-				_pre("1d", "", NULL), _pre("2d", "", NULL)
-			),
-			_pre("r9", "", 
-				_pre("4", "-a2",
-					_pre("1", "", _pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL), NULL),
-					_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
-					NULL
-				),
-				_pre("5", "-a2",
-					_pre("1", "", _pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL), NULL),
-					_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
-					NULL
-				),
-				_pre("1d", "", NULL), _pre("1dsq", "-b6 -r4,4", NULL), _pre("2d", "-b6 -r4,4", NULL),
-				NULL
-			),
-			_pre("1d", "-a2", NULL), _pre("1dsq", "-a2 -b6 -r4,4", NULL), _pre("2d", "-a2 -b6 -r4,4", NULL),
-			NULL
-		),
-		_pre("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05", NULL),
-		NULL
+		_n("pacbio", "-k15 -w10 -a2 -b4 -p4 -q2 -r3,3 -Y50 -s50 -m0.3", {
+			_n("clr", ""),
+			_n("ccs", "-b5 -p6 -p2")
+		}),
+		_n("ont", "-k15 -w10 -a3 -b5 -p6 -q2 -r3,3 -Y50 -s50 -m0.3", {
+			_n("r7", "-b4", { _n("1d", ""), _n("2d", "") }),
+			_n("r9", "", {
+				_n("4", "-a2", {
+					_n("1", "", {
+						_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4")
+					}),
+					_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4"),
+				}),
+				_n("5", "-a2", {
+					_n("1", "", {
+						_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4")
+					}),
+					_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4"),
+				}),
+				_n("1d", ""), _n("1dsq", "-b6 -r4,4"), _n("2d", "-b6 -r4,4"),
+			}),
+			_n("1d", "-a2"), _n("1dsq", "-a2 -b6 -r4,4"), _n("2d", "-a2 -b6 -r4,4"),
+		}),
+		_n("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05")
 	};
-	#undef _pre
+	#undef _n
 
 	struct mm_preset_s const *const *c = presets - 1;
 	mm_split_foreach(arg, ".:", {		/* traverse preset param tree along with parsing */
@@ -5928,6 +5932,9 @@ static void mm_opt_tags(mm_opt_t *o, char const *arg)
 		oassert(o, l == 2, "unknown tag: `%.*s'.", l, p);
 		kv_push(uint16_t, o->tags, mm_encode_tag(p));
 	});
+
+	/* alias tag array */
+	o->b.tag = o->tags.a; o->b.n_tag = o->tags.n;
 	o->r.tag = o->tags.a; o->r.n_tag = o->tags.n;
 	return;
 }
@@ -6231,8 +6238,8 @@ int mm_print_help(mm_opt_t const *o)
 			"");
 	*/
 	_msg(2, "Options:");
-	_msg(2, "  Global:");
-	_msg(2, "    -x STR       load preset params [ont]");
+	_msg(2, "  General:");
+	_msg(2, "    -x STR/FILE  load preset params [ont] / load config file");
 	_msg(2, "                   {pacbio.{clr,ccs},ont.{r7,r9}.{1d,1dsq,2d},ava}");
 	_msg(2, "    -t INT       number of threads [%d]", o->nth);
 	_msg(2, "    -d FILE      index construction mode, dump index to FILE");
@@ -6262,10 +6269,11 @@ int mm_print_help(mm_opt_t const *o)
 	_msg(3, "    -P           omit secondary (repetitive) alignments");
 	_msg(2, "    -Q           include quality string");
 	_msg(3, "    -R STR       read group header line, such as `@RG\\tID:1' [%s]", o->r.rg_line ? o->r.rg_line : "");
-	_msg(3, "    -T STR,...   optional tags: {RG,AS,XS,NM,NH,IH,SA,MD} []");
+	_msg(3, "    -T STR,...   optional tags: {RG,CO,AS,XS,NM,NH,IH,SA,MD} []");
 	_msg(3, "                   RG is also inferred from `-R'");
 	_msg(3, "                   supp. records are omitted when SA is enabled");
 	_msg(3, "                   tags in the input BAM file will also transferred");
+	_msg(3, "                   fasta/q comments are saved in CO tag");
 	_msg(2, "");
 	if(o->verbose < 3) {
 		_msg(2, "  Pass -hh to show all the options.");
