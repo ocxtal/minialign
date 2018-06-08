@@ -5827,7 +5827,16 @@ static int mm_opt_load_conf(mm_opt_t *o, char const *arg)
 		kv_reserve(char, str, 2 * str.n);
 	}
 	fclose(fp); kv_push(char, str, '\0');
+	for(uint64_t i = 0; i < str.n; i++) {
+		if(str.a[i] == '\n' || str.a[i] == '\t') { str.a[i] = ' '; }
+	}
+
+	/* parse */
 	mm_opt_parse_line(o, str.a);
+
+	/* cleanup */
+	o->log(o, 1, __func__, "loading preset params from `%s': `%s'", arg, str.a);
+	free(str.a);
 	return(1);
 }
 
