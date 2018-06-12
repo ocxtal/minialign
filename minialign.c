@@ -1983,20 +1983,21 @@ uint64_t bseq_read_bam(
  * @fn bseq_read_fasta
  * @brief parse one sequence, returns 0 for success, 1 for buffer starvation, 2 for broken format
  */
-static _force_inline
+// static _force_inline
 uint64_t bseq_read_fasta(
 	bseq_file_t *restrict fp,
 	bseq_seq_v *restrict seq,		/* src */
 	uint8_v *restrict mem)			/* dst, must have enough space (e.g. 2 * buffer) */
 {
 	#define _id(x)					(x)
+	#define _escape(x)				( _sel_v32i8(x, sv, _eq_v32i8(x, tv)) )
 	#define _trans(x)				( _shuf_v32i8(cv, _and_v32i8(fv, x)) )
 	#define _forward_state(_state)	fp->state = _state; case _state
 	#define _cp()					if(_unlikely(p >= t)) { goto _refill; }
 
 	/* keep them on registers */
-	v32i8_t const dv = _set_v32i8(fp->delim == '@'? '+' : fp->delim);
-	v32i8_t const sv = _set_v32i8(' '), lv = _set_v32i8('\n'), fv = _set_v32i8(0xf);
+	v32i8_t const dv = _set_v32i8(fp->delim == '@' ? '+' : fp->delim);
+	v32i8_t const sv = _set_v32i8(' '), tv = _set_v32i8('\t'), lv = _set_v32i8('\n'), fv = _set_v32i8(0xf);
 	v32i8_t const cv = _from_v16i8_v32i8(_load_v16i8(encaf));
 
 	bseq_seq_t *s = &seq->a[seq->n - 1];		/* restore previous states */
@@ -2014,7 +2015,7 @@ uint64_t bseq_read_fasta(
 			_strip(p, t, sv); _cp();
 			s->name = (char *)_init(q, mem->a);
 		_forward_state(3):
-			m = _readline(p, t, q, sv, _id); _cp();
+			m = _readline(p, t, q, sv, _escape); _cp();
 			p++;								/* skip '\n' or ' ' after sequence name */
 			s->l_name = _term(s->name, q, mem->a);
 			s->n_tag = m & fp->keep_comment;	/* set n_tag if comment line found */
@@ -2024,7 +2025,7 @@ uint64_t bseq_read_fasta(
 			_strip(p, t, sv); _cp();
 			*q++ = 'C'; *q++ = 'O'; *q++ = 'Z';
 		_forward_state(5):						/* parsing comment */
-			_readline(p, t, q, lv, _id); _cp();	/* refill needed, comment continues */
+			_readline(p, t, q, lv, _escape); _cp();	/* refill needed, comment continues */
 			p++; while(q[-1] == ' ') { q--; }	/* skip '\n' after comment, strip spaces at the tail of the comment */
 			if(s->n_tag == 0) { q = mem->a + (ptrdiff_t)s->tag; }
 		_seq_head:
