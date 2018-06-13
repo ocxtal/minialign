@@ -5021,7 +5021,7 @@ uint64_t mm_print_sam_num(
 	uint8_t type,
 	uint8_t const *p)
 {
-	switch (type) {
+	switch(type) {
 		case 'a': _put(b, *p); return(1);
 		case 'c': _puti(int8_t, b, (int8_t)*p); return(1);
 		case 'C': _puti(uint8_t, b, (uint8_t)*p); return(1);
@@ -5062,11 +5062,8 @@ void mm_restore_sam_tags(
 		/* print body */
 		if(p[2] == 'Z') {
 			/* string */
-			p += 3;
-			while(*p) {
-				_put(b, *p); p++;
-			}
-			p++;
+			for(p += 3; *p++;) { _put(b, p[-1]); }
+			// p += 3; do { _put(b, (*p == '\t' ? ' ' : *p)); } while(*p++);
 		} else if(tag_size[p[2]&0x1f] == 0xfe) {
 			/* array */
 			uint8_t type = p[3];
