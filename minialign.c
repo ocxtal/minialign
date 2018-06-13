@@ -2563,6 +2563,15 @@ typedef struct {
 
 /* opt.h */
 /**
+ * @enum mm_opt_type_t
+ */
+enum mm_opt_type_t {
+	MM_OPT_BOOL = 1,
+	MM_OPT_REQ = 2,
+	MM_OPT_OPT = 3
+};
+
+/**
  * @struct mm_opt_parser_t
  * @brief option parser function prototype
  */
@@ -5686,23 +5695,7 @@ void mm_print_mapped(mm_print_t *b, mm_idx_seq_t const *ref, bseq_seq_t const *t
 }
 /* end of printer.c */
 
-/* main.c */
-
-/**
- * @fn liftrlimit
- * @brief elevate max virtual memory size
- */
-static _force_inline
-void liftrlimit()
-{
-#ifdef __linux__
-	struct rlimit r;
-	getrlimit(RLIMIT_AS, &r);
-	r.rlim_cur = r.rlim_max;
-	setrlimit(RLIMIT_AS, &r);
-#endif
-}
-
+/* opt.c */
 /**
  * @macro mm_split_foreach
  * @brief split string into tokens and pass each to _body.
@@ -5780,12 +5773,12 @@ int mm_opt_parse_argv(mm_opt_t *o, char const *const *argv)
 		if(_isarg(q)) {											/* option starts with '-' and longer than 2 letters, such as "-a" and "-ab" */
 			kv_push(void *, o->parg, mm_strdup(q)); continue;	/* positional argument */
 		}
-		while(o->t[_x(*++q)].type == 1) { o->t[_x(*q)].fn(o, NULL); }/* eat boolean options */
-		if(*q == '\0') { continue; }							/* end of positional argument */
-		if(!o->t[_x(*q)].fn) { oassert(o, 0, "unknown option `-%c'.", *q); continue; }/* argument option not found */
-		char const *r = q[1] ? q+1 : (p[1] && _isarg(p[1]) ? *++p : NULL);/* if the option ends without argument, inspect the next element in the jagged array (originally placed after space(s)) */
-		oassert(o, o->t[_x(*q)].type != 2 || r, "missing argument for option `-%c'.", *q);
-		if(o->t[_x(*q)].type != 2 || r) { o->t[_x(*q)].fn(o, r); }/* option with argument would be found at the tail */
+		while(o->t[_x(*++q)].type == MM_OPT_BOOL) { o->t[_x(*q)].fn(o, NULL); }			/* eat boolean options */
+		if(*q == '\0') { continue; }													/* end of positional argument */
+		if(!o->t[_x(*q)].fn) { oassert(o, 0, "unknown option `-%c'.", *q); continue; }	/* argument option not found */
+		char const *r = q[1] ? q+1 : (p[1] && _isarg(p[1]) ? *++p : NULL);				/* if the option ends without argument, inspect the next element in the jagged array (originally placed after space(s)) */
+		oassert(o, o->t[_x(*q)].type != MM_OPT_REQ || r, "missing argument for option `-%c'.", *q);
+		if(o->t[_x(*q)].type != MM_OPT_REQ || r) { o->t[_x(*q)].fn(o, r); }				/* option with argument would be found at the tail */
 	}
 	kv_push(void *, o->parg, NULL); o->parg.n--;				/* always keep NULL-terminated */
 	#undef _isarg
@@ -6167,47 +6160,65 @@ mm_opt_t *mm_opt_init(char const *const *argv)
 		/* parsers: mapping from option character to functionality */
 		.t = {
 			['\0'] = { 0, NULL },			/* sentinel */
-			['x'] = { 2, mm_opt_preset },
-			['R'] = { 2, mm_opt_rg },
-			['T'] = { 2, mm_opt_tags },
-			['O'] = { 2, mm_opt_format },
-			['d'] = { 2, mm_opt_fnw },
+			['x'] = { MM_OPT_REQ,  mm_opt_preset },
+			['R'] = { MM_OPT_REQ,  mm_opt_rg },
+			['T'] = { MM_OPT_REQ,  mm_opt_tags },
+			['O'] = { MM_OPT_REQ,  mm_opt_format },
+			['d'] = { MM_OPT_REQ,  mm_opt_fnw },
 
-			['X'] = { 1, mm_opt_ava },
-			['A'] = { 1, mm_opt_comp },
-			['P'] = { 1, mm_opt_omit_rep },
-			['Q'] = { 1, mm_opt_keep_qual },
-			['v'] = { 3, mm_opt_verbose },
-			['h'] = { 1, mm_opt_help },
-			['t'] = { 2, mm_opt_threads },
+			['X'] = { MM_OPT_BOOL, mm_opt_ava },
+			['A'] = { MM_OPT_BOOL, mm_opt_comp },
+			['P'] = { MM_OPT_BOOL, mm_opt_omit_rep },
+			['Q'] = { MM_OPT_BOOL, mm_opt_keep_qual },
+			['v'] = { MM_OPT_OPT,  mm_opt_verbose },
+			['h'] = { MM_OPT_BOOL, mm_opt_help },
+			['t'] = { MM_OPT_REQ,  mm_opt_threads },
 
-			['k'] = { 2, mm_opt_kmer },
-			['w'] = { 2, mm_opt_window },
-			['c'] = { 3, mm_opt_circular },
-			['f'] = { 2, mm_opt_frq },
-			['B'] = { 2, mm_opt_bin },
-			['C'] = { 3, mm_opt_base_id },
-			['L'] = { 2, mm_opt_min_len },
+			['k'] = { MM_OPT_REQ,  mm_opt_kmer },
+			['w'] = { MM_OPT_REQ,  mm_opt_window },
+			['c'] = { MM_OPT_OPT,  mm_opt_circular },
+			['f'] = { MM_OPT_REQ,  mm_opt_frq },
+			['B'] = { MM_OPT_REQ,  mm_opt_bin },
+			['C'] = { MM_OPT_OPT,  mm_opt_base_id },
+			['L'] = { MM_OPT_REQ,  mm_opt_min_len },
 
-			['W'] = { 2, mm_opt_wlen },
-			['G'] = { 2, mm_opt_glen },
-			['a'] = { 2, mm_opt_match },
-			['b'] = { 2, mm_opt_mismatch },
-			['e'] = { 2, mm_opt_mod },
-			['p'] = { 2, mm_opt_gi },
-			['q'] = { 2, mm_opt_ge },
-			['r'] = { 2, mm_opt_gf },
-			['Y'] = { 2, mm_opt_xdrop },
-			['s'] = { 2, mm_opt_min_score },
-			['m'] = { 2, mm_opt_min_ratio },
-			['1'] = { 2, mm_opt_batch },
-			['2'] = { 2, mm_opt_outbuf }
+			['W'] = { MM_OPT_REQ,  mm_opt_wlen },
+			['G'] = { MM_OPT_REQ,  mm_opt_glen },
+			['a'] = { MM_OPT_REQ,  mm_opt_match },
+			['b'] = { MM_OPT_REQ,  mm_opt_mismatch },
+			['e'] = { MM_OPT_REQ,  mm_opt_mod },
+			['p'] = { MM_OPT_REQ,  mm_opt_gi },
+			['q'] = { MM_OPT_REQ,  mm_opt_ge },
+			['r'] = { MM_OPT_REQ,  mm_opt_gf },
+			['Y'] = { MM_OPT_REQ,  mm_opt_xdrop },
+			['s'] = { MM_OPT_REQ,  mm_opt_min_score },
+			['m'] = { MM_OPT_REQ,  mm_opt_min_ratio },
+			['1'] = { MM_OPT_REQ,  mm_opt_batch },
+			['2'] = { MM_OPT_REQ,  mm_opt_outbuf }
 		}
 	};
 	if(mm_opt_parse_argv(o, ++argv) || mm_opt_check_sanity(o) || (o->pt = pt_init(o->nth)) == NULL) {
 		mm_opt_destroy(o); return(NULL);
 	}
 	return(o);
+}
+
+/* end of opt.c */
+
+/* main.c */
+/**
+ * @fn liftrlimit
+ * @brief elevate max virtual memory size
+ */
+static _force_inline
+void liftrlimit()
+{
+#ifdef __linux__
+	struct rlimit r;
+	getrlimit(RLIMIT_AS, &r);
+	r.rlim_cur = r.rlim_max;
+	setrlimit(RLIMIT_AS, &r);
+#endif
 }
 
 /**
