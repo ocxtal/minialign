@@ -60,13 +60,13 @@
 
 /* utils.h */
 /* max, min, roundup */
-#define MAX2(x,y) 		( (x) > (y) ? (x) : (y) )
-#define MIN2(x,y) 		( (x) < (y) ? (x) : (y) )
+#define MAX2(x,y)			 		( (x) > (y) ? (x) : (y) )
+#define MIN2(x,y) 					( (x) < (y) ? (x) : (y) )
 #define _roundup(x, base)			( ((x) + (base) - 1) & ~((base) - 1) )
 
 /* _likely, _unlikely */
-#define _likely(x)		__builtin_expect(!!(x), 1)
-#define _unlikely(x)	__builtin_expect(!!(x), 0)
+#define _likely(x)					__builtin_expect(!!(x), 1)
+#define _unlikely(x)				__builtin_expect(!!(x), 0)
 
 /* _force_inline */
 #define _force_inline	inline
