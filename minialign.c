@@ -1983,7 +1983,7 @@ uint64_t bseq_read_bam(
  * @fn bseq_read_fasta
  * @brief parse one sequence, returns 0 for success, 1 for buffer starvation, 2 for broken format
  */
-// static _force_inline
+static _force_inline
 uint64_t bseq_read_fasta(
 	bseq_file_t *restrict fp,
 	bseq_seq_v *restrict seq,		/* src */
