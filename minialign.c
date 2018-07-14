@@ -1298,7 +1298,6 @@ pg_t *pg_init(FILE *fp, pt_t *pt)
 	kv_hq_init(pg->hq);
 
 	/* init worker args */
-	// for(uint64_t i = 0; i < pt_nth(pt); i++) { pg->c[i] = (void *)pg; }
 	pt_set_worker(pg->pt, pg, pg_worker);
 	return(pg);
 }
@@ -1375,7 +1374,7 @@ pg_block_t *pg_read_multi(pg_t *pg)
 {
 	/* multithreaded; read compressed blocks and push them to queue */
 	pg_block_t *t;
-	while(!pg->eof && pg->bal < pg->ub) {
+	while(pg->hq.n < pg->ub && !pg->eof && pg->bal < pg->ub) {
 		if((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
 		pg->bal++;
 		pt_enq_retry(&pg->pt->in, 0, t, PT_DEFAULT_INTERVAL);
@@ -1384,7 +1383,7 @@ pg_block_t *pg_read_multi(pg_t *pg)
 	/* fetch inflated blocks and push heapqueue to sort */
 	while((t = pt_deq(&pg->pt->out, 0)) != PT_EMPTY) {
 		pg->bal--;
-		kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){.u64 = {t->id, (uintptr_t)t}}));
+		kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){ .u64 = { t->id, (uintptr_t)t } }));
 	}
 
 	/* check if input depleted */
@@ -1449,7 +1448,7 @@ void pg_write_multi(pg_t *pg, pg_block_t *s)
 			sched_yield(); continue;		/* queue full, wait for a while */
 		}
 		pg->bal--;
-		kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){.u64 = {t->id, (uintptr_t)t}}));
+		kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){ .u64 = { t->id, (uintptr_t)t } }));
 	}
 
 	/* flush heapqueue */
@@ -3058,7 +3057,7 @@ uint64_t mm_idx_dump_calc_size(mm_idx_t const *mi)
 	return(size);
 }
 static _force_inline
-void mm_idx_dump(mm_idx_t const *mi, void *fp, write_t wfp)
+void mm_idx_dump(mm_idx_t const *mi, void *fp, write_t const wfp)
 {
 	#define _writep(_b, _l)		{ wfp(fp, _b, _l); }
 	#define _writea(type, _a)	{ type _t = (_a); _writep(&(_t), sizeof(type)); }
@@ -3124,7 +3123,7 @@ void mm_idx_dump(mm_idx_t const *mi, void *fp, write_t wfp)
  * @brief create index object from file stream
  */
 static _force_inline
-mm_idx_t *mm_idx_load(void *fp, read_t rfp)
+mm_idx_t *mm_idx_load(void *fp, read_t const rfp)
 {
 	/* read by _l and test if full length is filled, jump to _fail if not */
 	#define _readp(_b, _l)	{ if(rfp(fp, _b, _l) != _l) { goto _mm_idx_load_fail; } }
@@ -6321,7 +6320,7 @@ int main_index(mm_opt_t *o)
 
 		/* dump index */
 		o->log(o, 9, __func__, "built index for %lu target sequence(s).", mi->n_seq);
-		mm_idx_dump(mi, pg, (write_t)pgwrite);
+		mm_idx_dump(mi, pg, (write_t const)pgwrite);
 		mm_idx_destroy(mi);
 	});
 	pg_destroy(pg);
@@ -6384,7 +6383,7 @@ int main_align(mm_opt_t *o)
 	#define _mm_idx_load_wrap(_pg, _r) ({ \
 		mm_idx_t *_mi = NULL; \
 		if((_pg) != NULL) { \
-			_mi = mm_idx_load(_pg, (read_t)pgread); \
+			_mi = mm_idx_load(_pg, (read_t const)pgread); \
 			pg_freeze(_pg);		/* release thread worker */ \
 			if(_mi == NULL && pg_eof(_pg) == 0) { main_align_error(o, 5, __func__, *(_r)); goto _main_align_fail; } \
 		} else if(*(_r) != NULL) { \
