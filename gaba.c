@@ -175,18 +175,20 @@
 
 /* internal constants */
 #define BLK_BASE					( 5 )
-#define BLK						( 0x01<<BLK_BASE )
+#define BLK							( 0x01<<BLK_BASE )
 
 #ifdef DEBUG_MEM
 #  define MIN_BULK_BLOCKS			( 0 )
 #  define MEM_ALIGN_SIZE			( 32 )		/* 32byte aligned for AVX2 environments */
 #  define MEM_INIT_SIZE				( (uint64_t)4 * 1024 )
 #  define MEM_MARGIN_SIZE			( 4096 )	/* tail margin of internal memory blocks */
+#  define MEM_GC_INTV				( 32 )
 #else
 #  define MIN_BULK_BLOCKS			( 32 )
 #  define MEM_ALIGN_SIZE			( 32 )		/* 32byte aligned for AVX2 environments */
-#  define MEM_INIT_SIZE				( (uint64_t)256 * 1024 * 1024  )
+#  define MEM_INIT_SIZE				( (uint64_t)16 * 1024 * 1024  )
 #  define MEM_MARGIN_SIZE			( 4096 )	/* tail margin of internal memory blocks */
+#  define MEM_GC_INTV				( 4096 )
 #endif
 
 #define INIT_FETCH_APOS				( -1 )
@@ -536,8 +538,12 @@ struct gaba_stack_s {
 	struct gaba_mem_block_s *mem;
 	uint8_t *top;
 	uint8_t *end;
+
+	/* memory usage tracker */
+	uint16_t curr_depth, max_depth;
+	uint32_t flush_cnt;
 };
-_static_assert(sizeof(struct gaba_stack_s) == 24);
+_static_assert(sizeof(struct gaba_stack_s) == 32);
 #define _stack_size(_s)					( (uint64_t)((_s)->end - (_s)->top) )
 
 /**
@@ -575,8 +581,8 @@ struct gaba_dp_context_s {
 
 	/* memory management */
 	struct gaba_mem_block_s mem;		/** (16) root memory block */
-	struct gaba_stack_s stack;			/** (24) current stack */
-	uint64_t _pad2;
+	struct gaba_stack_s stack;			/** (32) current stack */
+	// uint64_t _pad2;
 
 	/* score constants */
 	double imx, xmx;					/** (16) 1 / (M - X), X / (M - X) (precalculated constants) */
@@ -1972,13 +1978,16 @@ struct gaba_block_s *fill_cap_seq_bounded(
  */
 static _force_inline
 uint64_t max_blocks_mem(
-	struct gaba_dp_context_s const *self)
+	struct gaba_dp_context_s const *self,
+	struct gaba_block_s const *blk)
 {
-	uint64_t mem_size = _stack_size(&self->stack);
+	uint64_t mem_size = self->stack.end - (uint8_t const *)blk;
+	uint64_t const margin = sizeof(struct gaba_joint_tail_s);
+	mem_size = mem_size < margin ? 0 : mem_size - margin;
 	uint64_t blk_cnt = mem_size / sizeof(struct gaba_block_s);
 	debug("calc_max_block_mem, stack_top(%p), stack_end(%p), mem_size(%lu), cnt(%lu)",
 		self->stack.top, self->stack.end, mem_size, (blk_cnt > 3) ? (blk_cnt - 3) : 0);
-	return(((blk_cnt > 3) ? blk_cnt : 3) - 3);
+	return(((blk_cnt > 1) ? blk_cnt : 1) - 1);
 }
 
 /**
@@ -1990,8 +1999,8 @@ static _force_inline
 uint64_t max_blocks_idx(
 	struct gaba_dp_context_s const *self)
 {
-	uint64_t p = self->w.r.arem + self->w.r.brem;
-	return(MIN2(p + p / 2, self->w.r.pridx) / BLK + 1);
+	uint64_t p = MIN2(self->w.r.arem, self->w.r.brem);
+	return(MIN2(4 * p, self->w.r.pridx) / BLK + 1);
 }
 
 /**
@@ -2047,23 +2056,44 @@ struct gaba_block_s *fill_section_seq_bounded(
 	struct gaba_dp_context_s *self,
 	struct gaba_block_s *blk)
 {
+	debug("start");
 	/* extra large bulk fill (with stack allocation) */
-	uint64_t mem_cnt, seq_cnt;			/* #blocks filled in bulk */
-	while((mem_cnt = max_blocks_mem(self)) < (seq_cnt = max_blocks_idx(self))) {
-		debug("mem_cnt(%lu), seq_cnt(%lu)", mem_cnt, seq_cnt);
+	uint64_t mem_cnt;					/* #blocks filled in bulk */
+	while((mem_cnt = max_blocks_mem(self, blk)) < max_blocks_idx(self)) {
+		debug("mem_cnt(%lu), max_blocks_idx(%lu)", mem_cnt, max_blocks_idx(self));
 
+		/* expand stack if the available size is smaller than minimum extendable length */
+		uint64_t seq_cnt = min_blocks_idx(self);
+		if(mem_cnt < MAX2(seq_cnt, MIN_BULK_BLOCKS)) {
+			// self->stack.top = (uint8_t *)blk;
+			if(gaba_dp_add_stack(self, _mem_blocks(MAX2(seq_cnt, MIN_BULK_BLOCKS))) != 0) { return(NULL); }
+			debug("blk(%p), stack(%p, %p)", blk, self->stack.top, self->stack.end);
+			blk = fill_create_phantom(self, blk, _load_v2i8(&blk->acnt));
+		}
+		if(seq_cnt <= MIN_BULK_BLOCKS) { debug("escape(%lu)", seq_cnt); break; }
+
+		/* extend until the end of the stack */
+		debug("mem bounded fill, seq_cnt(%lu), max_blocks_mem(%lu), len(%lu), blk(%p), stack(%p, %p, %lu)",
+			seq_cnt, max_blocks_mem(self, blk), MIN2(seq_cnt, max_blocks_mem(self, blk)), blk, self->stack.top, self->stack.end, self->stack.end - (uint8_t const *)blk);
+		if(((blk = fill_bulk_k_blocks(self, blk, MIN2(seq_cnt, max_blocks_mem(self, blk))))->xstat & STAT_MASK) != CONT) {
+			return(blk);
+		}
+
+		#if 0
 		/* here mem limit reaches first (seq sections too long), so fill without seq test */
 		if((mem_cnt = MIN2(mem_cnt, min_blocks_idx(self))) > MIN_BULK_BLOCKS) {
 			debug("mem bounded fill");
 			if(((blk = fill_bulk_k_blocks(self, blk, mem_cnt))->xstat & STAT_MASK) != CONT) {
 				return(blk);
 			}
+			mem_cnt = min_blocks_idx(self);
 		}
 
 		/* memory ran out: malloc a next stack and create a new phantom head */
 		debug("add stack, blk(%p)", blk);
-		if(gaba_dp_add_stack(self, _mem_blocks(seq_cnt)) != 0) { return(NULL); }
+		if(gaba_dp_add_stack(self, 0/* _mem_blocks(seq_cnt) */) != 0) { return(NULL); }
 		blk = fill_create_phantom(self, blk, _load_v2i8(&blk->acnt));
+		#endif
 	}
 
 	/* bulk fill with seq bound check */
@@ -3904,7 +3934,7 @@ int64_t gaba_dp_add_stack(
 	struct gaba_dp_context_s *self,
 	uint64_t size)
 {
-	debug("add_stack, ptr(%p)", self->stack.mem->next);
+	// fprintf(stderr, "add_stack, ptr(%p)\n", self->stack.mem->next);
 	if(self->stack.mem->next == NULL) {
 		/* current stack is the tail of the memory block chain, add new block */
 		size = MAX2(
@@ -3912,7 +3942,7 @@ int64_t gaba_dp_add_stack(
 			2 * self->stack.mem->size
 		);
 		struct gaba_mem_block_s *mem = gaba_malloc(size);
-		debug("malloc called, mem(%p)", mem);
+		// fprintf(stderr, "malloc called, mem(%p)\n", mem);
 		if(mem == NULL) { return(-1); }
 
 		/* link new node to the tail of the current chain */
@@ -3926,6 +3956,8 @@ int64_t gaba_dp_add_stack(
 	self->stack.mem = self->stack.mem->next;
 	self->stack.top = (uint8_t *)_roundup((uintptr_t)(self->stack.mem + 1), MEM_ALIGN_SIZE);
 	self->stack.end = (uint8_t *)self->stack.mem + self->stack.mem->size;
+	self->stack.curr_depth++;
+	self->stack.max_depth = MAX2(self->stack.curr_depth, self->stack.max_depth);
 	return(0);
 }
 
@@ -3941,6 +3973,29 @@ void _export(gaba_dp_flush)(
 	self->stack.mem = &self->mem;
 	self->stack.top = (uint8_t *)(self + 1);
 	self->stack.end = (uint8_t *)self + MEM_INIT_SIZE;
+	self->stack.curr_depth = 0;
+	#if 0
+	if(++self->stack.flush_cnt > MEM_GC_INTV) {
+		uint64_t d = self->stack.max_depth + 1;
+
+		/* clear depth tracker */
+		self->stack.flush_cnt = 0;
+		self->stack.max_depth = 0;
+
+		fprintf(stderr, "cleanup memory, depth(%lu)\n", d);
+		struct gaba_mem_block_s *curr = &self->mem, *prev = NULL;
+		while(d > 0 && curr != NULL) {
+			d--; prev = curr; curr = curr->next;
+			fprintf(stderr, "d(%lu), prev(%p), curr(%p)\n", d, prev, curr);
+		}
+		if(prev != NULL) { prev->next = NULL; fprintf(stderr, "overwrite prev(%p)\n", prev); }
+		while(curr != NULL) {
+			prev = curr; curr = curr->next; prev->next = NULL; free(prev);
+			fprintf(stderr, "free(%p)\n", prev);
+		}
+	}
+	#endif
+	// fprintf(stderr, "flushed, ptr(%p)\n", self->stack.mem);
 	return;
 }
 
@@ -3971,7 +4026,11 @@ void _export(gaba_dp_flush_stack)(
 {
 	if(stack == NULL) { return; }
 	self = _restore_dp_context(self);
-	self->stack = *stack;
+	/* do not overwrite flush_cnt and max_depth */
+	self->stack.mem = stack->mem;
+	self->stack.top = stack->top;
+	self->stack.end = stack->end;
+	self->stack.curr_depth = stack->curr_depth;
 	debug("restore stack, self(%p), mem(%p, %p, %p)", self, stack->mem, stack->top, stack->end);
 	return;
 }
