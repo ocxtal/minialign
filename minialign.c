@@ -6351,10 +6351,10 @@ void main_align_error(mm_opt_t *o, int stat, char const *fn, char const *file)
 {
 	switch(stat) {
 	case 1: o->log(o, 'E', fn, "failed to instanciate alignment context."); break;
-	case 2: o->log(o, 'E', fn, "failed to open index file `%s'. Please check file path and its version.", file); break;
-	case 3: o->log(o, 'E', fn, "failed to open sequence file `%s'. Please check file path and its format.", file); break;
-	case 4: o->log(o, 'E', fn, "failed to map sequence file `%s'. Please check file path and its format.", file); break;
-	case 5: o->log(o, 'E', fn, "failed to load index block from `%s'. Please check file path and its version.", file); break;
+	case 2: o->log(o, 'E', fn, "failed to build index for `%s'. Please check file path and format.", file); break;
+	case 3: o->log(o, 'E', fn, "failed to open sequence file `%s'. Please check file path and format.", file); break;
+	case 4: o->log(o, 'E', fn, "failed to map sequence file `%s'. Please check file path and format.", file); break;
+	case 5: o->log(o, 'E', fn, "failed to load index block from `%s'. Please check file path and version, or rebuild the index.", file); break;
 	}
 	return;
 }
@@ -6391,7 +6391,7 @@ int main_align(mm_opt_t *o)
 		if((_pg) != NULL) { \
 			_mi = mm_idx_load(_pg, (read_t const)pgread); \
 			pg_freeze(_pg);		/* release thread worker */ \
-			if(_mi == NULL && pg_eof(_pg) == 0) { main_align_error(o, 5, __func__, *(_r)); goto _main_align_fail; } \
+			if(_mi == NULL && ((_r) == h || pg_eof(_pg) == 0)) { main_align_error(o, 5, __func__, *(_r)); goto _main_align_fail; } \
 		} else if(*(_r) != NULL) { \
 			bseq_file_t *_fp = _bseq_open_wrap(&br, *(_r)); \
 			_mi = mm_idx_gen(&o->c, _fp, o->pt); \
@@ -6407,7 +6407,8 @@ int main_align(mm_opt_t *o)
 	pr = mm_print_init(&o->r);
 
 	/* iterate over index *blocks* */
-	char const *const *r = (char const *const *)o->parg.a;
+	char const *const *h = (char const *const *)o->parg.a;
+	char const *const *r = h;
 	char const *const *t = (char const *const *)&o->parg.a[rt];
 	while(r < t && (mi = _mm_idx_load_wrap(pg, r))) {
 		o->log(o, 9, __func__, "loaded/built index for %lu target sequence(s).", mi->n_seq);
@@ -6476,3 +6477,4 @@ _main_final:;
 }
 
 /* end of main.c */
+
