@@ -1134,6 +1134,9 @@ unittest( .name = "pt.multi" ) {
 
 /* stdio stream with multithreaded compression / decompression */
 
+#define PG_BLOCK_SIZE				( 1024 * 1024 )
+#define PG_MAGIC					"PG00"
+#define PG_MAGIC_SIZE				( 4 )
 #define pg_eof(_pg)					( (_pg)->eof == 2 ? 1 : 0 )
 
 /**
@@ -1141,7 +1144,7 @@ unittest( .name = "pt.multi" ) {
  * @brief compression / decompression unit block
  */
 typedef struct {
-	uint64_t head, len;				/* head pointer (index) and block length */
+	uint32_t head, len;				/* head pointer (index) and block length */
 	uint32_t id;					/* block id */
 	uint8_t raw, flush, _pad[2];	/* raw: 1 if compressed, flush: 1 if needed to dump */
 	uint8_t buf[];
@@ -1156,7 +1159,7 @@ typedef struct {
 	pt_t *pt;
 	pg_block_t *s;
 	uint32_t ub, lb, bal, icnt, ocnt, eof, nth;
-	uint64_t block_size;
+	uint32_t block_size;
 	kvec_t(v4u32_t) hq;
 	void *c[];
 } pg_t;
@@ -1249,7 +1252,9 @@ pg_block_t *pg_read_block(pg_t *pg)
 	pg_block_t *s = malloc(sizeof(pg_block_t) + pg->block_size);
 
 	/* read block */
-	if(fread(&s->len, sizeof(uint64_t), 1, pg->fp) != 1 || s->len == 0) { goto _fail; }
+	uint8_t magic[PG_MAGIC_SIZE + 1];
+	if(fread(magic, PG_MAGIC_SIZE, 1, pg->fp) != 1 || memcmp(magic, PG_MAGIC, PG_MAGIC_SIZE) != 0) { goto _fail; }
+	if(fread(&s->len, sizeof(uint32_t), 1, pg->fp) != 1 || s->len == 0) { goto _fail; }
 	if(fread(s->buf, sizeof(uint8_t), s->len, pg->fp) != s->len) { goto _fail; }
 
 	/* set metadata */
@@ -1273,7 +1278,8 @@ void pg_write_block(pg_t *pg, pg_block_t *s)
 	if(s->len == 0) return;
 
 	/* dump header then block */
-	fwrite(&s->len, sizeof(uint64_t), 1, pg->fp);
+	fwrite(PG_MAGIC, PG_MAGIC_SIZE, 1, pg->fp);
+	fwrite(&s->len, sizeof(uint32_t), 1, pg->fp);
 	fwrite(s->buf, sizeof(uint8_t), s->len, pg->fp);
 	free(s);
 	return;
@@ -1293,7 +1299,7 @@ pg_t *pg_init(FILE *fp, pt_t *pt)
 	*pg = (pg_t){
 		.fp = fp, .pt = pt,
 		.lb = pt_nth(pt), .ub = 3 * pt_nth(pt), .bal = 0, .nth = pt_nth(pt),
-		.block_size = 1024 * 1024
+		.block_size = PG_BLOCK_SIZE
 	};
 	kv_hq_init(pg->hq);
 
@@ -3130,7 +3136,7 @@ mm_idx_t *mm_idx_load(void *fp, read_t const rfp)
 	#define _reada(type)	({ type _n; _readp(&_n, sizeof(type)); _n; })
 
 	mm_idx_t *mi = NULL;
-	if(_reada(uint32_t) != MM_IDX_MAGIC) { fprintf(stderr, "magic not correct\n"); goto _mm_idx_load_fail; }
+	if(_reada(uint32_t) != MM_IDX_MAGIC) { goto _mm_idx_load_fail; }
 	uint64_t size = _reada(uint64_t);		/* read index size */
 	mi = malloc(size); _readp(mi, size);	/* malloc mem and read all FIXME: can be mapped to hugepages to improve performance */
 	mi->mono = 1;
