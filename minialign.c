@@ -6394,7 +6394,7 @@ int main_align(mm_opt_t *o)
 		if((_pg) != NULL) { \
 			_mi = mm_idx_load(_pg, (read_t const)pgread); \
 			pg_freeze(_pg);		/* release thread worker */ \
-			if(_mi == NULL && ((_r) == h || pg_eof(_pg) == 0)) { main_align_error(o, 5, __func__, *(_r)); goto _main_align_fail; } \
+			if(_mi == NULL && (micnt == 0 || pg_eof(_pg) > 2)) { main_align_error(o, 5, __func__, *(_r)); goto _main_align_fail; } \
 		} else if(*(_r) != NULL) { \
 			bseq_file_t *_fp = _bseq_open_wrap(&br, *(_r)); \
 			_mi = mm_idx_gen(&o->c, _fp, o->pt); \
@@ -6410,8 +6410,8 @@ int main_align(mm_opt_t *o)
 	pr = mm_print_init(&o->r);
 
 	/* iterate over index *blocks* */
-	char const *const *h = (char const *const *)o->parg.a;
-	char const *const *r = h;
+	uint64_t micnt = 0;							/* #processed index blocks */
+	char const *const *r = (char const *const *)o->parg.a;
 	char const *const *t = (char const *const *)&o->parg.a[rt];
 	while(r < t && (mi = _mm_idx_load_wrap(pg, r))) {
 		o->log(o, 9, __func__, "loaded/built index for %lu target sequence(s).", mi->n_seq);
@@ -6430,7 +6430,7 @@ int main_align(mm_opt_t *o)
 			o->log(o, 9, __func__, "finished mapping `%s' onto `%s'.", *q, pg ? *o->parg.a : r[-1]);
 		}
 		mm_align_destroy(aln); aln = NULL;		/* prevent double free (occurs when error occured in the next _mm_idx_load_wrap) */
-		mm_idx_destroy(mi); mi = NULL;			/* prevent double free */
+		mm_idx_destroy(mi); mi = NULL; micnt++;	/* prevent double free */
 	}
 	mm_print_destroy(pr);
 	pg_destroy(pg);
