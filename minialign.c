@@ -1252,9 +1252,10 @@ pg_block_t *pg_read_block(pg_t *pg)
 	pg_block_t *s = malloc(sizeof(pg_block_t) + pg->block_size);
 
 	/* read block */
-	uint8_t magic[PG_MAGIC_SIZE + 1];
+	uint8_t magic[PG_MAGIC_SIZE + 1] = { 0 };
 	if(fread(magic, PG_MAGIC_SIZE, 1, pg->fp) != 1 || memcmp(magic, PG_MAGIC, PG_MAGIC_SIZE) != 0) { goto _fail; }
 	if(fread(&s->len, sizeof(uint32_t), 1, pg->fp) != 1 || s->len == 0) { goto _fail; }
+	if(s->len == 0xffffffff) { pg->eof = MAX2(pg->eof, 1); free(s); return(NULL); }
 	if(fread(s->buf, sizeof(uint8_t), s->len, pg->fp) != s->len) { goto _fail; }
 
 	/* set metadata */
@@ -1265,6 +1266,7 @@ pg_block_t *pg_read_block(pg_t *pg)
 	return(s);
 _fail:
 	free(s);
+	pg->eof = MAX2(pg->eof, 3);
 	return(NULL);
 }
 
@@ -1298,7 +1300,8 @@ pg_t *pg_init(FILE *fp, pt_t *pt)
 	pg_t *pg = calloc(1, sizeof(pg_t) + pt_nth(pt) * sizeof(pg_t *));
 	*pg = (pg_t){
 		.fp = fp, .pt = pt,
-		.lb = pt_nth(pt), .ub = 3 * pt_nth(pt), .bal = 0, .nth = pt_nth(pt),
+		.lb = pt_nth(pt), .ub = 3 * pt_nth(pt), .bal = 0,
+		.eof = 0, .nth = pt_nth(pt),
 		.block_size = PG_BLOCK_SIZE
 	};
 	kv_hq_init(pg->hq);
@@ -1355,8 +1358,9 @@ void pg_destroy(pg_t *pg)
 	}
 
 	/* write terminator */
-	uint64_t z = 0;
-	fwrite(&z, sizeof(uint64_t), 1, pg->fp);
+	uint32_t z = 0xffffffff;
+	fwrite(PG_MAGIC, PG_MAGIC_SIZE, 1, pg->fp);
+	fwrite(&z, sizeof(uint32_t), 1, pg->fp);
 	
 	/* cleanup contexts */
 	kv_hq_destroy(pg->hq);
@@ -1372,7 +1376,7 @@ pg_block_t *pg_read_single(pg_t *pg)
 {
 	/* single-threaded */
 	pg_block_t *t;
-	if((t = pg_read_block(pg)) == NULL) { pg->eof = 2; return(NULL); }
+	if((t = pg_read_block(pg)) == NULL) { pg->eof = MAX2(pg->eof, 2); return(NULL); }
 	return(pg_inflate(t, pg->block_size));
 }
 static _force_inline
@@ -1381,23 +1385,22 @@ pg_block_t *pg_read_multi(pg_t *pg)
 	/* multithreaded; read compressed blocks and push them to queue */
 	pg_block_t *t;
 	while(pg->hq.n < pg->ub && !pg->eof && pg->bal < pg->ub) {
-		if((t = pg_read_block(pg)) == NULL) { pg->eof = 1; break; }
+		if((t = pg_read_block(pg)) == NULL) { break; }
 		pg->bal++;
 		pt_enq_retry(&pg->pt->in, 0, t, PT_DEFAULT_INTERVAL);
 	}
 
-	/* fetch inflated blocks and push heapqueue to sort */
-	while((t = pt_deq(&pg->pt->out, 0)) != PT_EMPTY) {
-		pg->bal--;
-		kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){ .u64 = { t->id, (uintptr_t)t } }));
-	}
-
 	/* check if input depleted */
-	if(pg->ocnt >= pg->icnt) { pg->eof = 2; return(NULL); }
+	if(pg->ocnt >= pg->icnt) { pg->eof = MAX2(pg->eof, 2); return(NULL); }
 
-	/* check if inflated block is available */
-	if(pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) {
-		sched_yield(); return(NULL);	/* wait for a while */
+	/* fetch inflated blocks and push heapqueue to sort */
+	while(pg->hq.n < 2 || pg->hq.a[1].u64[0] > pg->ocnt) {
+		while((t = pt_deq(&pg->pt->out, 0)) != PT_EMPTY) {
+			pg->bal--;
+			kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){ .u64 = { t->id, (uintptr_t)t } }));
+		}
+		if(pg->hq.a[1].u64[0] == pg->ocnt) { break; }
+		sched_yield();
 	}
 
 	/* block is available! */
