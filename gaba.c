@@ -1983,11 +1983,13 @@ uint64_t max_blocks_mem(
 {
 	uint64_t mem_size = self->stack.end - (uint8_t const *)blk;
 	uint64_t const margin = sizeof(struct gaba_joint_tail_s);
+	uint64_t const mblks = 1;
+
 	mem_size = mem_size < margin ? 0 : mem_size - margin;
 	uint64_t blk_cnt = mem_size / sizeof(struct gaba_block_s);
 	debug("calc_max_block_mem, stack_top(%p), stack_end(%p), mem_size(%lu), cnt(%lu)",
 		self->stack.top, self->stack.end, mem_size, (blk_cnt > 3) ? (blk_cnt - 3) : 0);
-	return(((blk_cnt > 1) ? blk_cnt : 1) - 1);
+	return((blk_cnt > mblks) ? (blk_cnt - mblks) : 0);
 }
 
 /**
@@ -2063,7 +2065,7 @@ struct gaba_block_s *fill_section_seq_bounded(
 		debug("mem_cnt(%lu), max_blocks_idx(%lu)", mem_cnt, max_blocks_idx(self));
 
 		/* expand stack if the available size is smaller than minimum extendable length */
-		uint64_t seq_cnt = min_blocks_idx(self);
+		uint64_t seq_cnt = max_blocks_idx(self);
 		if(mem_cnt < MAX2(seq_cnt, MIN_BULK_BLOCKS)) {
 			// self->stack.top = (uint8_t *)blk;
 			if(gaba_dp_add_stack(self, _mem_blocks(MAX2(seq_cnt, MIN_BULK_BLOCKS))) != 0) { return(NULL); }
