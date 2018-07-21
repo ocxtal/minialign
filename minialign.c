@@ -1399,7 +1399,7 @@ pg_block_t *pg_read_multi(pg_t *pg)
 			pg->bal--;
 			kv_hq_push(v4u32_t, incq_comp, pg->hq, ((v4u32_t){ .u64 = { t->id, (uintptr_t)t } }));
 		}
-		if(pg->hq.a[1].u64[0] == pg->ocnt) { break; }
+		if(pg->hq.n >= 2 && pg->hq.a[1].u64[0] == pg->ocnt) { break; }
 		sched_yield();
 	}
 
