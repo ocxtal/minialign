@@ -2060,24 +2060,24 @@ struct gaba_block_s *fill_section_seq_bounded(
 {
 	debug("start");
 	/* extra large bulk fill (with stack allocation) */
-	uint64_t mem_cnt;					/* #blocks filled in bulk */
-	while((mem_cnt = max_blocks_mem(self, blk)) < max_blocks_idx(self)) {
-		debug("mem_cnt(%lu), max_blocks_idx(%lu)", mem_cnt, max_blocks_idx(self));
+	uint64_t mem_cnt, max_seq_cnt;		/* #blocks filled in bulk */
+	while((mem_cnt = max_blocks_mem(self, blk)) < (max_seq_cnt = max_blocks_idx(self))) {
+		debug("mem_cnt(%lu), max_blocks_idx(%lu)", mem_cnt, max_seq_cnt);
 
 		/* expand stack if the available size is smaller than minimum extendable length */
-		uint64_t seq_cnt = max_blocks_idx(self);
-		if(mem_cnt < MAX2(seq_cnt, MIN_BULK_BLOCKS)) {
+		if(mem_cnt < MAX2(max_seq_cnt, MIN_BULK_BLOCKS)) {
 			// self->stack.top = (uint8_t *)blk;
-			if(gaba_dp_add_stack(self, _mem_blocks(MAX2(seq_cnt, MIN_BULK_BLOCKS))) != 0) { return(NULL); }
+			if(gaba_dp_add_stack(self, _mem_blocks(MAX2(max_seq_cnt, MIN_BULK_BLOCKS))) != 0) { return(NULL); }
 			debug("blk(%p), stack(%p, %p)", blk, self->stack.top, self->stack.end);
 			blk = fill_create_phantom(self, blk, _load_v2i8(&blk->acnt));
 		}
-		if(seq_cnt <= MIN_BULK_BLOCKS) { debug("escape(%lu)", seq_cnt); break; }
+		uint64_t min_seq_cnt = min_blocks_idx(self);
+		if(min_seq_cnt <= MIN_BULK_BLOCKS) { debug("escape(%lu)", seq_cnt); break; }
 
 		/* extend until the end of the stack */
 		debug("mem bounded fill, seq_cnt(%lu), max_blocks_mem(%lu), len(%lu), blk(%p), stack(%p, %p, %lu)",
-			seq_cnt, max_blocks_mem(self, blk), MIN2(seq_cnt, max_blocks_mem(self, blk)), blk, self->stack.top, self->stack.end, self->stack.end - (uint8_t const *)blk);
-		if(((blk = fill_bulk_k_blocks(self, blk, MIN2(seq_cnt, max_blocks_mem(self, blk))))->xstat & STAT_MASK) != CONT) {
+			seq_cnt, max_blocks_mem(self, blk), MIN2(min_seq_cnt, max_blocks_mem(self, blk)), blk, self->stack.top, self->stack.end, self->stack.end - (uint8_t const *)blk);
+		if(((blk = fill_bulk_k_blocks(self, blk, MIN2(min_seq_cnt, max_blocks_mem(self, blk))))->xstat & STAT_MASK) != CONT) {
 			return(blk);
 		}
 
