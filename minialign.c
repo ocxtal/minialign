@@ -5875,7 +5875,7 @@ static void mm_opt_preset(mm_opt_t *o, char const *arg)
 			}),
 			_n("1d", "-a2"), _n("1dsq", "-a2 -b6 -r4,4"), _n("2d", "-a2 -b6 -r4,4"),
 		}),
-		_n("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -r0.05")
+		_n("ava", "-k15 -w5 -a2 -b3 -p0 -q2 -Y50 -s30 -m0.05")
 	};
 	#undef _n
 
