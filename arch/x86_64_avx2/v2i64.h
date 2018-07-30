@@ -122,6 +122,12 @@ typedef struct v2i64_s {
 )
 
 /* shift */
+#define _shl_v2i64(a, n) ( \
+	(v2i64_t) {_i_v2i64(slli)((a).v1, (n))} \
+)
+#define _shr_v2i64(a, n) ( \
+	(v2i64_t) {_i_v2i64(srli)((a).v1, (n))} \
+)
 #define _shlv_v2i64(a, n) ( \
 	(v2i64_t) {_i_v2i64(sll)((a).v1, (n).v1)} \
 )

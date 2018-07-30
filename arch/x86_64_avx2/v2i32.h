@@ -136,6 +136,12 @@ typedef struct v2i32_s {
 #define _sar_v2i32(a, imm) ( \
 	(v2i32_t) {_i_v2i32(srai)((a).v1, (imm))} \
 )
+#define _shl_v2i32(a, imm) ( \
+	(v2i32_t) {_i_v2i32(slli)((a).v1, (imm))} \
+)
+#define _shr_v2i32(a, imm) ( \
+	(v2i32_t) {_i_v2i32(srli)((a).v1, (imm))} \
+)
 
 /* mask */
 #define _mask_v2i32(a) ( \

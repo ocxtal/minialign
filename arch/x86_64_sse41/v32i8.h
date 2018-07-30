@@ -154,6 +154,22 @@ typedef struct v32i8_s {
 		_i_v32i8x(srli)((a).v2, (imm)) \
 	} \
 )
+
+/* double shift (palignr) */
+#define _bsld_v32i8(a, b, imm) ( \
+	(v32i8_t) { \
+		_i_v32i8(alignr)((a).v1, (b).v2, sizeof(__m128i) - (imm)), \
+		_i_v32i8(alignr)((a).v2, (a).v1, sizeof(__m128i) - (imm)) \
+	} \
+)
+#define _bsrd_v32i8(a, b, imm) ( \
+	(v32i8_t) { \
+		_i_v32i8(alignr)((b).v2, (b).v1, (imm)), \
+		_i_v32i8(alignr)((a).v1, (b).v2, (imm)) \
+	} \
+)
+
+/* bit shift */
 #define _shl_v32i8(a, imm) ( \
 	(v32i8_t) { \
 		_mm_slli_epi32((a).v1, (imm)), \

@@ -111,6 +111,8 @@
 /* shift */
 #define _bsl_n			_vec_alias_join2(_bsl_, nvec_prefix)
 #define _bsr_n			_vec_alias_join2(_bsr_, nvec_prefix)
+#define _bsld_n			_vec_alias_join2(_bsld_, nvec_prefix)
+#define _bsrd_n			_vec_alias_join2(_bsrd_, nvec_prefix)
 #define _shl_n			_vec_alias_join2(_shl_, nvec_prefix)
 #define _shr_n			_vec_alias_join2(_shr_, nvec_prefix)
 #define _sal_n			_vec_alias_join2(_sal_, nvec_prefix)
@@ -118,6 +120,8 @@
 
 #define _bsl_w			_vec_alias_join2(_bsl_, wvec_prefix)
 #define _bsr_w			_vec_alias_join2(_bsr_, wvec_prefix)
+#define _bsld_w			_vec_alias_join2(_bsld_, wvec_prefix)
+#define _bsrd_w			_vec_alias_join2(_bsrd_, wvec_prefix)
 #define _shl_w			_vec_alias_join2(_shl_, wvec_prefix)
 #define _shr_w			_vec_alias_join2(_shr_, wvec_prefix)
 #define _sal_w			_vec_alias_join2(_sal_, wvec_prefix)

@@ -120,24 +120,40 @@ typedef struct v32i8_s {
 	(int8_t)_i_v32i8(extract)((a).v1, (imm)) \
 )
 
-/* shift */
+/* byte shift */
 #define _bsl_v32i8(a, imm) ( \
-	(v32i8_t) { \
-		_mm256_alignr_epi8( \
-			(a).v1, \
-			_mm256_permute2x128_si256((a).v1, (a).v1, 0x08), \
-			15) \
-	} \
+	(v32i8_t) { _mm256_alignr_epi8( \
+		(a).v1, \
+		_mm256_permute2x128_si256((a).v1, (a).v1, 0x08), \
+		15 \
+	)} \
 )
 #define _bsr_v32i8(a, imm) ( \
-	(v32i8_t) { \
-		_mm256_alignr_epi8( \
-			_mm256_castsi128_si256( \
-				_mm256_extracti128_si256((a).v1, 1)), \
-			(a).v1, \
-			1) \
-	} \
+	(v32i8_t) { _mm256_alignr_epi8( \
+		_mm256_castsi128_si256( \
+			_mm256_extracti128_si256((a).v1, 1)), \
+		(a).v1, \
+		1 \
+	)} \
 )
+
+/* double shift (palignr) */
+#define _bsld_v32i8(a, b, imm) ( \
+	(v32i8_t) { _mm256_alignr_epi8( \
+		(a).v1, \
+		_mm256_permute2x128_si256((a).v1, (b).v1, 0x03), \
+		sizeof(__m128i) - (imm) \
+	)} \
+)
+#define _bsrd_v32i8(a, b, imm) ( \
+	(v32i8_t) { _mm256_alignr_epi8( \
+		_mm256_permute2x128_si256((a).v1, (b).v1, 0x03), \
+		(b).v1, \
+		(imm) \
+	)} \
+)
+
+/* bit shift */
 #define _shl_v32i8(a, imm) ( \
 	(v32i8_t) { \
 		_mm256_slli_epi32((a).v1, (imm)) \
@@ -165,6 +181,19 @@ typedef struct v32i8_s {
 		.m1 = _i_v32i8(movemask)((a).v1) \
 	} \
 )
+
+/* horizontal max (reduction max) */
+#define _hmax_v32i8(a) ({ \
+	__m128i _t = _mm_max_epi8( \
+		_mm256_castsi256_si128((a).v1), \
+		_mm256_extracti128_si256((a).v1, 1) \
+	); \
+	_t = _mm_max_epi8(_t, _mm_srli_si128(_t, 8)); \
+	_t = _mm_max_epi8(_t, _mm_srli_si128(_t, 4)); \
+	_t = _mm_max_epi8(_t, _mm_srli_si128(_t, 2)); \
+	_t = _mm_max_epi8(_t, _mm_srli_si128(_t, 1)); \
+	(int8_t)_mm_extract_epi8(_t, 0); \
+})
 
 /* convert */
 #define _cvt_v32i16_v32i8(a) ( \

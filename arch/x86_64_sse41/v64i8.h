@@ -199,6 +199,26 @@ typedef struct v64i8_s {
 		_i_v64i8x(srli)((a).v4, (imm)) \
 	} \
 )
+
+/* double shift */
+#define _bsld_v64i8(a, b, imm) ( \
+	(v64i8_t) { \
+		_i_v64i8(alignr)((a).v1, (b).v4, sizeof(__m128i) - (imm)), \
+		_i_v64i8(alignr)((a).v2, (a).v1, sizeof(__m128i) - (imm)), \
+		_i_v64i8(alignr)((a).v3, (a).v2, sizeof(__m128i) - (imm)), \
+		_i_v64i8(alignr)((a).v4, (a).v3, sizeof(__m128i) - (imm)) \
+	} \
+)
+#define _bsrd_v64i8(a, b, imm) ( \
+	(v64i8_t) { \
+		_i_v64i8(alignr)((b).v2, (b).v1, (imm)), \
+		_i_v64i8(alignr)((b).v3, (b).v2, (imm)), \
+		_i_v64i8(alignr)((b).v4, (b).v3, (imm)), \
+		_i_v64i8(alignr)((a).v1, (b).v4, (imm)) \
+	} \
+)
+
+/* bit shift */
 #define _shl_v64i8(a, imm) ( \
 	(v64i8_t) { \
 		_mm_slli_epi32((a).v1, (imm)), \

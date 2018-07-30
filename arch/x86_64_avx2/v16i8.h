@@ -138,7 +138,7 @@ typedef struct v16i8_s {
 	(int8_t)_i_v16i8(extract)((a).v1, (imm)) \
 )
 
-/* shift */
+/* byte shift */
 #define _bsl_v16i8(a, imm) ( \
 	(v16i8_t) { \
 		_i_v16i8x(slli)((a).v1, (imm)) \
@@ -149,6 +149,20 @@ typedef struct v16i8_s {
 		_i_v16i8x(srli)((a).v1, (imm)) \
 	} \
 )
+
+/* double shift (palignr) */
+#define _bsld_v16i8(a, b, imm) ( \
+	(v16i8_t) { \
+		_mm_alignr_epi8((a).v1, (b).v1, sizeof(__m128i) - (imm)) \
+	} \
+)
+#define _bsrd_v16i8(a, b, imm) ( \
+	(v16i8_t) { \
+		_mm_alignr_epi8((a).v1, (b).v1, (imm)) \
+	} \
+)
+
+/* bit shift */
 #define _shl_v16i8(a, imm) ( \
 	(v16i8_t) { \
 		_mm_slli_epi32((a).v1, (imm)) \

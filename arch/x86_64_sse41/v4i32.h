@@ -127,12 +127,42 @@ typedef struct v4i32_s {
 	(int32_t)_i_v4i32(extract)((a).v1, (imm)) \
 )
 
-/* shift */
+/* element shift */
+#define _bsl_v4i32(a, imm) ( \
+	(v4i32_t) { \
+		_mm_slli_si128((a).v1, sizeof(int32_t) * (imm)) \
+	} \
+)
+#define _bsr_v4i32(a, imm) ( \
+	(v4i32_t) { \
+		_mm_srli_si128((a).v1, sizeof(int32_t) * (imm)) \
+	} \
+)
+
+/* double shift (palignr) */
+#define _bsld_v4i32(a, b, imm) ( \
+	(v4i32_t) { \
+		_mm_alignr_epi8((a).v1, (b).v1, sizeof(__m128i) - sizeof(int32_t) * (imm)) \
+	} \
+)
+#define _bsrd_v4i32(a, b, imm) ( \
+	(v4i32_t) { \
+		_mm_alignr_epi8((a).v1, (b).v1, sizeof(int32_t) * (imm)) \
+	} \
+)
+
+/* bit shift */
 #define _sal_v4i32(a, imm) ( \
 	(v4i32_t) {_i_v4i32(slli)((a).v1, (imm))} \
 )
 #define _sar_v4i32(a, imm) ( \
 	(v4i32_t) {_i_v4i32(srai)((a).v1, (imm))} \
+)
+#define _shl_v4i32(a, imm) ( \
+	(v4i32_t) {_i_v4i32(slli)((a).v1, (imm))} \
+)
+#define _shr_v4i32(a, imm) ( \
+	(v4i32_t) {_i_v4i32(srli)((a).v1, (imm))} \
 )
 
 /* mask */

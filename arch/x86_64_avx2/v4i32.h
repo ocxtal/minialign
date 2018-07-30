@@ -47,6 +47,7 @@ typedef struct v4i32_s {
 
 /* expand intrinsic name */
 #define _i_v4i32(intrin) 			_mm_##intrin##_epi32
+#define _i_v4u32(intrin) 			_mm_##intrin##_epu32
 #define _i_v4i32x(intrin)			_mm_##intrin##_si128
 
 /* apply */
@@ -55,14 +56,11 @@ typedef struct v4i32_s {
 		_i_v4i32(intrin)(expander##_v4i32_1(__VA_ARGS__)) \
 	} \
 )
-#define _a_v4i32e(intrin, expander, ...) ( \
+#define _a_v4u32(intrin, expander, ...) ( \
 	(v4i32_t) { \
-		_i_v4i32x(intrin)(expander##_v4i32_1(__VA_ARGS__)) \
+		_i_v4u32(intrin)(expander##_v4i32_1(__VA_ARGS__)) \
 	} \
 )
-#define _a_v4i32ev(intrin, expander, ...) { \
-	_i_v4i32x(intrin)(expander##_v4i32_1(__VA_ARGS__)); \
-}
 #define _a_v4i32x(intrin, expander, ...) ( \
 	(v4i32_t) { \
 		_i_v4i32x(intrin)(expander##_v4i32_1(__VA_ARGS__)) \
@@ -73,10 +71,10 @@ typedef struct v4i32_s {
 }
 
 /* load and store */
-#define _load_v4i32(...)	_a_v4i32e(load, _e_p, __VA_ARGS__)
-#define _loadu_v4i32(...)	_a_v4i32e(load, _e_p, __VA_ARGS__)
-#define _store_v4i32(...)	_a_v4i32ev(store, _e_pv, __VA_ARGS__)
-#define _storeu_v4i32(...)	_a_v4i32ev(store, _e_pv, __VA_ARGS__)
+#define _load_v4i32(...)	_a_v4i32x(load, _e_p, __VA_ARGS__)
+#define _loadu_v4i32(...)	_a_v4i32x(load, _e_p, __VA_ARGS__)
+#define _store_v4i32(...)	_a_v4i32xv(store, _e_pv, __VA_ARGS__)
+#define _storeu_v4i32(...)	_a_v4i32xv(store, _e_pv, __VA_ARGS__)
 
 /* broadcast */
 #define _set_v4i32(...)		_a_v4i32(set1, _e_i, __VA_ARGS__)
@@ -104,6 +102,8 @@ typedef struct v4i32_s {
 #define _sub_v4i32(...)		_a_v4i32(sub, _e_vv, __VA_ARGS__)
 #define _max_v4i32(...)		_a_v4i32(max, _e_vv, __VA_ARGS__)
 #define _min_v4i32(...)		_a_v4i32(min, _e_vv, __VA_ARGS__)
+#define _maxu_v4i32(...)	_a_v4u32(max, _e_vv, __VA_ARGS__)
+#define _minu_v4i32(...)	_a_v4u32(min, _e_vv, __VA_ARGS__)
 
 /* blend: mask == 1 ? a : b */
 #define _sel_v4i32(mask, a, b) ( \
@@ -127,12 +127,42 @@ typedef struct v4i32_s {
 	(int32_t)_i_v4i32(extract)((a).v1, (imm)) \
 )
 
-/* shift */
+/* element shift */
+#define _bsl_v4i32(a, imm) ( \
+	(v4i32_t) { \
+		_mm_slli_si128((a).v1, sizeof(int32_t) * (imm)) \
+	} \
+)
+#define _bsr_v4i32(a, imm) ( \
+	(v4i32_t) { \
+		_mm_srli_si128((a).v1, sizeof(int32_t) * (imm)) \
+	} \
+)
+
+/* double shift (palignr) */
+#define _bsld_v4i32(a, b, imm) ( \
+	(v4i32_t) { \
+		_mm_alignr_epi8((a).v1, (b).v1, sizeof(__m128i) - sizeof(int32_t) * (imm)) \
+	} \
+)
+#define _bsrd_v4i32(a, b, imm) ( \
+	(v4i32_t) { \
+		_mm_alignr_epi8((a).v1, (b).v1, sizeof(int32_t) * (imm)) \
+	} \
+)
+
+/* bit shift */
 #define _sal_v4i32(a, imm) ( \
 	(v4i32_t) {_i_v4i32(slli)((a).v1, (imm))} \
 )
 #define _sar_v4i32(a, imm) ( \
 	(v4i32_t) {_i_v4i32(srai)((a).v1, (imm))} \
+)
+#define _shl_v4i32(a, imm) ( \
+	(v4i32_t) {_i_v4i32(slli)((a).v1, (imm))} \
+)
+#define _shr_v4i32(a, imm) ( \
+	(v4i32_t) {_i_v4i32(srli)((a).v1, (imm))} \
 )
 
 /* mask */
