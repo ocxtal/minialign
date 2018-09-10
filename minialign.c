@@ -4726,7 +4726,6 @@ int mm_align_file(mm_align_t *b, bseq_file_t *fp, mm_print_t *pr)
 {
 	if(fp == NULL || pr == NULL) { return(-1); }
 	b->fp = fp; b->pr = pr;		/* input and output */
-	mm_print_header(pr, b->u.mi.n_seq, b->u.mi.s);
 	pt_stream(b->pt, b, mm_align_source, mm_align_worker, mm_align_drain);	/* multithreaded mapping */
 	return(fp->is_eof > 2 ? 1 : 0);
 }
@@ -6422,6 +6421,7 @@ int main_align(mm_opt_t *o)
 			goto _main_align_fail;
 		}
 		/* iterate over queries */
+		mm_print_header(pr, mi->n_seq, mi->s);
 		for(char const *const *q = (char const *const *)&o->parg.a[qh]; *q; q++) {
 			debug("query(%s)", *q);
 			bseq_file_t *fp = _bseq_open_wrap(&bq, *q);
